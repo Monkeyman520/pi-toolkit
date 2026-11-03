@@ -1,3 +1,20 @@
+# pi-packages — Agent Guidance
+
+## Project identity
+
+`pi-packages` is a personally maintained collection of independently installable Pi coding agent plugins. The root organizes the collection; plugin code belongs under `packages/<plugin-name>/`. This is not the Pi host's source tree or a standalone application.
+
+Use English for repository documentation and written project guidance. Preserve this identity rather than selecting an unrelated scaffold from generic directory names or tool configuration.
+
+## Package development
+
+- Before adding or changing a package, read [packages/README.md](packages/README.md) for layout, manifests, development setup, resource discovery, and verification.
+- Before changing package boundaries or stack constraints, read [CONTEXT.md](.grimoire/CONTEXT.md), the relevant [ADRs](.grimoire/adr/), and the task's specification. Check the applicable official Pi documentation linked from the package reference.
+- Use TypeScript ESM with erasable syntax, Node.js >= 22.19.0, Biome, Vitest, TypeBox (`typebox`), and `tsc --noEmit`; no bundler or emitted build is required.
+- Keep used host SDK packages and `typebox` as host-provided peers with `"*"` ranges; declare other runtime dependencies and avoid undeclared sibling imports.
+- Keep package READMEs specific to actual resources, compatibility, permissions, and verified commands. Reflect the actual package catalog and available tooling; distinguish reference examples from runnable commands.
+- Verify each real package with its own type check, Biome check, Vitest tests, and Pi loading/usage evidence. Documentation/configuration inspection is not a runtime test.
+
 <!-- CODEGRAPH_START -->
 ## CodeGraph
 

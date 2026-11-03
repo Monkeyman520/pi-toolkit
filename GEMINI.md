@@ -1,3 +1,9 @@
+# pi-packages
+
+This is a personally maintained collection of independently installable Pi coding agent plugins. Repository documentation and written guidance use English.
+
+For every task, follow [AGENTS.md](AGENTS.md) for canonical project identity and package development requirements, together with the existing guidance below.
+
 <!-- CODEGRAPH_START -->
 ## CodeGraph
 
