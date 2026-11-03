@@ -20,3 +20,7 @@
 
 ### Project Language
 - **Definition:** English is the language for repository-maintained documentation and written project guidance, including README files, agent guidance, context, architectural decisions, and specifications. This is a human-language convention, not a programming-language selection.
+
+## Architectural Decisions
+
+- [ADR 0003: Pi-hosted single-owner subscription maintenance](./adr/0003-pi-hosted-single-owner-subscription-maintenance.md) records the runtime and cross-process coordination constraints for `pi-quota-keeper` (previously `renew-session`).
