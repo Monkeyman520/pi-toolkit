@@ -6,20 +6,25 @@ This repository organizes Pi plugin packages; it is not the Pi host's source tre
 
 ## Package catalog
 
-**No plugin packages have been implemented yet.** The collection currently provides project guidance and package conventions, not an installable plugin. Real packages will be listed here with links to their README files.
+| Package | Purpose |
+| --- | --- |
+| [pi-auto-resume](./packages/pi-auto-resume/README.md) | Configurable recovery of interrupted Pi tasks |
+| [pi-quota-keeper](./packages/pi-quota-keeper/README.md) | Coordinated account quota visibility and capability-gated activation |
+
+Both packages have controlled Pi 1.5.0 loading/usage smoke evidence. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
 
 ## Installation model
 
 Each plugin lives in `packages/<plugin-name>/` and owns its manifest, resources, and documentation. Select an individual package rather than installing the repository root as an all-plugins bundle.
 
-The following are **future-use examples**, not working installation commands for the current empty collection. Replace `PLUGIN_NAME` with an existing package directory and follow that package's setup instructions first. From the checkout root:
+From this checkout, select one real package and follow its README. For example:
 
 ```sh
-# Register one real local package in personal Pi settings.
-pi install ./packages/PLUGIN_NAME
+# Register only Pi Auto Resume in personal Pi settings.
+pi install ./packages/pi-auto-resume
 
-# Alternatively, try that package for one invocation without registering it.
-pi -e ./packages/PLUGIN_NAME
+# Or try Pi Quota Keeper temporarily without changing settings.
+pi -e ./packages/pi-quota-keeper
 ```
 
 Pi does not install or modify a local package's dependency tree. Prepare any dependencies required by its README before loading it. Do not infer npm publication or host compatibility from a directory name.
@@ -40,7 +45,9 @@ pi-packages/
 │   ├── spec/                 # Requirements contracts
 │   └── ticket/               # Reserved for separately requested tickets
 └── packages/
-    └── README.md             # Package layout and development reference
+    ├── README.md             # Package layout and development reference
+    ├── pi-auto-resume/        # Interrupted-task recovery
+    └── pi-quota-keeper/       # Quota visibility and coordinated activation
 ```
 
 Existing development-tool configuration is omitted from this overview. Its presence does not change the repository's project category.
@@ -60,7 +67,7 @@ Existing development-tool configuration is omitted from this overview. Its prese
 
 Host-provided SDK packages and `typebox`, when used, are peers rather than bundled runtime dependencies. See the [package development reference](packages/README.md) for manifests, TypeScript configuration, resource discovery, and verification guidance.
 
-The repository has no root package manifest, installed toolchain, or root test/build scripts. A package manager, workspace orchestration tool, publication scope, and exact dependency versions have not been selected. Do not treat the reference examples as an installed development environment.
+There is no root package manifest or root test/build script. Each real package owns its npm lockfile, pinned development tooling, checks, and Pi smoke test; see its README. This does not establish a collection-wide workspace tool or publication scope.
 
 ## Contributing
 

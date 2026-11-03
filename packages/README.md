@@ -1,6 +1,6 @@
 # Package Development Reference
 
-This directory holds independently installable plugins for the [pi-packages collection](../README.md). It currently contains guidance only. `<plugin-name>` below represents a future real package, not a shipped example.
+This directory holds independently installable plugins for the [pi-packages collection](../README.md). Current packages are [pi-auto-resume](./pi-auto-resume/README.md) and [pi-quota-keeper](./pi-quota-keeper/README.md). The reference fragments below describe the baseline; each package README documents its actual setup and verified commands.
 
 Follow [AGENTS.md](../AGENTS.md), [ADR 0001](../.grimoire/adr/0001-independently-installable-pi-packages.md), and [ADR 0002](../.grimoire/adr/0002-typescript-esm-plugin-development-stack.md) when adding or changing packages. Use English for package documentation and written project guidance.
 
@@ -41,7 +41,7 @@ A package's ESM metadata, Node.js baseline, and separate development checks:
 }
 ```
 
-TypeScript (at least 5.8 for `erasableSyntaxOnly`), Biome (`@biomejs/biome`), and Vitest are development tooling. Make them available through the package's documented development setup; they are not extension runtime dependencies. Use the selected package manager's script runner to invoke these scripts. This collection does not yet select a runner or install the tools.
+TypeScript (at least 5.8 for `erasableSyntaxOnly`), Biome (`@biomejs/biome`), and Vitest are development tooling. Make them available through the package's documented development setup; they are not extension runtime dependencies. Use the selected package manager's script runner to invoke these scripts. Current real packages use package-local npm lockfiles and development tooling; there is no root workspace runner.
 
 ### Host-provided dependencies
 
@@ -130,7 +130,7 @@ Use the [collection installation examples](../README.md#installation-model) only
 
 Use Pi for runtime verification. Direct `node extensions/index.ts` execution does not establish Pi's resource discovery or host module mapping.
 
-There are no real plugin sources, package configurations, or runnable checks in this directory yet. These steps define future package verification; this initialization does not claim a compiler, Biome, Vitest, or a plugin smoke test has run.
+Real plugin sources and package-specific checks now exist in `pi-auto-resume/` and `pi-quota-keeper/`. Their READMEs distinguish controlled Pi runtime smoke evidence from unperformed live-service and physical sleep/wake checks.
 
 ## Official references
 
