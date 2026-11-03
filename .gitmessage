@@ -1,0 +1,9 @@
+# <gitmoji> <type>(<scope>): <subject>
+#
+# gitmoji: 🎉, ✨, 🐛, 📝, 🔧, ♻️, ⚡️, ✅, 📦, 👷
+# type: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+# scope: optional scope (e.g., project, grimoire, config)
+# subject: imperative, present-tense, lowercase description without trailing period
+#
+# Example:
+# 🎉 feat(project): initialize project structure and configuration
