@@ -45,6 +45,7 @@ export type BrowserResult =
 	| { type: "summarize" }
 	| { type: "rename"; title: string }
 	| { type: "toggle_widget" }
+	| { type: "open_settings" }
 	| null;
 
 function normalizePathKey(p: string | undefined): string | undefined {
@@ -338,6 +339,10 @@ export async function openPrettySessionBrowser(params: {
 				done({ type: "toggle_widget" });
 				return;
 			}
+			if (matchesKey(data, "ctrl+s")) {
+				done({ type: "open_settings" });
+				return;
+			}
 			if (matchesKey(data, "ctrl+r")) {
 				renameMode = true;
 				renameDraft = currentMeta?.title ?? "";
@@ -486,7 +491,7 @@ export async function openPrettySessionBrowser(params: {
 			}
 
 			lines.push("");
-			const footerHints = `↑↓ select · Enter switch · Tab scope · Ctrl+G summarize · Ctrl+R rename · Ctrl+W widget (${config.showWidget ? "on" : "off"}) · Esc close`;
+			const footerHints = `↑↓ select · Enter switch · Tab scope · Ctrl+G summarize · Ctrl+R rename · Ctrl+W widget (${config.showWidget ? "on" : "off"}) · Ctrl+S settings · Esc close`;
 			lines.push(truncateToWidth(theme.fg("dim", footerHints), w));
 			lines.push(border);
 			return lines;

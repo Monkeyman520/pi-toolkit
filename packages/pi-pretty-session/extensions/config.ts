@@ -106,7 +106,10 @@ export const toggleAliases: Readonly<
 	Record<string, keyof PrettySessionConfig>
 > = {
 	auto: "enabled",
+	autosummarize: "enabled",
 	enabled: "enabled",
+	updatetokendelta: "contextDeltaTokens",
+	contextdeltatokens: "contextDeltaTokens",
 	llm: "useLlm",
 	usellm: "useLlm",
 	widget: "showWidget",

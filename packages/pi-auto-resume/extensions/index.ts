@@ -4,8 +4,19 @@ import {
 	type ExtensionContext,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
+import {
+	autoResumeUsage,
+	getAutoResumeCompletions,
+	parseAutoResumeArgs,
+} from "./commands.ts";
 import { AutoResumeConfigManager, CONFIG_FILE_NAME } from "./config.ts";
 import { defaults, Recovery, type Settings } from "./recovery.ts";
+import {
+	DISCOVER_EVENT,
+	isDiscoverPayload,
+	openAutoResumeSettingsPanel,
+	SELF_PLUGIN_ID,
+} from "./ui.ts";
 
 const WAKE_GAP_THRESHOLD_MS = 30000;
 const TICK_INTERVAL_MS = 250;
@@ -17,6 +28,7 @@ export default function (pi: ExtensionAPI) {
 	let recovery = new Recovery();
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let unlisten: (() => void) | undefined;
+	let unlistenDiscover: (() => void) | undefined;
 	let ctx: ExtensionContext | undefined;
 	let lastRenderedStatus: string | undefined;
 	let lastTick = Date.now();
@@ -40,6 +52,19 @@ export default function (pi: ExtensionAPI) {
 			targetCtx.ui.notify(result.error, "error");
 		}
 		return result;
+	};
+
+	const openSettingsPanel = async (targetCtx: ExtensionContext) => {
+		await openAutoResumeSettingsPanel({
+			ctx: targetCtx,
+			events: pi.events,
+			configManager,
+			recovery,
+			onStateChanged: () => syncStatus(),
+			onReloadConfig: async () => {
+				await syncConfig(targetCtx, true);
+			},
+		});
 	};
 
 	const tick = () => {
@@ -77,6 +102,8 @@ export default function (pi: ExtensionAPI) {
 		timer = undefined;
 		unlisten?.();
 		unlisten = undefined;
+		unlistenDiscover?.();
+		unlistenDiscover = undefined;
 		recovery.cancel();
 		lastRenderedStatus = undefined;
 		ctx = undefined;
@@ -93,6 +120,17 @@ export default function (pi: ExtensionAPI) {
 		lastTick = Date.now();
 		lastConfigCheck = lastTick;
 		syncStatus(true);
+		unlistenDiscover = pi.events.on(DISCOVER_EVENT, (payload: unknown) => {
+			if (!isDiscoverPayload(payload)) return;
+			payload.register({
+				id: SELF_PLUGIN_ID,
+				title: "Pi Auto Resume",
+				command: "/auto-resume",
+				getSummary: () =>
+					`${recovery.status} · enabled=${recovery.settings.enabled} · maxAttempts=${recovery.settings.maxAttempts}`,
+				open: openSettingsPanel,
+			});
+		});
 		if (current.mode === "tui")
 			unlisten = current.ui.onTerminalInput((data) => {
 				if (data === "\u001b" || data === "\u0003") {
@@ -145,25 +183,34 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.registerCommand("auto-resume", {
 		description:
-			"Show status; stop pending recovery; on/off for this session; or view/update config",
+			"Open interactive TUI settings panel, show status, stop pending recovery, toggle on/off, or update config",
+		getArgumentCompletions: (prefix) =>
+			getAutoResumeCompletions(prefix, recovery.settings),
 		handler: async (args, current) => {
 			ctx = current;
 			await syncConfig(current);
-			const trimmed = args.trim();
-			const parts = trimmed ? trimmed.split(/\s+/) : [];
-			const sub = (parts[0] ?? "").toLowerCase();
+			const cmd = parseAutoResumeArgs(args);
 
-			if (sub === "config" || sub === "cfg" || sub === "set") {
-				const keyArg = parts[1];
-				const valArg = parts.slice(2).join(" ");
-				if (!keyArg) {
-					current.ui.notify(
-						`Auto Resume Config (${configPath})\nActive: ${JSON.stringify(recovery.settings)}\nDefaults: ${JSON.stringify(defaults)}`,
-						configManager.error ? "error" : "info",
-					);
+			if (cmd.kind === "help") {
+				current.ui.notify(autoResumeUsage, "warning");
+				return;
+			}
+
+			if (cmd.kind === "default") {
+				if (current.mode === "tui") {
+					await openSettingsPanel(current);
 					return;
 				}
-				if (keyArg.toLowerCase() === "reload" && !valArg) {
+				syncStatus();
+				current.ui.notify(
+					`Auto Resume: ${recovery.status}; enabled=${recovery.settings.enabled}; maxAttempts=${recovery.settings.maxAttempts}; config=${configPath}\nDefaults: ${JSON.stringify(defaults)}`,
+					"info",
+				);
+				return;
+			}
+
+			if (cmd.kind === "config") {
+				if (cmd.reload) {
 					const reloaded = await syncConfig(current, true);
 					current.ui.notify(
 						reloaded.error ??
@@ -172,13 +219,24 @@ export default function (pi: ExtensionAPI) {
 					);
 					return;
 				}
-				if (!valArg) {
+				if (!cmd.key) {
+					if (current.mode === "tui") {
+						await openSettingsPanel(current);
+						return;
+					}
+					current.ui.notify(
+						`Auto Resume Config (${configPath})\nActive: ${JSON.stringify(recovery.settings)}\nDefaults: ${JSON.stringify(defaults)}`,
+						configManager.error ? "error" : "info",
+					);
+					return;
+				}
+				if (cmd.value === undefined) {
 					const matchKey = Object.keys(recovery.settings).find(
-						(k) => k.toLowerCase() === keyArg.toLowerCase(),
+						(k) => k.toLowerCase() === cmd.key?.toLowerCase(),
 					) as keyof Settings | undefined;
 					if (!matchKey) {
 						current.ui.notify(
-							`Unknown configuration key "${keyArg}". Valid keys: ${Object.keys(defaults).join(", ")}.`,
+							`Unknown configuration key "${cmd.key}". Valid keys: ${Object.keys(defaults).join(", ")}.`,
 							"error",
 						);
 						return;
@@ -189,7 +247,7 @@ export default function (pi: ExtensionAPI) {
 					);
 					return;
 				}
-				const updated = await configManager.setOption(keyArg, valArg, true);
+				const updated = await configManager.setOption(cmd.key, cmd.value, true);
 				if (!updated.ok) {
 					current.ui.notify(updated.error, "error");
 					return;
@@ -203,22 +261,16 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (sub === "stop" && parts.length === 1) {
+			if (cmd.kind === "stop") {
 				recovery.cancel();
-			} else if (sub === "off" && parts.length === 1) {
+			} else if (cmd.kind === "off") {
 				recovery.setEnabled(false);
-			} else if (sub === "on" && parts.length === 1) {
+			} else if (cmd.kind === "on") {
 				if (configManager.error) {
 					current.ui.notify(configManager.error, "error");
 					return;
 				}
 				recovery.setEnabled(true);
-			} else if (sub !== "" && sub !== "status") {
-				current.ui.notify(
-					"Usage: /auto-resume [status | stop | on | off | config [reload | <key> [value]]]",
-					"warning",
-				);
-				return;
 			}
 			syncStatus();
 			current.ui.notify(

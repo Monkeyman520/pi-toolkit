@@ -2,21 +2,29 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	ExtensionContext,
-	SessionEntry,
-	SessionHeader,
-	SessionInfo,
+import {
+	createEventBus,
+	type ExtensionAPI,
+	type ExtensionCommandContext,
+	type ExtensionContext,
+	type SessionEntry,
+	type SessionHeader,
+	type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	enrichSessionInfo,
 	filterEnrichedSessions,
 } from "../extensions/browser.ts";
-import { parsePrettySessionArgs } from "../extensions/commands.ts";
-import { CONFIG_FILE_NAME, defaultConfig } from "../extensions/config.ts";
+import {
+	getPrettySessionCompletions,
+	parsePrettySessionArgs,
+} from "../extensions/commands.ts";
+import {
+	CONFIG_FILE_NAME,
+	ConfigManager,
+	defaultConfig,
+} from "../extensions/config.ts";
 import {
 	formatContextLength,
 	formatRelativeAge,
@@ -27,6 +35,13 @@ import {
 } from "../extensions/display.ts";
 import registerPrettySession from "../extensions/index.ts";
 import { CUSTOM_ENTRY_TYPE } from "../extensions/summarizer.ts";
+import {
+	DISCOVER_EVENT,
+	discoverLoadedPanels,
+	isDiscoverPayload,
+	openPrettySessionSettingsPanel,
+	SELF_PLUGIN_ID,
+} from "../extensions/ui.ts";
 
 describe("commands, display formatting, and extension lifecycle", () => {
 	let tempAgentDir = "";
@@ -82,10 +97,129 @@ describe("commands, display formatting, and extension lifecycle", () => {
 			key: "updateEveryTurns",
 			value: "5",
 		});
+		expect(parsePrettySessionArgs("status")).toEqual({ kind: "info" });
 		expect(parsePrettySessionArgs("toggle widget")).toEqual({
 			kind: "toggle",
 			target: "widget",
 		});
+
+		const actions = getPrettySessionCompletions("") ?? [];
+		expect(actions.map((a) => a.value)).toEqual([
+			"browse",
+			"status",
+			"project",
+			"summarize",
+			"rename",
+			"unlock",
+			"list",
+			"config",
+			"toggle",
+			"help",
+		]);
+
+		const scopes = getPrettySessionCompletions("browse ") ?? [];
+		expect(scopes.map((s) => s.value)).toEqual([
+			"browse current",
+			"browse all",
+		]);
+
+		const toggles = getPrettySessionCompletions("toggle ") ?? [];
+		expect(toggles.map((t) => t.value)).toEqual([
+			"toggle auto",
+			"toggle llm",
+			"toggle widget",
+			"toggle status",
+			"toggle lock",
+			"toggle compact",
+		]);
+
+		const cfgKeys = getPrettySessionCompletions("config ") ?? [];
+		expect(cfgKeys.some((k) => k.value === "config reload")).toBe(true);
+		expect(cfgKeys.some((k) => k.value === "config widgetPlacement")).toBe(
+			true,
+		);
+
+		const placementVals =
+			getPrettySessionCompletions("config widgetPlacement ") ?? [];
+		expect(placementVals.map((v) => v.value)).toEqual([
+			"config widgetPlacement aboveEditor",
+			"config widgetPlacement belowEditor",
+		]);
+	});
+
+	it("renders TUI settings panel without uninstalled plugins and discovers loaded plugins via pi.events", async () => {
+		const bus = createEventBus();
+		bus.on(DISCOVER_EVENT, (payload: unknown) => {
+			if (!isDiscoverPayload(payload)) return;
+			payload.register({
+				id: SELF_PLUGIN_ID,
+				title: "Pi Pretty Session",
+				command: "/pretty-session (/ps)",
+				getSummary: () => "active",
+				open: async () => {},
+			});
+		});
+		expect(discoverLoadedPanels(bus)).toHaveLength(1);
+
+		const mgr = new ConfigManager(join(tempAgentDir, CONFIG_FILE_NAME));
+		let renderedSoloLines: string[] = [];
+		const fakeTheme = {
+			fg: (_token: string, text: string) => text,
+			bold: (text: string) => text,
+		};
+		const mockCtx = {
+			hasUI: true,
+			mode: "tui",
+			modelRegistry: { getAvailable: () => [] },
+			ui: {
+				custom: async (
+					factory: (
+						tui: { requestRender: () => void },
+						theme: typeof fakeTheme,
+						kb: unknown,
+						done: (val: unknown) => void,
+					) => { render: (w: number) => string[] },
+				) => {
+					const comp = factory(
+						{ requestRender: () => {} },
+						fakeTheme,
+						{},
+						() => {},
+					);
+					renderedSoloLines = comp.render(100);
+					return undefined;
+				},
+			},
+		} as unknown as ExtensionContext;
+
+		await openPrettySessionSettingsPanel({
+			ctx: mockCtx,
+			events: bus,
+			configManager: mgr,
+			getMeta: () => undefined,
+			getMetrics: () => ({
+				sessionId: "s1",
+				createdAt: "2026-04-20T09:00:00.000Z",
+				updatedAt: "2026-04-20T09:45:00.000Z",
+				turnCount: 1,
+				messageCount: 2,
+				userMessageCount: 1,
+				assistantMessageCount: 1,
+				compactionCount: 0,
+				contextTokens: 1000,
+				contextWindow: 100000,
+				contextPercent: 1,
+			}),
+			onConfigChanged: () => {},
+			onReloadConfig: async () => mgr.config,
+		});
+
+		const soloText = renderedSoloLines.join("\n");
+		expect(soloText).toContain("Pretty Session · Status & Settings");
+		expect(soloText).toContain("Auto-Summarize Enabled (auto)");
+		expect(soloText).not.toContain("Switch Installed Plugin");
+		expect(soloText).not.toContain("Auto Resume");
+		expect(soloText).not.toContain("Quota Keeper");
 	});
 
 	it("formats tokens, timestamps, widget lines, status line, and dashboard", () => {
@@ -303,6 +437,7 @@ describe("commands, display formatting, and extension lifecycle", () => {
 		let ctx: ExtensionCommandContext;
 
 		const pi = {
+			events: createEventBus(),
 			on(event: string, handler: EventFn) {
 				const list = handlers.get(event) ?? [];
 				list.push(handler);

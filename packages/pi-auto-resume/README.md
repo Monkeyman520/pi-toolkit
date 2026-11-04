@@ -5,9 +5,9 @@ An independently installable Pi extension that resumes **interrupted** tasks aft
 ## Compatibility and resources
 
 - Node.js >= 22.19.0; TypeScript ESM, no bundler or emitted build.
-- Requires Pi's `agent_settled`, response metadata, session lifecycle, and user-message APIs. Tested with Pi **1.5.0**, Windows, Node **26.13.0**.
-- One resource: `extensions/index.ts`. The `*` host peers are a loader contract, not a claim of compatibility with every Pi version.
-- No dependency on Pi Quota Keeper or other sibling plugins. No npm publication is claimed.
+- Requires Pi's `agent_settled`, response metadata, session lifecycle, TUI `SettingsList` (`@earendil-works/pi-tui`), and user-message APIs. Tested with Pi **1.5.0**, Windows, Node **26.13.0**.
+- Exposed extension entry: `extensions/index.ts`. The `*` host peers are a loader contract, not a claim of compatibility with every Pi version.
+- No dependency on Pi Quota Keeper or other sibling plugins. When other collection plugins are installed in the same session, their TUI settings panels discover each other dynamically over `pi.events` without displaying uninstalled plugins. No npm publication is claimed.
 
 ## Install and use
 
@@ -21,18 +21,20 @@ pi install ./packages/pi-auto-resume
 
 Runtime imports are Node built-ins and Pi-provided host modules; no local build is required. Local development dependencies are prepared separately below.
 
-Commands:
+Commands follow the unified `/auto-resume <action> [other-args]` format with interactive subcommand and argument auto-completion (`getArgumentCompletions`):
 
-- `/auto-resume` (or `/auto-resume status`): status and configuration path.
-- `/auto-resume stop`: cancel pending recovery.
-- `/auto-resume off` / `on`: disable/enable for the current session.
-- `/auto-resume config [reload | <key> [<value>]]`: view current settings, force reload from disk, or dynamically update and persist a setting to `pi-auto-resume.json`.
+- `/auto-resume` (no arguments): opens the interactive TUI status and settings panel in TUI mode, or prints the status summary in non-TUI modes.
+- `/auto-resume status`: show current session recovery status and configuration path.
+- `/auto-resume on` / `/auto-resume off`: enable or disable automatic recovery for the current session.
+- `/auto-resume stop`: cancel any pending recovery wait immediately.
+- `/auto-resume config [reload | <key> [<value>]]`: open the interactive TUI settings panel (when invoked with no `<key>` in TUI mode), force reload from disk (`reload`), or view/update and persist a setting to `pi-auto-resume.json`.
+- `/auto-resume help`: show command usage.
 
 In TUI mode, Escape or Ctrl+C also cancels pending recovery. RPC clients should use `/auto-resume stop` to cancel a pending idle wait; aborting an active run is also respected.
 
 ## Configuration
 
-Create or edit `pi-auto-resume.json` in Pi's agent directory (normally `~/.pi/agent`; `PI_CODING_AGENT_DIR` is respected). Changes to `pi-auto-resume.json` are hot-reloaded automatically without restarting Pi or running `/reload`.
+Configure settings interactively via `/auto-resume` or `/auto-resume config` in TUI mode, or create/edit `pi-auto-resume.json` in Pi's agent directory (normally `~/.pi/agent`; `PI_CODING_AGENT_DIR` is respected). Changes to `pi-auto-resume.json` are hot-reloaded automatically without restarting Pi or running `/reload`.
 
 All fields are optional. Defaults:
 
@@ -83,6 +85,6 @@ $env:PI_BINARY = 'C:\path\to\pi.exe'
 npm run smoke
 ```
 
-The smoke test copies only this package into a temporary directory without siblings or `node_modules`, uses an isolated Pi agent directory and a synthetic provider, and launches real Pi RPC. It verifies one network recovery, no continuation after success, cancellation of an idle wait, bounded retries, and clean shutdown. It does not use your credentials or send a live model request. Expected final output ends in `PASS`.
+The smoke test copies only this package into a temporary directory without siblings or `node_modules`, uses an isolated Pi agent directory and a synthetic provider, and launches real Pi RPC. It verifies one network recovery, no continuation after success, cancellation of an idle wait, bounded retries, dynamic configuration persistence, and clean shutdown. It does not use your credentials or send a live model request. Expected final output ends in `PASS`.
 
 Physical sleep/wake and every provider-specific failure wording have not been live-tested. Deterministic timing/error tests cover the supported decision rules; the real Pi smoke covers the host loading and continuation boundary.

@@ -221,6 +221,7 @@ export async function executeQuotaConfigCommand(
 				kind: "config";
 				key?: "mode" | "delayMs" | "pollIntervalMs";
 				value?: string;
+				reload?: boolean;
 		  },
 ): Promise<
 	| {
@@ -246,6 +247,14 @@ export async function executeQuotaConfigCommand(
 	}
 
 	if (command.kind === "config") {
+		if (command.reload) {
+			return {
+				ok: true,
+				mutated: false,
+				config: currentCfg,
+				message: `Reloaded Quota Keeper Config (${configPath}): ${JSON.stringify(currentCfg)}`,
+			};
+		}
 		if (!command.key) {
 			return {
 				ok: true,

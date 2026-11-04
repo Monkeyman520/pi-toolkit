@@ -5,7 +5,7 @@ Show quota for Pi-logged-in accounts, track actual service reset times, and perf
 ## Compatibility and resources
 
 - Node.js >= 22.19.0; TypeScript ESM; no bundler/emitted build.
-- Requires Pi's provider auth/model-registry, isolated `complete()`, session lifecycle, and command APIs. Tested with Pi **1.5.0**, Windows, Node **26.13.0**.
+- Requires Pi's provider auth/model-registry, isolated `complete()`, session lifecycle, TUI `SettingsList` (`@earendil-works/pi-tui`), and command APIs. Tested with Pi **1.5.0**, Windows, Node **26.13.0**.
 - One resource: `extensions/index.ts`; command `/quota`. No sibling package is required.
 - Google/Gemini here means **Google Antigravity**, including Pi-owned linked accounts from `pi-antigravity` 0.11.0's documented credential format. This package does not install, import, or silently enable that optional provider.
 
@@ -24,17 +24,19 @@ Runtime imports use Node, host-provided peers, and the declared dependency `prop
 
 ## Commands
 
+Commands follow the unified `/quota <action> [other-args]` format with interactive subcommand and argument auto-completion (`getArgumentCompletions` suggests actions, discovered account IDs, provider models, quota windows, and config keys/values):
+
 | Command                               | Result                                                                                                                  |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `/quota`                              | Compact cached quota for all accounts                                                                                   |
-| `/quota details`                      | Detailed cached quota, including exact UTC reset-credit expiries                                                        |
+| `/quota`                              | Open interactive TUI quota & wake-up settings panel in TUI mode, or compact cached quota summary in non-TUI modes       |
+| `/quota status [account-id]`          | Compact cached quota for all accounts or one exact `<account-id>` (`/quota <account-id>` is also accepted)              |
+| `/quota details [account-id]`         | Detailed cached quota, including exact UTC reset-credit expiries (`/quota <account-id> details` is also accepted)       |
 | `/quota list`                         | Copyable account IDs, masked account labels, and type (provider / OAuth, API key, or unknown)                           |
-| `/quota <account-id>`                 | Only that exact account's compact cached quota                                                                          |
-| `/quota <account-id> details`         | Detailed quota for that exact account; `/quota details <account-id>` is also accepted                                   |
 | `/quota refresh`                      | Force an owner-only fresh poll, bypassing the configured interval, then show its results                                |
 | `/quota enable <id> <model> [window]` | Persist account wake-up opt-in and model (plus optional reset window) in `pi-quota-keeper.json` and refresh owner state |
 | `/quota disable <id>`                 | Remove account from `enabledAccounts` in `pi-quota-keeper.json` and refresh owner state                                 |
-| `/quota config [key [value]]`         | View or update `mode` (`reset`\|`fixed`), `delayMs` (`delay`), or `pollIntervalMs` (`poll`) in `pi-quota-keeper.json`   |
+| `/quota config [reload \| key [val]]` | Open TUI settings panel (in TUI mode with no key), reload config, or view/update `mode`, `delayMs`, or `pollIntervalMs` |
+| `/quota help`                         | Display command usage                                                                                                   |
 
 IDs come from `/quota list` and are matched exactly; unknown/partial IDs never fall back to other accounts. List/ID/details views do not trigger extra provider requests. Old caches with no credential-type metadata show unknown until refreshed. Lists are capped at 196 entries with an explicit truncation notice.
 

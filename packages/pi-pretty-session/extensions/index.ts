@@ -6,8 +6,12 @@ import {
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { loadEnrichedSessions, openPrettySessionBrowser } from "./browser.ts";
-import { parsePrettySessionArgs, prettySessionUsage } from "./commands.ts";
-import { CONFIG_FILE_NAME, ConfigManager } from "./config.ts";
+import {
+	getPrettySessionCompletions,
+	parsePrettySessionArgs,
+	prettySessionUsage,
+} from "./commands.ts";
+import { CONFIG_FILE_NAME, ConfigManager, toggleAliases } from "./config.ts";
 import {
 	formatConfigReport,
 	formatProjectReport,
@@ -29,6 +33,12 @@ import {
 	type SummarySource,
 	sanitizeSingleLine,
 } from "./summarizer.ts";
+import {
+	DISCOVER_EVENT,
+	isDiscoverPayload,
+	openPrettySessionSettingsPanel,
+	SELF_PLUGIN_ID,
+} from "./ui.ts";
 
 const WIDGET_KEY = "pretty-session";
 const STATUS_KEY = "pretty-session";
@@ -45,6 +55,7 @@ export default function (pi: ExtensionAPI) {
 	let lastPluginSetTitle: string | undefined;
 	let summaryAbort: AbortController | undefined;
 	let watchTimer: ReturnType<typeof setInterval> | undefined;
+	let unlistenDiscover: (() => void) | undefined;
 	let lastStatusLine: string | undefined;
 	let lastWidgetKey: string | undefined;
 
@@ -309,11 +320,37 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	async function openSettingsPanel(targetCtx: ExtensionContext) {
+		await syncConfig(targetCtx);
+		await ensureProjectInfo(targetCtx);
+		recomputeSessionState(targetCtx);
+		await openPrettySessionSettingsPanel({
+			ctx: targetCtx,
+			events: pi.events,
+			configManager,
+			getMeta: () => currentMetadata,
+			getMetrics: () => recomputeSessionState(targetCtx).metrics,
+			onConfigChanged: () => renderUI(targetCtx),
+			onReloadConfig: () => syncConfig(targetCtx, true),
+			onOpenBrowser: async () => {
+				await handleCommand("browse", targetCtx as ExtensionCommandContext);
+			},
+			onSummarizeNow: async () => {
+				await handleCommand("summarize", targetCtx as ExtensionCommandContext);
+			},
+			onUnlockTitle: async () => {
+				await handleCommand("unlock", targetCtx as ExtensionCommandContext);
+			},
+		});
+	}
+
 	function stop() {
 		if (watchTimer) {
 			clearInterval(watchTimer);
 			watchTimer = undefined;
 		}
+		unlistenDiscover?.();
+		unlistenDiscover = undefined;
 		summaryAbort?.abort();
 		summaryAbort = undefined;
 		lastStatusLine = undefined;
@@ -328,6 +365,20 @@ export default function (pi: ExtensionAPI) {
 		await ensureProjectInfo(ctx, true);
 		const state = recomputeSessionState(ctx);
 		renderUI(ctx, state);
+
+		unlistenDiscover = pi.events.on(DISCOVER_EVENT, (payload: unknown) => {
+			if (!isDiscoverPayload(payload)) return;
+			payload.register({
+				id: SELF_PLUGIN_ID,
+				title: "Pi Pretty Session",
+				command: "/pretty-session (/ps)",
+				getSummary: () => {
+					const title = currentMetadata?.title ?? "(unnamed session)";
+					return `${title} · auto=${configManager.config.enabled} · widget=${configManager.config.showWidget}`;
+				},
+				open: openSettingsPanel,
+			});
+		});
 
 		watchTimer = setInterval(() => {
 			if (currentCtx) {
@@ -542,6 +593,10 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				if (!cmd.key) {
+					if (ctx.mode === "tui") {
+						await openSettingsPanel(ctx);
+						return;
+					}
 					ctx.ui.notify(
 						formatConfigReport(
 							configManager.config,
@@ -554,9 +609,12 @@ export default function (pi: ExtensionAPI) {
 				}
 				if (cmd.value === undefined) {
 					const cfg = configManager.config;
-					const matchKey = Object.keys(cfg).find(
-						(k) => k.toLowerCase() === cmd.key?.toLowerCase(),
-					) as keyof typeof cfg | undefined;
+					const lowerKey = (cmd.key ?? "").toLowerCase();
+					const matchKey =
+						(toggleAliases[lowerKey] as keyof typeof cfg | undefined) ??
+						(Object.keys(cfg).find((k) => k.toLowerCase() === lowerKey) as
+							| keyof typeof cfg
+							| undefined);
 					if (!matchKey) {
 						ctx.ui.notify(`Unknown configuration key "${cmd.key}".`, "error");
 						return;
@@ -622,6 +680,8 @@ export default function (pi: ExtensionAPI) {
 					await handleCommand("summarize", ctx);
 				} else if (action.type === "toggle_widget") {
 					await handleCommand("toggle widget", ctx);
+				} else if (action.type === "open_settings") {
+					await openSettingsPanel(ctx);
 				} else if (action.type === "rename") {
 					await handleCommand(`rename ${action.title}`, ctx);
 				} else if (action.type === "switch") {
@@ -643,15 +703,34 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	const getCompletions = (prefix: string) => {
+		const models = (() => {
+			try {
+				const reg = currentCtx?.modelRegistry as unknown as {
+					getAvailable?: () => ReadonlyArray<{ id: string; provider: string }>;
+				};
+				return reg?.getAvailable?.() ?? [];
+			} catch {
+				return [];
+			}
+		})();
+		return getPrettySessionCompletions(prefix, {
+			config: configManager.config,
+			models,
+		});
+	};
+
 	pi.registerCommand("pretty-session", {
 		description:
-			"Browse sessions with descriptions/metrics, view project info, auto-summarize, or update config",
+			"Browse sessions with descriptions/metrics, open TUI settings panel, view project info, auto-summarize, or update config",
+		getArgumentCompletions: getCompletions,
 		handler: handleCommand,
 	});
 
 	pi.registerCommand("ps", {
 		description:
-			"Short alias for /pretty-session (session browser, project info, summarize, rename, config)",
+			"Short alias for /pretty-session (session browser, TUI settings panel, project info, summarize, rename, config)",
+		getArgumentCompletions: getCompletions,
 		handler: handleCommand,
 	});
 }

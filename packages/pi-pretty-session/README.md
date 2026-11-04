@@ -35,17 +35,18 @@ Runtime imports are Node built-ins and Pi-provided host modules (`@earendil-work
 
 ### Commands
 
-Pi dispatches built-in interactive commands (`/resume`, `/session`, `/name`) before extension commands, so this plugin exposes `/pretty-session` and its short alias `/ps`:
+Pi dispatches built-in interactive commands (`/resume`, `/session`, `/name`) before extension commands, so this plugin exposes `/pretty-session` and its short alias `/ps` following the unified `/<extension> <action> [other-args]` convention with multi-token argument auto-completion (`getArgumentCompletions`):
 
-- `/ps` or `/ps browse [all]`: Open the interactive TUI session & project browser (search sessions by title, description, project, or branch; press `Enter` to switch sessions via `ctx.switchSession`, `Tab` to toggle Current Project vs All Projects, `Ctrl+G` to re-summarize, `Ctrl+R` to rename, `Ctrl+W` to toggle the widget). In non-TUI modes (such as RPC), outputs the formatted session and project dashboard notification.
-- `/ps info`: Show the current session's title, description, start time, last update time, context length, project overview, and active configuration.
+- `/ps` or `/ps browse [current|all]`: Open the interactive TUI session & project browser (search sessions by title, description, project, or branch; press `Enter` to switch sessions via `ctx.switchSession`, `Tab` to toggle Current Project vs All Projects, `Ctrl+G` to re-summarize, `Ctrl+R` to rename, `Ctrl+W` to toggle the widget, `Ctrl+S` to open the TUI settings panel). In non-TUI modes (such as RPC), outputs the formatted session and project dashboard notification.
+- `/ps status` (or `/ps info`): Show the current session's title, description, start time, last update time, context length, project overview, and active configuration.
 - `/ps project`: Refresh and display detailed project information (path, Git branch/dirty count/latest commit, manifest details and scripts, project session count).
 - `/ps summarize` (or `/ps refresh`): Immediately generate/refresh the session title and description (overriding any manual-name lock).
 - `/ps rename <title> [| <description>]`: Set a custom session title (and optional description) and lock it against automatic overwrite.
 - `/ps unlock`: Clear the manual title lock so automatic dynamic updates can update the title again.
-- `/ps list [all]`: List saved sessions for the current project (or `all` projects) with their descriptions, timestamps, and context metrics.
-- `/ps config [reload | <key> <value>]`: View current configuration, force a reload from disk, or dynamically update and persist a setting (for example `/ps config updateEveryTurns 5`, `/ps config widgetPlacement belowEditor`, `/ps config model openai/gpt-4o-mini`, or `/ps config model default`).
+- `/ps list [current|all]`: List saved sessions for the current project (or `all` projects) with their descriptions, timestamps, and context metrics.
+- `/ps config [reload | <key> [<value>]]`: Open the interactive `SettingsList` TUI configuration panel (when invoked with no `<key>` in TUI mode), force a reload from disk (`reload`), or dynamically view/update and persist a setting (for example `/ps config updateEveryTurns 5`, `/ps config widgetPlacement belowEditor`, `/ps config model openai/gpt-4o-mini`, or `/ps config model default`).
 - `/ps toggle <auto|llm|widget|status|lock|compact>`: Toggle boolean settings at runtime without restarting Pi.
+- `/ps help`: Display command usage.
 
 ## Configuration
 

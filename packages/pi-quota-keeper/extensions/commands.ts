@@ -1,4 +1,7 @@
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import type { QuotaKeeperConfig } from "./coordination.ts";
 import { formatQuotaList, formatQuotaView } from "./display.ts";
+import type { Snapshot } from "./providers.ts";
 
 export type QuotaConfigKey = "mode" | "delayMs" | "pollIntervalMs";
 
@@ -7,10 +10,15 @@ export type QuotaCommand =
 	| { kind: "list" | "refresh" | "usage" }
 	| { kind: "enable"; id: string; model: string; resetWindow?: string }
 	| { kind: "disable"; id: string }
-	| { kind: "config"; key?: QuotaConfigKey; value?: string };
+	| {
+			kind: "config";
+			key?: QuotaConfigKey;
+			value?: string;
+			reload?: boolean;
+	  };
 
 export const quotaUsage =
-	"Usage: /quota | /quota details | /quota list | /quota refresh | /quota <account-id> [details] | /quota enable <account-id> <model-id> [window-id] | /quota disable <account-id> | /quota config [mode|delayMs|pollIntervalMs <value>]";
+	"Usage: /quota [status [account-id] | details [account-id] | list | refresh | <account-id> [details] | enable <account-id> <model-id> [window-id] | disable <account-id> | config [reload | mode|delayMs|pollIntervalMs [value]] | help]";
 
 const configKeyAliases: Readonly<Record<string, QuotaConfigKey>> = {
 	mode: "mode",
@@ -21,39 +29,54 @@ const configKeyAliases: Readonly<Record<string, QuotaConfigKey>> = {
 	pollintervalms: "pollIntervalMs",
 };
 
+const reservedWords = new Set([
+	"status",
+	"view",
+	"details",
+	"list",
+	"refresh",
+	"enable",
+	"disable",
+	"config",
+	"help",
+	"-h",
+	"--help",
+]);
+
 export function parseQuotaArgs(args: string): QuotaCommand {
 	if (args.length > 512) return { kind: "usage" };
 	const parts = args.trim().split(/\s+/).filter(Boolean);
 	if (!parts.length) return { kind: "view", detailed: false };
-	const reserved = new Set([
-		"details",
-		"list",
-		"refresh",
-		"enable",
-		"disable",
-		"config",
-		"help",
-		"-h",
-		"--help",
-	]);
+
 	if (parts.length === 1) {
-		if (parts[0] === "help" || parts[0] === "-h" || parts[0] === "--help")
+		const first = parts[0] ?? "";
+		if (first === "help" || first === "-h" || first === "--help")
 			return { kind: "usage" };
-		if (parts[0] === "list" || parts[0] === "refresh")
-			return { kind: parts[0] };
-		if (parts[0] === "config") return { kind: "config" };
-		if (parts[0] === "enable" || parts[0] === "disable")
-			return { kind: "usage" };
-		if (parts[0] === "details") return { kind: "view", detailed: true };
-		return { kind: "view", id: parts[0], detailed: false };
+		if (first === "list" || first === "refresh") return { kind: first };
+		if (first === "config") return { kind: "config" };
+		if (first === "enable" || first === "disable") return { kind: "usage" };
+		if (first === "details") return { kind: "view", detailed: true };
+		if (first === "status" || first === "view")
+			return { kind: "view", detailed: false };
+		return { kind: "view", id: first, detailed: false };
 	}
+
+	if (parts[0] === "status" || parts[0] === "view") {
+		const id = parts[1];
+		if (parts.length === 2 && id && !reservedWords.has(id)) {
+			return { kind: "view", id, detailed: false };
+		}
+		return { kind: "usage" };
+	}
+
 	if (parts[0] === "disable") {
 		const id = parts[1];
-		if (parts.length === 2 && id && !reserved.has(id)) {
+		if (parts.length === 2 && id && !reservedWords.has(id)) {
 			return { kind: "disable", id };
 		}
 		return { kind: "usage" };
 	}
+
 	if (parts[0] === "enable") {
 		const id = parts[1];
 		const model = parts[2];
@@ -61,7 +84,7 @@ export function parseQuotaArgs(args: string): QuotaCommand {
 		if (
 			(parts.length === 3 || parts.length === 4) &&
 			id &&
-			!reserved.has(id) &&
+			!reservedWords.has(id) &&
 			model
 		) {
 			return {
@@ -73,8 +96,13 @@ export function parseQuotaArgs(args: string): QuotaCommand {
 		}
 		return { kind: "usage" };
 	}
+
 	if (parts[0] === "config") {
-		const key = configKeyAliases[(parts[1] ?? "").toLowerCase()];
+		const second = (parts[1] ?? "").toLowerCase();
+		if (second === "reload" && parts.length === 2) {
+			return { kind: "config", reload: true };
+		}
+		const key = configKeyAliases[second];
 		if (!key) return { kind: "usage" };
 		if (parts.length === 2) return { kind: "config", key };
 		if (parts.length === 3 && parts[2]) {
@@ -82,6 +110,7 @@ export function parseQuotaArgs(args: string): QuotaCommand {
 		}
 		return { kind: "usage" };
 	}
+
 	if (parts.length === 2) {
 		const id =
 			parts[0] === "details"
@@ -89,8 +118,10 @@ export function parseQuotaArgs(args: string): QuotaCommand {
 				: parts[1] === "details"
 					? parts[0]
 					: undefined;
-		if (id && !reserved.has(id)) return { kind: "view", id, detailed: true };
+		if (id && !reservedWords.has(id))
+			return { kind: "view", id, detailed: true };
 	}
+
 	return { kind: "usage" };
 }
 
@@ -110,4 +141,284 @@ export function formatQuotaCommand(
 		return formatQuotaView({ ...view, snapshots, detailed: command.detailed });
 	}
 	return formatQuotaView(view);
+}
+
+export interface QuotaCompletionContext {
+	snapshots?: readonly Snapshot[];
+	config?: QuotaKeeperConfig;
+	models?: ReadonlyArray<{ id: string; provider: string; name?: string }>;
+}
+
+const quotaActions: ReadonlyArray<{ action: string; description: string }> = [
+	{
+		action: "status",
+		description: "Show compact quota status (all accounts or one account-id)",
+	},
+	{
+		action: "details",
+		description: "Show detailed quota windows, UTC resets, and diagnostics",
+	},
+	{
+		action: "list",
+		description: "List copyable account IDs, masked labels, and auth types",
+	},
+	{
+		action: "refresh",
+		description: "Force an immediate quota poll through the maintenance owner",
+	},
+	{
+		action: "enable",
+		description:
+			"Enable scheduled wake-up: /quota enable <account-id> <model-id> [window-id]",
+	},
+	{
+		action: "disable",
+		description: "Disable scheduled wake-up: /quota disable <account-id>",
+	},
+	{
+		action: "config",
+		description:
+			"Open TUI settings panel, reload config, or update mode/delayMs/pollIntervalMs",
+	},
+	{ action: "help", description: "Show /quota command usage" },
+];
+
+const fallbackProviderModels: Readonly<Record<string, readonly string[]>> = {
+	anthropic: ["claude-sonnet-4-5", "claude-haiku-4-5"],
+	openai: ["gpt-5", "gpt-5-mini", "codex-mini-latest"],
+	"openai-codex": ["gpt-5", "codex-mini-latest"],
+	antigravity: ["gemini-2.5-flash", "gemini-2.5-pro"],
+	"google-antigravity": ["gemini-2.5-flash", "gemini-2.5-pro"],
+	"github-copilot": ["gpt-4o", "claude-3.5-sonnet"],
+	xai: ["grok-3-mini", "grok-3"],
+};
+
+function matchesProviderFamily(
+	accountProvider: string,
+	modelProvider: string,
+): boolean {
+	if (accountProvider === modelProvider) return true;
+	if (
+		(accountProvider === "openai" || accountProvider === "openai-codex") &&
+		(modelProvider === "openai" || modelProvider === "openai-codex")
+	) {
+		return true;
+	}
+	if (
+		(accountProvider === "antigravity" ||
+			accountProvider === "google-antigravity") &&
+		(modelProvider === "antigravity" || modelProvider === "google-antigravity")
+	) {
+		return true;
+	}
+	return false;
+}
+
+export function getQuotaModelsForProvider(
+	provider: string,
+	context?: QuotaCompletionContext,
+	accountId?: string,
+): string[] {
+	const seen = new Set<string>();
+	if (accountId && context?.config?.models[accountId]) {
+		seen.add(context.config.models[accountId]);
+	}
+	for (const m of context?.models ?? []) {
+		if (matchesProviderFamily(provider, m.provider) && m.id) {
+			seen.add(m.id);
+		}
+	}
+	for (const fallback of fallbackProviderModels[provider] ?? []) {
+		seen.add(fallback);
+	}
+	return [...seen];
+}
+
+export function getQuotaCompletions(
+	argumentPrefix: string,
+	context?: QuotaCompletionContext,
+): AutocompleteItem[] | null {
+	const trimmedStart = argumentPrefix.trimStart();
+	const endsWithSpace = /\s$/.test(argumentPrefix);
+	const parts = trimmedStart ? trimmedStart.split(/\s+/).filter(Boolean) : [];
+	const snapshots = context?.snapshots ?? [];
+	const cfg = context?.config;
+
+	if (parts.length === 0 || (parts.length === 1 && !endsWithSpace)) {
+		const partial = (parts[0] ?? "").toLowerCase();
+		const matches = quotaActions
+			.filter((item) => item.action.startsWith(partial))
+			.map((item) => ({
+				value: item.action,
+				label: item.action,
+				description: item.description,
+			}));
+		return matches.length > 0 ? matches : null;
+	}
+
+	const actionToken = parts[0] ?? "";
+	const sub = actionToken.toLowerCase();
+	const tokenIndex = endsWithSpace ? parts.length : parts.length - 1;
+	const partial = endsWithSpace ? "" : (parts[parts.length - 1] ?? "");
+	const lowerPartial = partial.toLowerCase();
+
+	const collectAccounts = (): Array<{
+		id: string;
+		provider: string;
+		description: string;
+	}> => {
+		const byId = new Map<
+			string,
+			{ id: string; provider: string; description: string }
+		>();
+		for (const s of snapshots) {
+			byId.set(s.id, {
+				id: s.id,
+				provider: s.provider,
+				description: `${s.label} · ${s.status}${s.activation.supported ? " · wake-up eligible" : ""}`,
+			});
+		}
+		for (const enabledId of cfg?.enabledAccounts ?? []) {
+			if (!byId.has(enabledId)) {
+				const prov = enabledId.split(":")[0] || "unknown";
+				byId.set(enabledId, {
+					id: enabledId,
+					provider: prov,
+					description: "Configured in enabledAccounts",
+				});
+			}
+		}
+		return [...byId.values()];
+	};
+
+	if (
+		(sub === "status" || sub === "view" || sub === "details") &&
+		tokenIndex === 1
+	) {
+		const matches = collectAccounts()
+			.filter((a) => a.id.toLowerCase().startsWith(lowerPartial))
+			.map((a) => ({
+				value: `${actionToken} ${a.id}`,
+				label: a.id,
+				description: a.description,
+			}));
+		return matches.length > 0 ? matches : null;
+	}
+
+	if (sub === "disable" && tokenIndex === 1) {
+		const enabledSet = new Set(cfg?.enabledAccounts ?? []);
+		const allAccounts = collectAccounts().sort(
+			(a, b) => Number(enabledSet.has(b.id)) - Number(enabledSet.has(a.id)),
+		);
+		const matches = allAccounts
+			.filter((a) => a.id.toLowerCase().startsWith(lowerPartial))
+			.map((a) => ({
+				value: `${actionToken} ${a.id}`,
+				label: a.id,
+				description: enabledSet.has(a.id)
+					? `Currently enabled (${a.description})`
+					: a.description,
+			}));
+		return matches.length > 0 ? matches : null;
+	}
+
+	if (sub === "enable") {
+		if (tokenIndex === 1) {
+			const matches = collectAccounts()
+				.filter((a) => a.id.toLowerCase().startsWith(lowerPartial))
+				.map((a) => ({
+					value: `${actionToken} ${a.id}`,
+					label: a.id,
+					description: a.description,
+				}));
+			return matches.length > 0 ? matches : null;
+		}
+		if (tokenIndex === 2) {
+			const accountId = parts[1] ?? "";
+			const snap = snapshots.find((s) => s.id === accountId);
+			const provider = snap?.provider ?? (accountId.split(":")[0] || "");
+			const modelIds = getQuotaModelsForProvider(provider, context, accountId);
+			const matches = modelIds
+				.filter((m) => m.toLowerCase().startsWith(lowerPartial))
+				.map((m) => ({
+					value: `${actionToken} ${accountId} ${m}`,
+					label: m,
+					description: `Wake-up model for ${accountId}`,
+				}));
+			return matches.length > 0 ? matches : null;
+		}
+		if (tokenIndex === 3) {
+			const accountId = parts[1] ?? "";
+			const modelId = parts[2] ?? "";
+			const snap = snapshots.find((s) => s.id === accountId);
+			const winIds = new Set<string>();
+			for (const w of snap?.windows ?? []) {
+				if (w.id) winIds.add(w.id);
+			}
+			if (cfg?.resetWindows[accountId]) {
+				winIds.add(cfg.resetWindows[accountId]);
+			}
+			const matches = [...winIds]
+				.filter((w) => w.toLowerCase().startsWith(lowerPartial))
+				.map((w) => ({
+					value: `${actionToken} ${accountId} ${modelId} ${w}`,
+					label: w,
+					description: `Reset window for ${accountId}`,
+				}));
+			return matches.length > 0 ? matches : null;
+		}
+		return null;
+	}
+
+	if (sub === "config") {
+		if (tokenIndex === 1) {
+			const configKeys: ReadonlyArray<{ key: string; description: string }> = [
+				{
+					key: "reload",
+					description: "Reload pi-quota-keeper.json from disk",
+				},
+				{
+					key: "mode",
+					description: `Schedule mode: reset | fixed (current: ${cfg?.mode ?? "reset"})`,
+				},
+				{
+					key: "delayMs",
+					description: `Post-reset delay in ms (current: ${cfg?.delayMs ?? 30000})`,
+				},
+				{
+					key: "pollIntervalMs",
+					description: `Quota polling interval in ms (current: ${cfg?.pollIntervalMs ?? 60000})`,
+				},
+			];
+			const matches = configKeys
+				.filter((item) => item.key.toLowerCase().startsWith(lowerPartial))
+				.map((item) => ({
+					value: `${actionToken} ${item.key}`,
+					label: item.key,
+					description: item.description,
+				}));
+			return matches.length > 0 ? matches : null;
+		}
+		if (tokenIndex === 2) {
+			const rawKey = parts[1] ?? "";
+			const resolvedKey = configKeyAliases[rawKey.toLowerCase()];
+			if (!resolvedKey) return null;
+			const values =
+				resolvedKey === "mode"
+					? ["reset", "fixed"]
+					: resolvedKey === "delayMs"
+						? ["0", "15000", "30000", "60000", "120000"]
+						: ["10000", "30000", "60000", "120000", "300000"];
+			const matches = values
+				.filter((v) => v.toLowerCase().startsWith(lowerPartial))
+				.map((v) => ({
+					value: `${actionToken} ${rawKey} ${v}`,
+					label: v,
+					description: `Set ${resolvedKey} = ${v}`,
+				}));
+			return matches.length > 0 ? matches : null;
+		}
+	}
+
+	return null;
 }

@@ -6,7 +6,12 @@ import {
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { collectAccounts } from "./accounts.ts";
-import { formatQuotaCommand, parseQuotaArgs, quotaUsage } from "./commands.ts";
+import {
+	formatQuotaCommand,
+	getQuotaCompletions,
+	parseQuotaArgs,
+	quotaUsage,
+} from "./commands.ts";
 import {
 	defaultQuotaConfig,
 	executeQuotaConfigCommand,
@@ -19,12 +24,19 @@ import {
 } from "./coordination.ts";
 import { queryQuota } from "./providers.ts";
 import { dueActivation } from "./schedule.ts";
+import {
+	DISCOVER_EVENT,
+	isDiscoverPayload,
+	openQuotaSettingsPanel,
+	SELF_PLUGIN_ID,
+} from "./ui.ts";
 import { sendWakeup, withWakeup } from "./wakeups.ts";
 
 export default function (pi: ExtensionAPI) {
 	let current: ExtensionContext | undefined, owner: Owner | undefined;
 	let abort = new AbortController(),
 		timer: ReturnType<typeof setInterval> | undefined;
+	let unlistenDiscover: (() => void) | undefined;
 	let refreshPending = false;
 	let busy: Promise<void> | undefined,
 		lastPoll = 0,
@@ -201,9 +213,74 @@ export default function (pi: ExtensionAPI) {
 			if (signal === abort.signal) refreshPending = false;
 		}
 	}
+
+	async function syncOwnerAndState(
+		nextConfig: QuotaKeeperConfig,
+	): Promise<boolean> {
+		config = nextConfig;
+		let synced = false;
+		try {
+			await owner?.acquire();
+			synced = (await owner?.requestRefresh(abort.signal)) ?? false;
+			if (synced) {
+				state = await readState(dir);
+				lastFollowerMtimeMs = undefined;
+			}
+		} catch {
+			synced = false;
+		}
+		show();
+		return synced;
+	}
+
+	async function openSettingsPanel(targetCtx: ExtensionContext): Promise<void> {
+		try {
+			config = await readQuotaConfig(dir);
+		} catch {
+			// Keep current config in memory if unreadable
+		}
+		try {
+			state = await readState(dir);
+		} catch {
+			// Keep current state in memory if unreadable
+		}
+		await openQuotaSettingsPanel({
+			ctx: targetCtx,
+			events: pi.events,
+			dir,
+			getState: () => state,
+			getConfig: () => config,
+			getOwnerActive: () => owner?.active ?? false,
+			getProblem: () => problem,
+			onApplyConfig: syncOwnerAndState,
+			onRefreshNow: async () => {
+				try {
+					await owner?.acquire();
+					const refreshed =
+						(await owner?.requestRefresh(abort.signal)) ?? false;
+					if (refreshed) {
+						state = await readState(dir);
+						problem = undefined;
+					}
+					show();
+					return refreshed;
+				} catch {
+					return false;
+				}
+			},
+			onReloadConfig: async () => {
+				config = await readQuotaConfig(dir);
+				show();
+				return config;
+			},
+		});
+	}
+
 	async function stop() {
 		if (timer) clearInterval(timer);
 		timer = undefined;
+		unlistenDiscover?.();
+		unlistenDiscover = undefined;
 		abort.abort();
 		await busy;
 		await owner?.close();
@@ -222,6 +299,17 @@ export default function (pi: ExtensionAPI) {
 		refreshPending = false;
 		const signal = abort.signal;
 		owner = new Owner(dir, () => refreshNow(signal));
+		unlistenDiscover = pi.events.on(DISCOVER_EVENT, (payload: unknown) => {
+			if (!isDiscoverPayload(payload)) return;
+			payload.register({
+				id: SELF_PLUGIN_ID,
+				title: "Pi Quota Keeper",
+				command: "/quota",
+				getSummary: () =>
+					`${owner?.active ? "owner" : "follower"} · ${state.snapshots.length} accounts · ${state.schedule?.mode ?? config.mode}`,
+				open: openSettingsPanel,
+			});
+		});
 		launch();
 		timer = setInterval(launch, 1000);
 		timer.unref?.();
@@ -229,11 +317,48 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", stop);
 	pi.registerCommand("quota", {
 		description:
-			"View quotas, list account IDs, select an account, enable/disable wake-ups, update config, or refresh through the owner",
+			"Open interactive TUI quota & settings panel, view quotas, list account IDs, enable/disable wake-ups, update config, or refresh through the owner",
+		getArgumentCompletions: (prefix) => {
+			const models = (() => {
+				try {
+					const reg = current?.modelRegistry as unknown as {
+						getAvailable?: () => ReadonlyArray<{
+							id: string;
+							provider: string;
+							name?: string;
+						}>;
+					};
+					return reg?.getAvailable?.() ?? [];
+				} catch {
+					return [];
+				}
+			})();
+			return getQuotaCompletions(prefix, {
+				snapshots: state.snapshots,
+				config,
+				models,
+			});
+		},
 		handler: async (args, ctx) => {
+			current = ctx;
+			const trimmedArgs = args.trim();
+			if (!trimmedArgs && ctx.mode === "tui") {
+				await openSettingsPanel(ctx);
+				return;
+			}
+
 			const command = parseQuotaArgs(args);
 			if (command.kind === "usage") {
 				ctx.ui.notify(quotaUsage, "info");
+				return;
+			}
+			if (
+				command.kind === "config" &&
+				!command.key &&
+				!command.reload &&
+				ctx.mode === "tui"
+			) {
+				await openSettingsPanel(ctx);
 				return;
 			}
 			if (
@@ -246,23 +371,13 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(res.error, "error");
 					return;
 				}
+				config = res.config;
 				if (!res.mutated) {
+					show();
 					ctx.ui.notify(res.message, "info");
 					return;
 				}
-				config = res.config;
-				let synced = false;
-				try {
-					await owner?.acquire();
-					synced = (await owner?.requestRefresh(abort.signal)) ?? false;
-					if (synced) {
-						state = await readState(dir);
-						lastFollowerMtimeMs = undefined;
-					}
-				} catch {
-					synced = false;
-				}
-				show();
+				const synced = await syncOwnerAndState(res.config);
 				ctx.ui.notify(
 					`${res.message}${synced ? " Owner state refreshed." : " Saved; owner will apply on next poll."}`,
 					"info",

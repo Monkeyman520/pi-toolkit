@@ -1,7 +1,15 @@
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+	createEventBus,
+	type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
+import {
+	getAutoResumeCompletions,
+	parseAutoResumeArgs,
+} from "../extensions/commands.ts";
 import {
 	AutoResumeConfigManager,
 	CONFIG_FILE_NAME,
@@ -12,6 +20,13 @@ import {
 	Recovery,
 	resetTime,
 } from "../extensions/recovery.ts";
+import {
+	DISCOVER_EVENT,
+	discoverLoadedPanels,
+	isDiscoverPayload,
+	openAutoResumeSettingsPanel,
+	SELF_PLUGIN_ID,
+} from "../extensions/ui.ts";
 
 describe("restricted recovery", () => {
 	it.each([
@@ -163,6 +178,268 @@ describe("restricted recovery", () => {
 			const mgr2 = new AutoResumeConfigManager(cfgPath);
 			const loaded2 = await mgr2.reloadIfChanged();
 			expect(loaded2.settings.maxAttempts).toBe(7);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("parses unified /auto-resume <action> [other-args] commands and provides multi-token completions", () => {
+		expect(parseAutoResumeArgs("")).toEqual({ kind: "default" });
+		expect(parseAutoResumeArgs("status")).toEqual({ kind: "status" });
+		expect(parseAutoResumeArgs("on")).toEqual({ kind: "on" });
+		expect(parseAutoResumeArgs("off")).toEqual({ kind: "off" });
+		expect(parseAutoResumeArgs("stop")).toEqual({ kind: "stop" });
+		expect(parseAutoResumeArgs("config")).toEqual({ kind: "config" });
+		expect(parseAutoResumeArgs("config reload")).toEqual({
+			kind: "config",
+			reload: true,
+		});
+		expect(parseAutoResumeArgs("config maxAttempts 3")).toEqual({
+			kind: "config",
+			key: "maxAttempts",
+			value: "3",
+		});
+		expect(parseAutoResumeArgs("unknown extra")).toEqual({ kind: "help" });
+
+		const actions = getAutoResumeCompletions("", defaults) ?? [];
+		expect(actions.map((a) => a.value)).toEqual([
+			"status",
+			"on",
+			"off",
+			"stop",
+			"config",
+			"help",
+		]);
+
+		const onOff = getAutoResumeCompletions("o", defaults) ?? [];
+		expect(onOff.map((a) => a.value)).toEqual(["on", "off"]);
+
+		const cfgKeys = getAutoResumeCompletions("config ", defaults) ?? [];
+		expect(cfgKeys.some((item) => item.value === "config reload")).toBe(true);
+		expect(cfgKeys.some((item) => item.value === "config retryDelayMs")).toBe(
+			true,
+		);
+
+		const boolValues =
+			getAutoResumeCompletions("config network ", defaults) ?? [];
+		expect(boolValues.map((item) => item.value)).toEqual([
+			"config network true",
+			"config network false",
+			"config network on",
+			"config network off",
+		]);
+
+		const intValues =
+			getAutoResumeCompletions("config maxAttempts 1", defaults) ?? [];
+		expect(intValues.map((item) => item.value)).toEqual([
+			"config maxAttempts 1",
+			"config maxAttempts 10",
+		]);
+	});
+
+	it("renders TUI settings panel without uninstalled plugins and discovers loaded plugins via pi.events", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-auto-resume-tui-"));
+		try {
+			const cfgPath = join(dir, CONFIG_FILE_NAME);
+			const mgr = new AutoResumeConfigManager(cfgPath);
+			const recovery = new Recovery();
+			const bus = createEventBus();
+
+			bus.on(DISCOVER_EVENT, (payload: unknown) => {
+				if (!isDiscoverPayload(payload)) return;
+				payload.register({
+					id: SELF_PLUGIN_ID,
+					title: "Pi Auto Resume",
+					command: "/auto-resume",
+					getSummary: () => "idle",
+					open: async () => {},
+				});
+			});
+
+			const soloPanels = discoverLoadedPanels(bus);
+			expect(soloPanels).toHaveLength(1);
+			expect(soloPanels[0]?.id).toBe(SELF_PLUGIN_ID);
+
+			let renderedSoloLines: string[] = [];
+			const fakeTheme = {
+				fg: (_token: string, text: string) => text,
+				bold: (text: string) => text,
+			};
+			const mockCtx = {
+				hasUI: true,
+				mode: "tui",
+				ui: {
+					custom: async (
+						factory: (
+							tui: { requestRender: () => void },
+							theme: typeof fakeTheme,
+							kb: unknown,
+							done: (val: unknown) => void,
+						) => { render: (w: number) => string[] },
+					) => {
+						const comp = factory(
+							{ requestRender: () => {} },
+							fakeTheme,
+							{},
+							() => {},
+						);
+						renderedSoloLines = comp.render(100);
+						return undefined;
+					},
+				},
+			} as unknown as ExtensionContext;
+
+			await openAutoResumeSettingsPanel({
+				ctx: mockCtx,
+				events: bus,
+				configManager: mgr,
+				recovery,
+				onStateChanged: () => {},
+				onReloadConfig: async () => {},
+			});
+
+			const soloText = renderedSoloLines.join("\n");
+			expect(soloText).toContain("Auto Resume · Status & Settings");
+			expect(soloText).toContain("Session Auto-Resume (on/off)");
+			expect(soloText).not.toContain("Switch Installed Plugin");
+			expect(soloText).not.toContain("Quota Keeper");
+			expect(soloText).not.toContain("Pretty Session");
+
+			// Register a second loaded plugin on the shared bus
+			bus.on(DISCOVER_EVENT, (payload: unknown) => {
+				if (!isDiscoverPayload(payload)) return;
+				payload.register({
+					id: "pi-quota-keeper",
+					title: "Pi Quota Keeper",
+					command: "/quota",
+					getSummary: () => "owner · 2 accounts",
+					open: async () => {},
+				});
+			});
+
+			let renderedMultiLines: string[] = [];
+			const mockCtxMulti = {
+				...mockCtx,
+				ui: {
+					custom: async (
+						factory: (
+							tui: { requestRender: () => void },
+							theme: typeof fakeTheme,
+							kb: unknown,
+							done: (val: unknown) => void,
+						) => { render: (w: number) => string[] },
+					) => {
+						const comp = factory(
+							{ requestRender: () => {} },
+							fakeTheme,
+							{},
+							() => {},
+						);
+						renderedMultiLines = comp.render(100);
+						return undefined;
+					},
+				},
+			} as unknown as ExtensionContext;
+
+			await openAutoResumeSettingsPanel({
+				ctx: mockCtxMulti,
+				events: bus,
+				configManager: mgr,
+				recovery,
+				onStateChanged: () => {},
+				onReloadConfig: async () => {},
+			});
+
+			expect(renderedMultiLines.join("\n")).toContain(
+				"Switch Installed Plugin",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("executes action-stop in TUI settings panel without freezing the list or breaking navigation", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-auto-resume-action-"));
+		try {
+			const cfgPath = join(dir, CONFIG_FILE_NAME);
+			const mgr = new AutoResumeConfigManager(cfgPath);
+			const recovery = new Recovery();
+			recovery.failed("fetch failed", {}, 0);
+			expect(recovery.status).toContain("network: waiting until");
+
+			const bus = createEventBus();
+			let panelComponent:
+				| {
+						render: (w: number) => string[];
+						handleInput: (d: string) => void;
+				  }
+				| undefined;
+			let doneCalled = false;
+			const fakeTheme = {
+				fg: (_token: string, text: string) => text,
+				bold: (text: string) => text,
+			};
+			const mockCtx = {
+				hasUI: true,
+				mode: "tui",
+				ui: {
+					custom: async (
+						factory: (
+							tui: { requestRender: () => void },
+							theme: typeof fakeTheme,
+							kb: unknown,
+							done: (val: unknown) => void,
+						) => {
+							render: (w: number) => string[];
+							handleInput: (d: string) => void;
+						},
+					) => {
+						panelComponent = factory(
+							{ requestRender: () => {} },
+							fakeTheme,
+							{},
+							() => {
+								doneCalled = true;
+							},
+						);
+						return undefined;
+					},
+				},
+			} as unknown as ExtensionContext;
+
+			let stateChanged = false;
+			await openAutoResumeSettingsPanel({
+				ctx: mockCtx,
+				events: bus,
+				configManager: mgr,
+				recovery,
+				onStateChanged: () => {
+					stateChanged = true;
+				},
+				onReloadConfig: async () => {},
+			});
+
+			// Navigate down to action-stop (index 8)
+			for (let i = 0; i < 8; i++) {
+				panelComponent?.handleInput("\x1b[B");
+			}
+			// Press Enter on action-stop
+			panelComponent?.handleInput("\r");
+
+			expect(recovery.status).toBe("cancelled");
+			expect(stateChanged).toBe(true);
+
+			// Ensure the list is NOT empty or frozen: re-render returns the full UI with updated status
+			const lines = panelComponent?.render(100).join("\n") ?? "";
+			expect(lines).toContain("Status: cancelled");
+			expect(lines).toContain("Cancelled pending recovery.");
+			expect(lines).toContain("Cancel Pending Recovery (stop)");
+
+			// Ensure user can still navigate back up
+			panelComponent?.handleInput("\x1b[A");
+			// And press Escape to close cleanly
+			panelComponent?.handleInput("\x1b");
+			expect(doneCalled).toBe(true);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
