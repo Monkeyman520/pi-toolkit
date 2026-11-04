@@ -532,4 +532,48 @@ describe("provider-owned linked Antigravity renewal", () => {
 		expect(x.refresh).toHaveBeenCalledTimes(1);
 		expect(accounts.some((a) => a.token === "linked-new-token")).toBe(true);
 	});
+	it("acquires the auth lock across repeated linked renewals using a plain fs object", async () => {
+		const spy = vi.spyOn(lockfile, "lock");
+		try {
+			const x = await linkedFixture();
+			await collectAccounts(x.ctx, x.dir, new AbortController().signal);
+			const rotated = await x.readStore();
+			rotated.accounts.expired.expires = 0;
+			await writeFile(x.file, JSON.stringify(rotated));
+			x.refresh.mockImplementationOnce(async (c: OAuthCredential) => {
+				const next = {
+					...c,
+					access: "linked-second-token",
+					refresh: "linked-second-refresh",
+					expires: Date.now() + 3600000,
+				};
+				const saved = await x.readStore();
+				saved.accounts.expired = { ...saved.accounts.expired, ...next };
+				await writeFile(x.file, JSON.stringify(saved));
+				return next;
+			});
+			const accounts = await collectAccounts(
+				x.ctx,
+				x.dir,
+				new AbortController().signal,
+			);
+			expect(x.refresh).toHaveBeenCalledTimes(2);
+			expect(accounts.some((a) => a.token === "linked-second-token")).toBe(
+				true,
+			);
+			expect(spy).toHaveBeenCalledTimes(2);
+			const customFs = spy.mock.calls[0]?.[1]?.fs as object | undefined;
+			expect(customFs).toBeDefined();
+			const symbols = Object.getOwnPropertySymbols(customFs ?? {});
+			expect(symbols).toHaveLength(1);
+			expect(
+				Object.getOwnPropertyDescriptor(customFs, symbols[0]),
+			).toMatchObject({
+				configurable: false,
+				writable: false,
+			});
+		} finally {
+			spy.mockRestore();
+		}
+	});
 });

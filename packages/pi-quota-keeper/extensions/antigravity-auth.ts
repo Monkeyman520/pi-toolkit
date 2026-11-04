@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import * as nodeFs from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,6 +10,9 @@ import { record } from "./providers.ts";
 
 type Saved = Record<string, unknown>;
 type Renewal = { account: Saved } | { reason: string };
+// Plain object copy avoids jiti's interopDefault Proxy caching undefined before
+// proper-lockfile defines its non-configurable mtime-precision symbol on fs.
+const lockFs = { ...nodeFs };
 const failures = new Map<string, number>();
 const failed =
 	"Linked Pi Antigravity token refresh failed; retry after one minute or reauthenticate this account in pi-antigravity.";
@@ -105,6 +109,7 @@ async function acquireAuthLock(
 		wait.throwIfAborted();
 		try {
 			return await lockfile.lock(path, {
+				fs: lockFs,
 				realpath: false,
 				retries: 0,
 				stale: 30000,

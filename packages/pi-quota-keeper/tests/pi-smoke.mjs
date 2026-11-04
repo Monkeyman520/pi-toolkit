@@ -200,9 +200,9 @@ try {
   const chat=(id)=>[{id,name:id,reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:1000,maxTokens:100}];
 
   const googleOAuth={...oauth,refreshToken:async c=>{
-   if(c.refresh!=="fixture-ag-b-refresh"||c.projectId!=="project-b")throw Error("Incorrect linked renewal target");
+   if(!["fixture-ag-b-refresh","fixture-ag-b-rotated"].includes(c.refresh)||c.projectId!=="project-b")throw Error("Incorrect linked renewal target");
    record("auth-refresh",{project:c.projectId});
-   const next={...c,access:"fixture-ag-b-refreshed",refresh:"fixture-ag-b-rotated",expires:Date.now()+3600000};
+   const next={...c,access:"fixture-ag-b-refreshed",refresh:c.refresh==="fixture-ag-b-refresh"?"fixture-ag-b-rotated":"fixture-ag-b-rotated-2",expires:Date.now()+3600000};
    const file=process.env.PI_CODING_AGENT_DIR+"/antigravity-accounts.json";
    const store=JSON.parse(readFileSync(file,"utf8"));store.accounts.b=next;writeFileSync(file,JSON.stringify(store));
    return next;
@@ -549,10 +549,20 @@ try {
 	const pollsBefore = (await metrics()).filter(
 		(e) => e.type === "quota",
 	).length;
+	linkedAfter.accounts.b.expires = 0;
+	await writeFile(
+		join(root, "antigravity-accounts.json"),
+		JSON.stringify(linkedAfter),
+	);
 	await manualFollower.command("prompt", { message: "/quota refresh" });
 	assert.ok(
 		latestUi(manualFollower).startsWith("Quota refreshed."),
 		`follower waits for completed owner refresh; actual=${latestUi(manualFollower)}`,
+	);
+	assert.equal(
+		(await metrics()).filter((e) => e.type === "auth-refresh").length,
+		2,
+		"repeated linked token renewal in the same Pi process succeeds without jiti Proxy fs crash",
 	);
 	assert.ok(
 		(await metrics()).filter((e) => e.type === "quota").length > pollsBefore,
