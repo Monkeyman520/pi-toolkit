@@ -23,15 +23,16 @@ Runtime imports are Node built-ins and Pi-provided host modules; no local build 
 
 Commands:
 
-- `/auto-resume`: status and configuration path.
+- `/auto-resume` (or `/auto-resume status`): status and configuration path.
 - `/auto-resume stop`: cancel pending recovery.
 - `/auto-resume off` / `on`: disable/enable for the current session.
+- `/auto-resume config [reload | <key> [<value>]]`: view current settings, force reload from disk, or dynamically update and persist a setting to `pi-auto-resume.json`.
 
 In TUI mode, Escape or Ctrl+C also cancels pending recovery. RPC clients should use `/auto-resume stop` to cancel a pending idle wait; aborting an active run is also respected.
 
 ## Configuration
 
-Create `pi-auto-resume.json` in Pi's agent directory (normally `~/.pi/agent`; `PI_CODING_AGENT_DIR` is respected). Restart or reload Pi after changes.
+Create or edit `pi-auto-resume.json` in Pi's agent directory (normally `~/.pi/agent`; `PI_CODING_AGENT_DIR` is respected). Changes to `pi-auto-resume.json` are hot-reloaded automatically without restarting Pi or running `/reload`.
 
 All fields are optional. Defaults:
 

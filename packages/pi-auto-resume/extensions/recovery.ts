@@ -1,4 +1,5 @@
 export type Cause = "network" | "throttle" | "quota";
+
 export interface Settings {
 	enabled: boolean;
 	network: boolean;
@@ -9,6 +10,7 @@ export interface Settings {
 	quotaDelayMs: number;
 	maxAttempts: number;
 }
+
 export const defaults: Settings = {
 	enabled: true,
 	network: true,
@@ -43,25 +45,43 @@ export function classify(error: string, status?: number): Cause | undefined {
 		return "throttle";
 }
 
-function timestamp(raw: string): number | undefined {
-	const num = Number(raw);
+function parseTimestampMs(raw: string): number | undefined {
+	const trimmed = raw.trim();
+	if (!trimmed) return undefined;
+	const num = Number(trimmed);
 	const value = Number.isFinite(num)
-		? num < 1e12
-			? num * 1000
-			: num
-		: Date.parse(raw);
+		? num > 0
+			? num < 1e12
+				? num * 1000
+				: num
+			: NaN
+		: Date.parse(trimmed);
 	return Number.isFinite(value) && value >= 0 && value <= 8.64e15
 		? value
 		: undefined;
 }
+
+function normalizeHeaders(
+	headers: Record<string, string>,
+): Record<string, string> {
+	const normalized: Record<string, string> = {};
+	for (const [key, value] of Object.entries(headers)) {
+		if (typeof value === "string") {
+			normalized[key.toLowerCase()] = value;
+		}
+	}
+	return normalized;
+}
+
 export function resetTime(
 	headers: Record<string, string>,
 	error: string,
 	now: number,
 ): number | undefined {
+	const normalized = normalizeHeaders(headers);
 	const times: number[] = [];
-	const retry = headers["retry-after"];
-	if (retry !== undefined) {
+	const retry = normalized["retry-after"]?.trim();
+	if (retry) {
 		const seconds = Number(retry);
 		const time =
 			Number.isFinite(seconds) && seconds >= 0
@@ -74,16 +94,16 @@ export function resetTime(
 		"anthropic-ratelimit-unified-7d-reset",
 		"x-ratelimit-reset",
 	]) {
-		const raw = headers[key];
+		const raw = normalized[key];
 		if (raw) {
-			const time = timestamp(raw);
+			const time = parseTimestampMs(raw);
 			if (time !== undefined) times.push(time);
 		}
 	}
 	for (const match of error.matchAll(
-		/["']?(?:resets_at|resetTime|resetsAt)["']?\s*[:=]\s*["']?([\dTZ:.+-]+)/g,
+		/["']?(?:resets_at|reset_at|resetTime|resetsAt)["']?\s*[:=]\s*["']?([\dTZ:.+-]+)/g,
 	)) {
-		const time = timestamp(match[1]);
+		const time = parseTimestampMs(match[1]);
 		if (time !== undefined) times.push(time);
 	}
 	return times.length ? Math.max(now, ...times) : undefined;
@@ -92,31 +112,124 @@ export function resetTime(
 export class Recovery {
 	readonly settings: Settings;
 	private pending?: { at: number; cause: Cause };
+	private stagedFailure?: {
+		error: string;
+		headers: Record<string, string>;
+		status?: number;
+	};
+	private lastHeaders: Record<string, string> = {};
+	private lastStatus: number | undefined;
 	private attempts = 0;
 	status = "idle";
+
 	constructor(settings: Partial<Settings> = {}) {
 		this.settings = { ...defaults, ...settings };
+		if (!this.settings.enabled) {
+			this.status = "disabled";
+		}
 	}
+
+	private clearStagedFailure() {
+		this.stagedFailure = undefined;
+		this.lastHeaders = {};
+		this.lastStatus = undefined;
+	}
+
+	updateSettings(nextSettings: Partial<Settings>) {
+		Object.assign(this.settings, { ...defaults, ...nextSettings });
+		if (!this.settings.enabled) {
+			this.pending = undefined;
+			this.clearStagedFailure();
+			this.status = "disabled";
+			return;
+		}
+		if (this.pending) {
+			if (!this.settings[this.pending.cause]) {
+				this.pending = undefined;
+				this.status = "not eligible";
+			} else if (this.attempts >= this.settings.maxAttempts) {
+				this.pending = undefined;
+				this.status = "attempt limit reached";
+			}
+		} else if (this.status === "disabled") {
+			this.status = "idle";
+		}
+	}
+
 	cancel() {
 		this.pending = undefined;
+		this.clearStagedFailure();
 		this.status = "cancelled";
 	}
+
+	setEnabled(enabled: boolean) {
+		this.settings.enabled = enabled;
+		if (!enabled) {
+			this.pending = undefined;
+			this.clearStagedFailure();
+			this.status = "disabled";
+		} else if (this.status === "disabled" || this.status === "cancelled") {
+			this.status = "idle";
+		}
+	}
+
 	running() {
 		this.pending = undefined;
+		this.clearStagedFailure();
 		this.status = "host running";
 	}
+
 	userInput() {
 		this.cancel();
 		this.attempts = 0;
 	}
+
 	completed() {
 		this.cancel();
 		this.attempts = 0;
-		this.status = "idle";
+		this.status = this.settings.enabled ? "idle" : "disabled";
 	}
+
 	woke() {
 		if (!this.settings.wake) this.cancel();
 	}
+
+	recordRequestStart() {
+		this.lastHeaders = {};
+		this.lastStatus = undefined;
+	}
+
+	recordProviderResponse(headers: Record<string, string>, status?: number) {
+		this.lastHeaders = { ...headers };
+		this.lastStatus = status;
+	}
+
+	recordAssistantMessage(stopReason?: string, errorMessage?: string) {
+		if (stopReason === "error") {
+			this.stagedFailure = {
+				error: errorMessage ?? "",
+				headers: { ...this.lastHeaders },
+				status: this.lastStatus,
+			};
+		} else {
+			this.clearStagedFailure();
+			if (stopReason === "aborted") this.cancel();
+			else this.completed();
+		}
+	}
+
+	settleTurn(aborted: boolean, now: number) {
+		if (aborted) {
+			this.cancel();
+			return;
+		}
+		const failure = this.stagedFailure;
+		this.clearStagedFailure();
+		if (failure) {
+			this.failed(failure.error, failure.headers, now, failure.status);
+		}
+	}
+
 	failed(
 		error: string,
 		headers: Record<string, string>,
@@ -145,6 +258,7 @@ export class Recovery {
 		this.pending = { at, cause };
 		this.status = `${cause}: waiting until ${new Date(at).toISOString()}`;
 	}
+
 	take(now: number, idle: boolean) {
 		if (!this.pending || !idle || now < this.pending.at) return false;
 		this.pending = undefined;

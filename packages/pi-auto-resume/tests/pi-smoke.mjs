@@ -159,6 +159,25 @@ try {
 		.trim()
 		.split("\n");
 	assert.equal(metrics.length, 6, "maxAttempts bounds repeated errors");
+	const cfgStart = events.length;
+	await command("prompt", { message: "/auto-resume config maxAttempts 4" });
+	await until(() =>
+		events
+			.slice(cfgStart)
+			.some(
+				(e) =>
+					e.type === "extension_ui_request" &&
+					String(e.message).includes("Updated maxAttempts=4"),
+			),
+	);
+	const persistedCfg = JSON.parse(
+		await readFile(join(root, "pi-auto-resume.json"), "utf8"),
+	);
+	assert.equal(
+		persistedCfg.maxAttempts,
+		4,
+		"/auto-resume config persists setting",
+	);
 	assert.ok(!stderr.includes("Failed to load extension"), stderr);
 	child.stdin.end();
 	await Promise.race([
