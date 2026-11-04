@@ -9,9 +9,10 @@ This repository organizes Pi plugin packages; it is not the Pi host's source tre
 | Package | Purpose |
 | --- | --- |
 | [pi-auto-resume](./packages/pi-auto-resume/README.md) | Configurable recovery of interrupted Pi tasks |
+| [pi-pretty-session](./packages/pi-pretty-session/README.md) | Automatic session naming, title/description summarization, dynamic config, session metrics, and project info |
 | [pi-quota-keeper](./packages/pi-quota-keeper/README.md) | Coordinated account quota visibility and capability-gated activation |
 
-Both packages have controlled Pi 1.5.0 loading/usage smoke evidence. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
+All packages have controlled Pi 1.5.0 loading/usage smoke evidence. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
 
 ## Installation model
 
@@ -47,6 +48,7 @@ pi-packages/
 └── packages/
     ├── README.md             # Package layout and development reference
     ├── pi-auto-resume/        # Interrupted-task recovery
+    ├── pi-pretty-session/     # Session summarization, metrics, and project info
     └── pi-quota-keeper/       # Quota visibility and coordinated activation
 ```
 
