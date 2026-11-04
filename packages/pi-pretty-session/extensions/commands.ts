@@ -1,5 +1,8 @@
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import {
+	configOptions,
+	configSchema,
 	defaultConfig,
 	type PrettySessionConfig,
 	toggleAliases,
@@ -218,42 +221,6 @@ const toggleTargets: ReadonlyArray<{
 	},
 ];
 
-const configKeyDescriptions: Readonly<
-	Record<keyof PrettySessionConfig, string>
-> = {
-	enabled: "Enable automatic session summarization and naming",
-	useLlm: "Use isolated LLM calls for summarization before heuristic fallback",
-	model: "Optional provider/modelId override for summarization calls",
-	updateEveryTurns: "Re-summarize every N completed turns",
-	contextDeltaTokens: "Re-summarize when context grows by N tokens",
-	summarizeOnCompact: "Re-summarize automatically after context compaction",
-	protectManualName: "Protect manual session titles against dynamic overwrite",
-	showWidget: "Display the session & project TUI widget",
-	widgetPlacement: "Widget placement: aboveEditor | belowEditor",
-	showStatus: "Display compact session summary in the footer status bar",
-	maxTitleLength: "Maximum character length for generated session titles",
-	maxDescriptionLength:
-		"Maximum character length for generated session descriptions",
-	summaryTimeoutMs: "Timeout in milliseconds for LLM summarization calls",
-};
-
-const booleanConfigKeys = new Set<keyof PrettySessionConfig>([
-	"enabled",
-	"useLlm",
-	"summarizeOnCompact",
-	"protectManualName",
-	"showWidget",
-	"showStatus",
-]);
-
-const numericConfigPresets: Readonly<Record<string, readonly string[]>> = {
-	updateEveryTurns: ["1", "2", "3", "5", "10"],
-	contextDeltaTokens: ["2000", "4000", "8000", "16000", "32000"],
-	maxTitleLength: ["40", "60", "80", "100"],
-	maxDescriptionLength: ["100", "160", "220", "280"],
-	summaryTimeoutMs: ["5000", "10000", "15000", "30000"],
-};
-
 export function getPrettySessionCompletions(
 	argumentPrefix: string,
 	context?: PrettySessionCompletionContext,
@@ -327,7 +294,7 @@ export function getPrettySessionCompletions(
 					candidates.push({
 						value: `${actionToken} ${key}`,
 						label: key,
-						description: `${configKeyDescriptions[key]} (current: ${String(cfg[key] ?? "default")})`,
+						description: `${configOptions[key].description} (current: ${String(cfg[key] ?? "default")})`,
 					});
 				}
 			}
@@ -346,17 +313,17 @@ export function getPrettySessionCompletions(
 			if (!resolvedKey) return null;
 
 			let values: string[] = [];
-			if (booleanConfigKeys.has(resolvedKey)) {
-				values = ["true", "false", "on", "off"];
+			if (Type.IsBoolean(configSchema.properties[resolvedKey])) {
+				values = [...configOptions[resolvedKey].values, "on", "off"];
 			} else if (resolvedKey === "widgetPlacement") {
-				values = ["aboveEditor", "belowEditor"];
+				values = [...configOptions.widgetPlacement.values];
 			} else if (resolvedKey === "model") {
 				values = [
-					"default",
+					...configOptions.model.values,
 					...(context?.models ?? []).map((m) => `${m.provider}/${m.id}`),
 				];
 			} else {
-				values = [...(numericConfigPresets[resolvedKey] ?? [])];
+				values = [...configOptions[resolvedKey].values];
 			}
 
 			const matches = values

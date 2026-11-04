@@ -15,6 +15,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { getQuotaModelsForProvider } from "./commands.ts";
 import {
+	configOptions,
 	executeQuotaConfigCommand,
 	type QuotaKeeperConfig,
 	type State,
@@ -188,7 +189,7 @@ export async function openQuotaSettingsPanel(params: {
 						description:
 							"reset: wait for service reset + delayMs · fixed: explicit 5-hour cadence",
 						currentValue: cfg.mode,
-						values: ["reset", "fixed"],
+						values: [...configOptions.mode.values],
 					},
 					{
 						id: "delayMs",
@@ -196,7 +197,7 @@ export async function openQuotaSettingsPanel(params: {
 						description:
 							"Delay after reported service reset before sending activation/wake-up (default: 30000ms)",
 						currentValue: String(cfg.delayMs),
-						values: ["0", "15000", "30000", "60000", "120000"],
+						values: [...configOptions.delayMs.values],
 					},
 					{
 						id: "pollIntervalMs",
@@ -204,7 +205,7 @@ export async function openQuotaSettingsPanel(params: {
 						description:
 							"Owner quota polling cadence in milliseconds (default: 60000ms)",
 						currentValue: String(cfg.pollIntervalMs),
-						values: ["10000", "30000", "60000", "120000", "300000"],
+						values: [...configOptions.pollIntervalMs.values],
 					},
 				];
 

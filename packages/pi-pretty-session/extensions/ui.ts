@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-tui";
 import {
 	type ConfigManager,
+	configOptions,
 	defaultConfig,
 	type PrettySessionConfig,
 } from "./config.ts";
@@ -132,7 +133,7 @@ export async function openPrettySessionSettingsPanel(params: {
 			const buildItems = (): SettingItem[] => {
 				const c = configManager.config;
 				const modelChoices = [
-					"default",
+					...configOptions.model.values,
 					...(c.model ? [c.model] : []),
 					...availableModels.map((m) => `${m.provider}/${m.id}`),
 				];
@@ -145,7 +146,7 @@ export async function openPrettySessionSettingsPanel(params: {
 						description:
 							"Automatically generate and update session title and description",
 						currentValue: String(c.enabled),
-						values: ["true", "false"],
+						values: [...configOptions.enabled.values],
 					},
 					{
 						id: "useLlm",
@@ -153,7 +154,7 @@ export async function openPrettySessionSettingsPanel(params: {
 						description:
 							"Use isolated LLM completion for summaries (falls back to local heuristics when false)",
 						currentValue: String(c.useLlm),
-						values: ["true", "false"],
+						values: [...configOptions.useLlm.values],
 					},
 					{
 						id: "model",
@@ -169,7 +170,7 @@ export async function openPrettySessionSettingsPanel(params: {
 						description:
 							"Prevent automatic re-summarization from overwriting manual /name or /ps rename titles",
 						currentValue: String(c.protectManualName),
-						values: ["true", "false"],
+						values: [...configOptions.protectManualName.values],
 					},
 					{
 						id: "showWidget",
@@ -177,7 +178,7 @@ export async function openPrettySessionSettingsPanel(params: {
 						description:
 							"Display live session & project overview widget near the editor",
 						currentValue: String(c.showWidget),
-						values: ["true", "false"],
+						values: [...configOptions.showWidget.values],
 					},
 					{
 						id: "widgetPlacement",
@@ -185,7 +186,7 @@ export async function openPrettySessionSettingsPanel(params: {
 						description:
 							"Position the session widget above or below the editor",
 						currentValue: c.widgetPlacement,
-						values: ["aboveEditor", "belowEditor"],
+						values: [...configOptions.widgetPlacement.values],
 					},
 					{
 						id: "showStatus",
@@ -193,7 +194,7 @@ export async function openPrettySessionSettingsPanel(params: {
 						description:
 							"Display compact session metrics in the footer status bar",
 						currentValue: String(c.showStatus),
-						values: ["true", "false"],
+						values: [...configOptions.showStatus.values],
 					},
 					{
 						id: "summarizeOnCompact",
@@ -201,42 +202,42 @@ export async function openPrettySessionSettingsPanel(params: {
 						description:
 							"Automatically refresh session summary when /compact completes",
 						currentValue: String(c.summarizeOnCompact),
-						values: ["true", "false"],
+						values: [...configOptions.summarizeOnCompact.values],
 					},
 					{
 						id: "updateEveryTurns",
 						label: "Update Every N Turns",
 						description: `Re-summarize after every N completed turns (default: ${defaultConfig.updateEveryTurns})`,
 						currentValue: String(c.updateEveryTurns),
-						values: ["1", "2", "3", "5", "10"],
+						values: [...configOptions.updateEveryTurns.values],
 					},
 					{
 						id: "contextDeltaTokens",
 						label: "Context Delta Threshold (tokens)",
 						description: `Re-summarize when context grows by N tokens (default: ${defaultConfig.contextDeltaTokens})`,
 						currentValue: String(c.contextDeltaTokens),
-						values: ["2000", "4000", "8000", "16000", "32000"],
+						values: [...configOptions.contextDeltaTokens.values],
 					},
 					{
 						id: "maxTitleLength",
 						label: "Max Title Length",
 						description: `Maximum characters for generated titles (default: ${defaultConfig.maxTitleLength})`,
 						currentValue: String(c.maxTitleLength),
-						values: ["40", "60", "80", "100"],
+						values: [...configOptions.maxTitleLength.values],
 					},
 					{
 						id: "maxDescriptionLength",
 						label: "Max Description Length",
 						description: `Maximum characters for generated descriptions (default: ${defaultConfig.maxDescriptionLength})`,
 						currentValue: String(c.maxDescriptionLength),
-						values: ["100", "160", "220", "280"],
+						values: [...configOptions.maxDescriptionLength.values],
 					},
 					{
 						id: "summaryTimeoutMs",
 						label: "Summary Timeout (ms)",
 						description: `Timeout for LLM summarization requests (default: ${defaultConfig.summaryTimeoutMs}ms)`,
 						currentValue: String(c.summaryTimeoutMs),
-						values: ["5000", "10000", "15000", "30000"],
+						values: [...configOptions.summaryTimeoutMs.values],
 					},
 					{
 						id: "action-summarize",

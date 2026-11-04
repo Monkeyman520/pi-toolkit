@@ -1,4 +1,6 @@
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
+import { configOptions, settingsSchema } from "./config.ts";
 import { defaults, type Settings } from "./recovery.ts";
 
 export type AutoResumeCommand =
@@ -12,31 +14,6 @@ export type AutoResumeCommand =
 
 export const autoResumeUsage =
 	"Usage: /auto-resume [status | stop | on | off | config [reload | <key> [value]] | help]";
-
-const settingKeyDescriptions: Readonly<Record<keyof Settings, string>> = {
-	enabled: "Enable or disable automatic recovery by default",
-	network: "Recover from network loss or request timeouts",
-	throttle: "Recover from temporary rate-limiting (HTTP 429)",
-	quota: "Recover after subscription quota reset",
-	wake: "Reevaluate interrupted work after computer wake",
-	retryDelayMs: "Minimum delay before network/throttle retry (ms)",
-	quotaDelayMs: "Safety delay after reported quota reset time (ms)",
-	maxAttempts: "Maximum consecutive automatic recovery attempts",
-};
-
-const booleanKeys = new Set<keyof Settings>([
-	"enabled",
-	"network",
-	"throttle",
-	"quota",
-	"wake",
-]);
-
-const integerPresets: Readonly<Record<string, readonly string[]>> = {
-	retryDelayMs: ["1000", "5000", "10000", "30000", "60000"],
-	quotaDelayMs: ["0", "5000", "15000", "30000", "60000", "120000"],
-	maxAttempts: ["1", "2", "3", "5", "10", "20"],
-};
 
 const actionDefinitions: ReadonlyArray<{
 	action: string;
@@ -150,7 +127,7 @@ export function getAutoResumeCompletions(
 				candidates.push({
 					value: `${actionToken} ${key}`,
 					label: key,
-					description: `${settingKeyDescriptions[key]} (current: ${String(settings[key])})`,
+					description: `${configOptions[key].description} (current: ${String(settings[key])})`,
 				});
 			}
 		}
@@ -164,9 +141,9 @@ export function getAutoResumeCompletions(
 		);
 		if (!matchedKey) return null;
 
-		const rawValues = booleanKeys.has(matchedKey)
-			? ["true", "false", "on", "off"]
-			: (integerPresets[matchedKey] ?? []);
+		const rawValues = Type.IsBoolean(settingsSchema.properties[matchedKey])
+			? [...configOptions[matchedKey].values, "on", "off"]
+			: configOptions[matchedKey].values;
 
 		const matches = rawValues
 			.filter((v) => v.toLowerCase().startsWith(lowerPartial))

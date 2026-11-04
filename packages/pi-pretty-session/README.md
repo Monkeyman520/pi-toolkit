@@ -83,6 +83,10 @@ This extension runs with Pi's full operating-system process privileges:
 
 ## Development and verification
 
+Package-local configuration metadata supplies both command completions and panel presets; the TypeBox schema remains the validation authority, including valid non-preset values. Lifecycle regression tests verify factory inactivity, repeated-start cleanup, independent instances, and that late summaries cannot write metadata or rename sessions after tree navigation or shutdown.
+
+The optional [collection isolation matrix](../../README.md#cross-plugin-isolation-verification) additionally exercises all seven plugin combinations in real Pi; it is development-only, not an installation or runtime dependency.
+
 Use the package-local npm lockfile and npm 11.20.0:
 
 ```sh

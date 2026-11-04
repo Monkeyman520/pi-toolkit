@@ -132,6 +132,10 @@ The extension has Pi's process privileges. It reads Pi auth and optional Pi Anti
 
 ## Development and verification
 
+Package-local configuration metadata supplies both command completions and scalar panel presets; account configuration and schema validation remain domain-owned. Lifecycle regression tests use empty account fixtures with real OS ownership to verify factory inactivity, repeated-start cleanup, and independent instances without accessing credentials.
+
+The optional [collection isolation matrix](../../README.md#cross-plugin-isolation-verification) additionally exercises all seven plugin combinations in real Pi; it is development-only, not an installation or runtime dependency.
+
 Use npm 11.20.0 and the package-local lockfile:
 
 ```sh

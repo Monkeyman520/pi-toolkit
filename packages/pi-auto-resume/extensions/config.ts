@@ -35,19 +35,43 @@ export const settingsSchema = Type.Object(
 
 export type PartialSettings = Static<typeof settingsSchema>;
 
-const booleanSettingKeys = new Set<keyof Settings>([
-	"enabled",
-	"network",
-	"throttle",
-	"quota",
-	"wake",
-]);
-
-const integerSettingKeys = new Set<keyof Settings>([
-	"retryDelayMs",
-	"quotaDelayMs",
-	"maxAttempts",
-]);
+// Suggestions are presentation metadata; the schema remains the validation authority.
+export const configOptions: Readonly<
+	Record<keyof Settings, { description: string; values: readonly string[] }>
+> = {
+	enabled: {
+		description: "Enable or disable automatic recovery by default",
+		values: ["true", "false"],
+	},
+	network: {
+		description: "Recover from network loss or request timeouts",
+		values: ["true", "false"],
+	},
+	throttle: {
+		description: "Recover from temporary rate-limiting (HTTP 429)",
+		values: ["true", "false"],
+	},
+	quota: {
+		description: "Recover after subscription quota reset",
+		values: ["true", "false"],
+	},
+	wake: {
+		description: "Reevaluate interrupted work after computer wake",
+		values: ["true", "false"],
+	},
+	retryDelayMs: {
+		description: "Minimum delay before network/throttle retry (ms)",
+		values: ["1000", "5000", "10000", "30000", "60000"],
+	},
+	quotaDelayMs: {
+		description: "Safety delay after reported quota reset time (ms)",
+		values: ["0", "5000", "15000", "30000", "60000", "120000"],
+	},
+	maxAttempts: {
+		description: "Maximum consecutive automatic recovery attempts",
+		values: ["1", "2", "3", "5", "10", "20"],
+	},
+};
 
 function parseBooleanInput(raw: string): boolean | undefined {
 	const normalized = raw.trim().toLowerCase();
@@ -202,7 +226,7 @@ export class AutoResumeConfigManager {
 
 		const trimmedValue = rawValue.trim();
 		let parsedValue: boolean | number;
-		if (booleanSettingKeys.has(resolvedKey)) {
+		if (Type.IsBoolean(settingsSchema.properties[resolvedKey])) {
 			const boolVal = parseBooleanInput(trimmedValue);
 			if (boolVal === undefined) {
 				return {
@@ -211,7 +235,7 @@ export class AutoResumeConfigManager {
 				};
 			}
 			parsedValue = boolVal;
-		} else if (integerSettingKeys.has(resolvedKey)) {
+		} else if (Type.IsInteger(settingsSchema.properties[resolvedKey])) {
 			if (!/^-?\d+$/.test(trimmedValue)) {
 				return {
 					ok: false,

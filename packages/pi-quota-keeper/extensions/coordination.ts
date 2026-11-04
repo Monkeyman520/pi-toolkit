@@ -159,6 +159,26 @@ export const defaultQuotaConfig: QuotaKeeperConfig = {
 	resetWindows: {},
 };
 
+export type QuotaConfigKey = "mode" | "delayMs" | "pollIntervalMs";
+
+// Only scalar command-editable settings have presets; account maps stay domain-owned.
+export const configOptions: Readonly<
+	Record<QuotaConfigKey, { description: string; values: readonly string[] }>
+> = {
+	mode: {
+		description: "Schedule mode: reset | fixed",
+		values: ["reset", "fixed"],
+	},
+	delayMs: {
+		description: "Post-reset delay in ms",
+		values: ["0", "15000", "30000", "60000", "120000"],
+	},
+	pollIntervalMs: {
+		description: "Quota polling interval in ms",
+		values: ["10000", "30000", "60000", "120000", "300000"],
+	},
+};
+
 export async function readQuotaConfig(dir: string): Promise<QuotaKeeperConfig> {
 	try {
 		const rawText = await readFile(join(dir, "pi-quota-keeper.json"), "utf8");
@@ -219,7 +239,7 @@ export async function executeQuotaConfigCommand(
 		| { kind: "disable"; id: string }
 		| {
 				kind: "config";
-				key?: "mode" | "delayMs" | "pollIntervalMs";
+				key?: QuotaConfigKey;
 				value?: string;
 				reload?: boolean;
 		  },

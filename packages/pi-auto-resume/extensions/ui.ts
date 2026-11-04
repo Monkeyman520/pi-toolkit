@@ -12,7 +12,7 @@ import {
 	type SettingsListTheme,
 	truncateToWidth,
 } from "@earendil-works/pi-tui";
-import type { AutoResumeConfigManager } from "./config.ts";
+import { type AutoResumeConfigManager, configOptions } from "./config.ts";
 import { defaults, type Recovery, type Settings } from "./recovery.ts";
 
 export const DISCOVER_EVENT = "pi-packages:ui:discover";
@@ -112,7 +112,7 @@ export async function openAutoResumeSettingsPanel(params: {
 						description:
 							"Resume tasks interrupted by network loss or request timeouts",
 						currentValue: String(s.network),
-						values: ["true", "false"],
+						values: [...configOptions.network.values],
 					},
 					{
 						id: "throttle",
@@ -120,7 +120,7 @@ export async function openAutoResumeSettingsPanel(params: {
 						description:
 							"Resume tasks interrupted by temporary HTTP 429 rate limits",
 						currentValue: String(s.throttle),
-						values: ["true", "false"],
+						values: [...configOptions.throttle.values],
 					},
 					{
 						id: "quota",
@@ -128,7 +128,7 @@ export async function openAutoResumeSettingsPanel(params: {
 						description:
 							"Wait for concrete service reset time + safety delay before resuming",
 						currentValue: String(s.quota),
-						values: ["true", "false"],
+						values: [...configOptions.quota.values],
 					},
 					{
 						id: "wake",
@@ -136,28 +136,28 @@ export async function openAutoResumeSettingsPanel(params: {
 						description:
 							"Reevaluate eligible interrupted work after the computer wakes from sleep",
 						currentValue: String(s.wake),
-						values: ["true", "false"],
+						values: [...configOptions.wake.values],
 					},
 					{
 						id: "retryDelayMs",
 						label: "Retry Delay (ms)",
 						description: `Minimum wait before network/throttling retry (default: ${defaults.retryDelayMs}ms)`,
 						currentValue: String(s.retryDelayMs),
-						values: ["1000", "5000", "10000", "30000", "60000"],
+						values: [...configOptions.retryDelayMs.values],
 					},
 					{
 						id: "quotaDelayMs",
 						label: "Post-Reset Safety Delay (ms)",
 						description: `Additional delay after reported quota reset (default: ${defaults.quotaDelayMs}ms)`,
 						currentValue: String(s.quotaDelayMs),
-						values: ["0", "5000", "15000", "30000", "60000", "120000"],
+						values: [...configOptions.quotaDelayMs.values],
 					},
 					{
 						id: "maxAttempts",
 						label: "Max Consecutive Attempts",
 						description: `Maximum automatic retries per user prompt (default: ${defaults.maxAttempts})`,
 						currentValue: String(s.maxAttempts),
-						values: ["1", "2", "3", "5", "10", "20"],
+						values: [...configOptions.maxAttempts.values],
 					},
 					{
 						id: "action-stop",

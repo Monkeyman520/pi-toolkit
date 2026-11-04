@@ -1,9 +1,14 @@
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import type { QuotaKeeperConfig } from "./coordination.ts";
+import {
+	configOptions,
+	defaultQuotaConfig,
+	type QuotaConfigKey,
+	type QuotaKeeperConfig,
+} from "./coordination.ts";
 import { formatQuotaList, formatQuotaView } from "./display.ts";
 import type { Snapshot } from "./providers.ts";
 
-export type QuotaConfigKey = "mode" | "delayMs" | "pollIntervalMs";
+export type { QuotaConfigKey } from "./coordination.ts";
 
 export type QuotaCommand =
 	| { kind: "view"; id?: string; detailed: boolean }
@@ -379,15 +384,15 @@ export function getQuotaCompletions(
 				},
 				{
 					key: "mode",
-					description: `Schedule mode: reset | fixed (current: ${cfg?.mode ?? "reset"})`,
+					description: `${configOptions.mode.description} (current: ${cfg?.mode ?? defaultQuotaConfig.mode})`,
 				},
 				{
 					key: "delayMs",
-					description: `Post-reset delay in ms (current: ${cfg?.delayMs ?? 30000})`,
+					description: `${configOptions.delayMs.description} (current: ${cfg?.delayMs ?? defaultQuotaConfig.delayMs})`,
 				},
 				{
 					key: "pollIntervalMs",
-					description: `Quota polling interval in ms (current: ${cfg?.pollIntervalMs ?? 60000})`,
+					description: `${configOptions.pollIntervalMs.description} (current: ${cfg?.pollIntervalMs ?? defaultQuotaConfig.pollIntervalMs})`,
 				},
 			];
 			const matches = configKeys
@@ -403,12 +408,7 @@ export function getQuotaCompletions(
 			const rawKey = parts[1] ?? "";
 			const resolvedKey = configKeyAliases[rawKey.toLowerCase()];
 			if (!resolvedKey) return null;
-			const values =
-				resolvedKey === "mode"
-					? ["reset", "fixed"]
-					: resolvedKey === "delayMs"
-						? ["0", "15000", "30000", "60000", "120000"]
-						: ["10000", "30000", "60000", "120000", "300000"];
+			const values = configOptions[resolvedKey].values;
 			const matches = values
 				.filter((v) => v.toLowerCase().startsWith(lowerPartial))
 				.map((v) => ({

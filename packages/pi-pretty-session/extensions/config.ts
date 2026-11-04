@@ -85,22 +85,67 @@ export interface ConfigReloadResult {
 	isNewError: boolean;
 }
 
-const booleanKeys = new Set<keyof PrettySessionConfig>([
-	"enabled",
-	"useLlm",
-	"summarizeOnCompact",
-	"protectManualName",
-	"showWidget",
-	"showStatus",
-]);
-
-const integerKeys = new Set<keyof PrettySessionConfig>([
-	"updateEveryTurns",
-	"contextDeltaTokens",
-	"maxTitleLength",
-	"maxDescriptionLength",
-	"summaryTimeoutMs",
-]);
+// Suggestions are presentation metadata; the schema remains the validation authority.
+export const configOptions: Readonly<
+	Record<
+		keyof PrettySessionConfig,
+		{ description: string; values: readonly string[] }
+	>
+> = {
+	enabled: {
+		description: "Enable automatic session summarization and naming",
+		values: ["true", "false"],
+	},
+	useLlm: {
+		description:
+			"Use isolated LLM calls for summarization before heuristic fallback",
+		values: ["true", "false"],
+	},
+	model: {
+		description: "Optional provider/modelId override for summarization calls",
+		values: ["default"],
+	},
+	updateEveryTurns: {
+		description: "Re-summarize every N completed turns",
+		values: ["1", "2", "3", "5", "10"],
+	},
+	contextDeltaTokens: {
+		description: "Re-summarize when context grows by N tokens",
+		values: ["2000", "4000", "8000", "16000", "32000"],
+	},
+	summarizeOnCompact: {
+		description: "Re-summarize automatically after context compaction",
+		values: ["true", "false"],
+	},
+	protectManualName: {
+		description: "Protect manual session titles against dynamic overwrite",
+		values: ["true", "false"],
+	},
+	showWidget: {
+		description: "Display the session & project TUI widget",
+		values: ["true", "false"],
+	},
+	widgetPlacement: {
+		description: "Widget placement: aboveEditor | belowEditor",
+		values: ["aboveEditor", "belowEditor"],
+	},
+	showStatus: {
+		description: "Display compact session summary in the footer status bar",
+		values: ["true", "false"],
+	},
+	maxTitleLength: {
+		description: "Maximum character length for generated session titles",
+		values: ["40", "60", "80", "100"],
+	},
+	maxDescriptionLength: {
+		description: "Maximum character length for generated session descriptions",
+		values: ["100", "160", "220", "280"],
+	},
+	summaryTimeoutMs: {
+		description: "Timeout in milliseconds for LLM summarization calls",
+		values: ["5000", "10000", "15000", "30000"],
+	},
+};
 
 export const toggleAliases: Readonly<
 	Record<string, keyof PrettySessionConfig>
@@ -276,7 +321,7 @@ export class ConfigManager {
 		let parsedValue: unknown;
 		const trimmedValue = rawValue.trim();
 
-		if (booleanKeys.has(resolvedKey)) {
+		if (Type.IsBoolean(configSchema.properties[resolvedKey])) {
 			const boolVal = parseBooleanValue(trimmedValue);
 			if (boolVal === undefined) {
 				return {
@@ -285,7 +330,7 @@ export class ConfigManager {
 				};
 			}
 			parsedValue = boolVal;
-		} else if (integerKeys.has(resolvedKey)) {
+		} else if (Type.IsInteger(configSchema.properties[resolvedKey])) {
 			if (!/^-?\d+$/.test(trimmedValue)) {
 				return {
 					ok: false,
@@ -361,7 +406,7 @@ export class ConfigManager {
 	> {
 		const normalized = target.trim().toLowerCase();
 		const key = toggleAliases[normalized];
-		if (!key || !booleanKeys.has(key)) {
+		if (!key || !Type.IsBoolean(configSchema.properties[key])) {
 			return {
 				ok: false,
 				error: `Unknown toggle target "${target}". Supported targets: auto, llm, widget, status, lock, compact.`,

@@ -69,7 +69,21 @@ Existing development-tool configuration is omitted from this overview. Its prese
 
 Host-provided SDK packages and `typebox`, when used, are peers rather than bundled runtime dependencies. See the [package development reference](packages/README.md) for manifests, TypeScript configuration, resource discovery, and verification guidance.
 
-There is no root package manifest or root test/build script. Each real package owns its npm lockfile, pinned development tooling, checks, and Pi smoke test; see its README. This does not establish a collection-wide workspace tool or publication scope.
+There is no root package manifest or workspace test/build runner. Each real package owns its npm lockfile, pinned development tooling, checks, and Pi smoke test; see its README. This does not establish a collection-wide workspace tool or publication scope.
+
+## Cross-plugin isolation verification
+
+After preparing each package's documented development dependencies, run from the repository root:
+
+```sh
+node tests/plugin-isolation.mjs
+```
+
+Set `PI_BINARY` to the actual Pi executable if needed (for example `$env:PI_BINARY = 'C:\path\to\pi.exe'` in PowerShell). The matrix requires Node.js >= 22.19.0, npm, installed Pi, and the npm cache populated by package setup for the quota plugin's offline production-dependency installation.
+
+This development-only script copies just the selected packages outside the checkout without sibling sources or development `node_modules`. It checks all seven nonempty combinations, exact plugin command visibility, interoperability of each package's local discovery implementation, and three session lifecycles per combination including discovery-listener cleanup. It uses an empty isolated auth store and disables LLM summaries; it does not contact live providers or change personal Pi settings. Expected final output is `Pi plugin isolation matrix: all 7 combinations PASS`.
+
+The matrix has been verified on Windows with Pi 1.5.0. It complements, rather than replaces, each package's type checks, Biome checks, Vitest tests, and provider-fixture smoke test. It is not a manual interactive-TUI or physical sleep/wake test.
 
 ## Contributing
 
