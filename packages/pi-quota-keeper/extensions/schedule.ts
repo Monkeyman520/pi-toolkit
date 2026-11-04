@@ -12,32 +12,36 @@ export interface Entry {
 	outcome?: string;
 }
 export type Ledger = Record<string, Entry>;
-const interval = 5 * 60 * 60 * 1000;
+const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 export function dueActivation(
-	s: Snapshot,
-	c: ActivationConfig,
+	snapshot: Snapshot,
+	config: ActivationConfig,
 	ledger: Ledger,
 	now: number,
 ): { id: string; cycle: string } | undefined {
-	if (!s.activation.supported || !c.enabledAccounts.includes(s.id)) return;
 	if (
-		s.status !== "available" &&
-		!(s.activation.bestEffort && c.mode === "fixed")
+		!snapshot.activation.supported ||
+		!config.enabledAccounts.includes(snapshot.id)
 	)
 		return;
-	ledger[s.id] ??= {};
-	const entry = ledger[s.id];
-	if (c.mode === "fixed") {
+	if (
+		snapshot.status !== "available" &&
+		!(snapshot.activation.bestEffort && config.mode === "fixed")
+	)
+		return;
+	ledger[snapshot.id] ??= {};
+	const entry = ledger[snapshot.id];
+	if (config.mode === "fixed") {
 		entry.anchor ??= now;
-		const slot = Math.floor((now - entry.anchor) / interval);
+		const slot = Math.floor((now - entry.anchor) / FIVE_HOURS_MS);
 		if (slot < 1) return;
 		const cycle = `fixed:${entry.anchor}:${slot}`;
-		return entry.attempted === cycle ? undefined : { id: s.id, cycle };
+		return entry.attempted === cycle ? undefined : { id: snapshot.id, cycle };
 	}
 	const windowId =
-		s.activation.windowId ??
-		(!s.activation.bestEffort ? "five_hour" : undefined);
-	const reset = s.windows.find((w) => w.id === windowId)?.resetAt;
+		snapshot.activation.windowId ??
+		(!snapshot.activation.bestEffort ? "five_hour" : undefined);
+	const reset = snapshot.windows.find((w) => w.id === windowId)?.resetAt;
 	if (reset === undefined) return;
 	if (entry.windowId !== undefined && entry.windowId !== windowId)
 		delete entry.resetAt;
@@ -45,11 +49,11 @@ export function dueActivation(
 	// A newer live window means normal work has already opened the current session.
 	if (entry.resetAt === undefined || reset > entry.resetAt)
 		entry.resetAt = reset;
-	if (now < entry.resetAt + c.delayMs) return;
+	if (now < entry.resetAt + config.delayMs) return;
 	// Keep legacy Claude cycle IDs so upgrading cannot replay its previous attempt.
 	const cycle =
 		windowId === "five_hour"
 			? `reset:${entry.resetAt}`
 			: `reset:${windowId}:${entry.resetAt}`;
-	return entry.attempted === cycle ? undefined : { id: s.id, cycle };
+	return entry.attempted === cycle ? undefined : { id: snapshot.id, cycle };
 }

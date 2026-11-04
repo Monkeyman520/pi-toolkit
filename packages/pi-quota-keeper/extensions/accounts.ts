@@ -6,12 +6,15 @@ import {
 	needsLinkedRefresh,
 	refreshLinkedAccount,
 } from "./antigravity-auth.ts";
-import { type Account, record } from "./providers.ts";
+import {
+	type Account,
+	isAntigravityProvider,
+	MAX_JSON_BYTES,
+	record,
+	nonEmptyText as text,
+} from "./providers.ts";
 
-function text(v: unknown): string | undefined {
-	return typeof v === "string" && v.length > 0 ? v : undefined;
-}
-function claim(access: unknown): string | undefined {
+function extractJwtSubClaim(access: unknown): string | undefined {
 	try {
 		const d = record(
 			JSON.parse(
@@ -28,15 +31,15 @@ function identityOf(credential: Record<string, unknown>): string {
 	return (
 		text(credential.email) ??
 		text(credential.accountId) ??
-		claim(credential.access) ??
+		extractJwtSubClaim(credential.access) ??
 		text(credential.refresh) ??
 		"default"
 	);
 }
-function id(provider: string, identity: string) {
+function buildAccountId(provider: string, identity: string) {
 	return `${provider}:${createHash("sha256").update(identity).digest("hex").slice(0, 16)}`;
 }
-function label(provider: string, email?: string) {
+function formatMaskedAccountLabel(provider: string, email?: string) {
 	if (!email) return provider;
 	const [user, domain] = email.split("@");
 	return `${provider} (${(user ?? "").slice(0, 1)}***@${(domain ?? "").slice(0, 1)}***)`
@@ -84,7 +87,7 @@ export async function collectAccounts(
 	let auth: Record<string, unknown> = {};
 	try {
 		const raw = await readFile(join(dir, "auth.json"), "utf8");
-		if (Buffer.byteLength(raw) > 2 * 1024 * 1024)
+		if (Buffer.byteLength(raw) > MAX_JSON_BYTES)
 			throw new Error("Auth file too large");
 		auth = record(JSON.parse(raw));
 	} catch (error) {
@@ -99,9 +102,9 @@ export async function collectAccounts(
 		};
 		const identity = identityOf(credential);
 		const account: Account = {
-			id: id(info.providerId, identity),
+			id: buildAccountId(info.providerId, identity),
 			provider: info.providerId,
-			label: label(info.providerId, text(credential.email)),
+			label: formatMaskedAccountLabel(info.providerId, text(credential.email)),
 			credentialType: info.type,
 		};
 		if (
@@ -125,7 +128,7 @@ export async function collectAccounts(
 				// Host resolution can refresh credentials. A concurrent account switch must
 				// not attribute the newly resolved token to the previously inventoried ID.
 				const latestRaw = await readFile(join(dir, "auth.json"), "utf8");
-				if (Buffer.byteLength(latestRaw) > 2 * 1024 * 1024)
+				if (Buffer.byteLength(latestRaw) > MAX_JSON_BYTES)
 					throw new Error("Auth file too large");
 				const latest = record(record(JSON.parse(latestRaw))[info.providerId]);
 				if (latest.type !== "oauth" || identityOf(latest) !== identity)
@@ -147,10 +150,7 @@ export async function collectAccounts(
 						account.token = authorization.slice(7);
 				}
 				account.accountId = text(credential.accountId);
-				if (
-					info.providerId === "antigravity" ||
-					info.providerId === "google-antigravity"
-				) {
+				if (isAntigravityProvider(info.providerId)) {
 					const parsed = record(JSON.parse(account.token ?? "{}"));
 					account.token = text(parsed.token);
 					account.projectId = text(parsed.projectId);
@@ -167,7 +167,7 @@ export async function collectAccounts(
 	// Linked token renewal is delegated to the registered provider, never account switching.
 	try {
 		const raw = await readFile(join(dir, "antigravity-accounts.json"), "utf8");
-		if (Buffer.byteLength(raw) > 2 * 1024 * 1024)
+		if (Buffer.byteLength(raw) > MAX_JSON_BYTES)
 			throw new Error("Account metadata too large");
 		const parsed = record(JSON.parse(raw));
 		if (
@@ -181,7 +181,7 @@ export async function collectAccounts(
 			for (const [key, v] of Object.entries(record(parsed.accounts))) {
 				const a = record(v),
 					identity = text(a.email) ?? text(a.accountId) ?? key;
-				const accountId = id("antigravity", identity);
+				const accountId = buildAccountId("antigravity", identity);
 				if (accounts.has(accountId)) continue;
 				signal.throwIfAborted();
 				let current = a;
@@ -195,7 +195,7 @@ export async function collectAccounts(
 				accounts.set(accountId, {
 					id: accountId,
 					provider: "antigravity",
-					label: label("antigravity", text(a.email)),
+					label: formatMaskedAccountLabel("antigravity", text(a.email)),
 					credentialType: "oauth",
 					token: unavailable ? undefined : text(current.access),
 					projectId: text(current.projectId),

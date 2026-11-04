@@ -6,7 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { OAuthCredential } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
-import { record } from "./providers.ts";
+import { MAX_JSON_BYTES, record, nonEmptyText as text } from "./providers.ts";
 
 type Saved = Record<string, unknown>;
 type Renewal = { account: Saved } | { reason: string };
@@ -16,9 +16,6 @@ const lockFs = { ...nodeFs };
 const failures = new Map<string, number>();
 const failed =
 	"Linked Pi Antigravity token refresh failed; retry after one minute or reauthenticate this account in pi-antigravity.";
-function text(v: unknown): string | undefined {
-	return typeof v === "string" && v.length > 0 ? v : undefined;
-}
 export function needsLinkedRefresh(account: Saved): boolean {
 	return (
 		!text(account.access) ||
@@ -32,10 +29,10 @@ async function readPrivate(
 	optional = false,
 ): Promise<string | undefined> {
 	try {
-		if ((await stat(path)).size > 2 * 1024 * 1024)
+		if ((await stat(path)).size > MAX_JSON_BYTES)
 			throw new Error("Account file too large");
 		const raw = await readFile(path, "utf8");
-		if (Buffer.byteLength(raw) > 2 * 1024 * 1024)
+		if (Buffer.byteLength(raw) > MAX_JSON_BYTES)
 			throw new Error("Account file too large");
 		return raw;
 	} catch (error) {

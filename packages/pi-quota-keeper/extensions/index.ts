@@ -1,44 +1,25 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	type ExtensionAPI,
 	type ExtensionContext,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-import { Check } from "typebox/value";
 import { collectAccounts } from "./accounts.ts";
 import { formatQuotaCommand, parseQuotaArgs, quotaUsage } from "./commands.ts";
-import { Owner, readState, type State, writeState } from "./coordination.ts";
+import {
+	defaultQuotaConfig,
+	executeQuotaConfigCommand,
+	Owner,
+	type QuotaKeeperConfig,
+	readQuotaConfig,
+	readState,
+	type State,
+	writeState,
+} from "./coordination.ts";
 import { queryQuota } from "./providers.ts";
 import { dueActivation } from "./schedule.ts";
 import { sendWakeup, withWakeup } from "./wakeups.ts";
-
-const configSchema = Type.Object(
-	{
-		pollIntervalMs: Type.Optional(
-			Type.Integer({ minimum: 10000, maximum: 86400000 }),
-		),
-		mode: Type.Optional(
-			Type.Union([Type.Literal("reset"), Type.Literal("fixed")]),
-		),
-		delayMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 86400000 })),
-		enabledAccounts: Type.Optional(
-			Type.Array(Type.String(), { maxItems: 100 }),
-		),
-		models: Type.Optional(Type.Record(Type.String(), Type.String())),
-		resetWindows: Type.Optional(Type.Record(Type.String(), Type.String())),
-	},
-	{ additionalProperties: false },
-);
-const defaults = {
-	pollIntervalMs: 60000,
-	mode: "reset" as "reset" | "fixed",
-	delayMs: 30000,
-	enabledAccounts: [] as string[],
-	models: {} as Record<string, string>,
-	resetWindows: {} as Record<string, string>,
-};
 
 export default function (pi: ExtensionAPI) {
 	let current: ExtensionContext | undefined, owner: Owner | undefined;
@@ -49,16 +30,24 @@ export default function (pi: ExtensionAPI) {
 		lastPoll = 0,
 		lastTick = 0;
 	let state: State = { version: 1, snapshots: [], ledger: {} };
-	let config = { ...defaults },
-		problem: string | undefined;
+	let config: QuotaKeeperConfig = {
+		...defaultQuotaConfig,
+		enabledAccounts: [],
+		models: {},
+		resetWindows: {},
+	};
+	let problem: string | undefined;
+	let lastStatusText: string | undefined;
+	let lastFollowerMtimeMs: number | undefined;
 	const dir = getAgentDir();
 	const show = () => {
-		if (current?.hasUI)
-			current.ui.setStatus(
-				"quota-keeper",
-				problem ??
-					`quota: ${owner?.active ? "owner" : "follower"} · ${state.snapshots.length} accounts · ${state.schedule?.mode ?? config.mode}`,
-			);
+		if (!current?.hasUI) return;
+		const nextStatus =
+			problem ??
+			`quota: ${owner?.active ? "owner" : "follower"} · ${state.snapshots.length} accounts · ${state.schedule?.mode ?? config.mode}`;
+		if (nextStatus === lastStatusText) return;
+		lastStatusText = nextStatus;
+		current.ui.setStatus("quota-keeper", nextStatus);
 	};
 	async function tick(forceRefresh = false) {
 		if (!current || !owner || abort.signal.aborted) return;
@@ -66,7 +55,17 @@ export default function (pi: ExtensionAPI) {
 			woke = now - lastTick > 30000;
 		lastTick = now;
 		if (!(await owner.acquire())) {
-			state = await readState(dir);
+			const stateFile = join(dir, "pi-quota-keeper-state.json");
+			const mtimeMs = await stat(stateFile)
+				.then((s) => s.mtimeMs)
+				.catch(() => -1);
+			if (
+				lastFollowerMtimeMs === undefined ||
+				lastFollowerMtimeMs !== mtimeMs
+			) {
+				state = await readState(dir);
+				lastFollowerMtimeMs = mtimeMs;
+			}
 			show();
 			return;
 		}
@@ -77,25 +76,7 @@ export default function (pi: ExtensionAPI) {
 			now - lastPoll >= config.pollIntervalMs ||
 			!lastPoll
 		) {
-			try {
-				const raw: unknown = JSON.parse(
-					await readFile(join(dir, "pi-quota-keeper.json"), "utf8"),
-				);
-				if (!Check(configSchema, raw)) throw new Error("Invalid configuration");
-				config = { ...defaults, ...raw };
-			} catch (error) {
-				if (
-					!(
-						error instanceof Error &&
-						"code" in error &&
-						error.code === "ENOENT"
-					)
-				)
-					throw new Error(
-						"Invalid/unreadable pi-quota-keeper.json; maintenance paused.",
-					);
-				config = { ...defaults };
-			}
+			config = await readQuotaConfig(dir);
 			// A takeover must load the previous owner's intent ledger before any request.
 			state = await readState(dir);
 			state.schedule = {
@@ -124,6 +105,7 @@ export default function (pi: ExtensionAPI) {
 			show();
 			return;
 		}
+		const ledgerBefore = JSON.stringify(state.ledger);
 		for (const snapshot of state.snapshots) {
 			if (abort.signal.aborted || !owner.active) return;
 			if (Date.now() - snapshot.fetchedAt > config.pollIntervalMs * 2) continue;
@@ -173,7 +155,9 @@ export default function (pi: ExtensionAPI) {
 			await writeState(dir, state);
 			lastPoll = 0;
 		}
-		await writeState(dir, state);
+		if (JSON.stringify(state.ledger) !== ledgerBefore) {
+			await writeState(dir, state);
+		}
 		problem = undefined;
 		show();
 	}
@@ -224,6 +208,8 @@ export default function (pi: ExtensionAPI) {
 		await busy;
 		await owner?.close();
 		owner = undefined;
+		lastStatusText = undefined;
+		lastFollowerMtimeMs = undefined;
 		current = undefined;
 	}
 	pi.on("session_start", async (_event, ctx) => {
@@ -238,17 +224,52 @@ export default function (pi: ExtensionAPI) {
 		owner = new Owner(dir, () => refreshNow(signal));
 		launch();
 		timer = setInterval(launch, 1000);
+		timer.unref?.();
 	});
 	pi.on("session_shutdown", stop);
 	pi.registerCommand("quota", {
 		description:
-			"View quotas, list account IDs, select an account, or refresh through the owner",
+			"View quotas, list account IDs, select an account, enable/disable wake-ups, update config, or refresh through the owner",
 		handler: async (args, ctx) => {
 			const command = parseQuotaArgs(args);
 			if (command.kind === "usage") {
 				ctx.ui.notify(quotaUsage, "info");
 				return;
 			}
+			if (
+				command.kind === "enable" ||
+				command.kind === "disable" ||
+				command.kind === "config"
+			) {
+				const res = await executeQuotaConfigCommand(dir, command);
+				if (!res.ok) {
+					ctx.ui.notify(res.error, "error");
+					return;
+				}
+				if (!res.mutated) {
+					ctx.ui.notify(res.message, "info");
+					return;
+				}
+				config = res.config;
+				let synced = false;
+				try {
+					await owner?.acquire();
+					synced = (await owner?.requestRefresh(abort.signal)) ?? false;
+					if (synced) {
+						state = await readState(dir);
+						lastFollowerMtimeMs = undefined;
+					}
+				} catch {
+					synced = false;
+				}
+				show();
+				ctx.ui.notify(
+					`${res.message}${synced ? " Owner state refreshed." : " Saved; owner will apply on next poll."}`,
+					"info",
+				);
+				return;
+			}
+
 			let refreshed = false;
 			if (command.kind === "refresh") {
 				try {

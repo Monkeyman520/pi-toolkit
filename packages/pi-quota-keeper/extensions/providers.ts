@@ -40,6 +40,16 @@ export interface Snapshot extends QuotaData {
 	reason?: string;
 	fetchedAt: number;
 }
+export const MAX_JSON_BYTES = 2 * 1024 * 1024;
+export function nonEmptyText(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+export function isAntigravityProvider(provider: string): boolean {
+	return provider === "antigravity" || provider === "google-antigravity";
+}
+export function isCodexProvider(provider: string): boolean {
+	return provider === "openai" || provider === "openai-codex";
+}
 export function record(value: unknown): Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
 		? (value as Record<string, unknown>)
@@ -116,7 +126,7 @@ export function parseQuota(provider: string, data: unknown): QuotaData {
 				...(shared ? { shared: true } : {}),
 			});
 	};
-	if (provider === "antigravity" || provider === "google-antigravity") {
+	if (isAntigravityProvider(provider)) {
 		const fraction = (value: unknown) =>
 			typeof value === "number" ? value * 100 : undefined;
 		const buckets = (value: unknown, group = "shared pool") => {
@@ -202,7 +212,7 @@ export function parseQuota(provider: string, data: unknown): QuotaData {
 				},
 			};
 		}
-	} else if (provider === "openai" || provider === "openai-codex") {
+	} else if (isCodexProvider(provider)) {
 		const count = resetCount(
 			record(d.rate_limit_reset_credits).available_count,
 		);
@@ -246,7 +256,7 @@ export async function readJson(response: Response): Promise<unknown> {
 			const { done, value } = await reader.read();
 			if (done) break;
 			size += value.length;
-			if (size > 2 * 1024 * 1024) throw new Error("Quota response too large");
+			if (size > MAX_JSON_BYTES) throw new Error("Quota response too large");
 			chunks.push(value);
 		}
 	} finally {
@@ -338,10 +348,7 @@ export async function queryQuota(
 		);
 	try {
 		let parsed: QuotaData;
-		if (
-			account.provider === "antigravity" ||
-			account.provider === "google-antigravity"
-		) {
+		if (isAntigravityProvider(account.provider)) {
 			if (!account.projectId)
 				return unavailable(
 					"Antigravity project ID unavailable; reauthenticate via pi-antigravity.",
@@ -384,8 +391,7 @@ export async function queryQuota(
 			parsed = parseQuota(account.provider, data);
 
 			if (
-				(account.provider === "openai" ||
-					account.provider === "openai-codex") &&
+				isCodexProvider(account.provider) &&
 				parsed.resetCredits &&
 				parsed.resetCredits.availableCount > 0
 			) {

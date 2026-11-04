@@ -1,4 +1,8 @@
-import type { Snapshot } from "./providers.ts";
+import {
+	isAntigravityProvider,
+	isCodexProvider,
+	type Snapshot,
+} from "./providers.ts";
 import type { ActivationConfig, Ledger } from "./schedule.ts";
 
 interface View {
@@ -34,7 +38,7 @@ function clean(text: string): string {
 		.replace(/\s+/g, " ")
 		.trim();
 }
-function duration(ms: number): string {
+function formatDuration(ms: number): string {
 	const seconds = Math.max(0, Math.ceil(ms / 1000));
 	if (seconds < 60) return `${seconds}s`;
 	let minutes = Math.floor(seconds / 60);
@@ -58,10 +62,10 @@ function validTime(value: number | undefined): value is number {
 		value <= 8.64e15
 	);
 }
-function utc(value: number): string {
+function formatUtcTimestamp(value: number): string {
 	return validTime(value) ? new Date(value).toISOString() : "unknown";
 }
-function title(s: Snapshot): string {
+function formatSnapshotTitle(s: Snapshot): string {
 	const name = providers.get(s.provider) ?? clean(s.provider);
 	const label = clean(s.label);
 	if (!label || label === s.provider || label === name) return name;
@@ -69,7 +73,7 @@ function title(s: Snapshot): string {
 		return name + label.slice(s.provider.length);
 	return `${name} · ${label}`;
 }
-function failure(s: Snapshot, detailed: boolean): string {
+function formatFailureReason(s: Snapshot, detailed: boolean): string {
 	const reason = clean(s.reason ?? "Quota information unavailable.");
 	const login = `/login ${clean(s.provider)}`;
 	const http = /^HTTP (\d{3})$/.exec(reason);
@@ -86,10 +90,9 @@ function failure(s: Snapshot, detailed: boolean): string {
 	if (reason.startsWith("Linked Pi Antigravity account token expired"))
 		return "Saved token expired. Refresh this account using pi-antigravity.";
 	if (reason.startsWith("Quota request failed")) {
-		const hint =
-			s.provider === "antigravity" || s.provider === "google-antigravity"
-				? " Try /antigravity.doctor."
-				: "";
+		const hint = isAntigravityProvider(s.provider)
+			? " Try /antigravity.doctor."
+			: "";
 		return `Request failed (network, access, timeout, or response format).${hint}`;
 	}
 	if (
@@ -128,11 +131,11 @@ function resetExpiryLines(
 			lines.push(`    ${count} ${unit}: expiry unknown`);
 		else if (expiry <= now)
 			lines.push(
-				`    ${count} ${unit} expired ${utc(expiry)} (${duration(now - expiry)} ago)`,
+				`    ${count} ${unit} expired ${formatUtcTimestamp(expiry)} (${formatDuration(now - expiry)} ago)`,
 			);
 		else
 			lines.push(
-				`    ${count} ${unit} expire${count === 1 ? "s" : ""} ${utc(expiry)} (in ${duration(expiry - now)})`,
+				`    ${count} ${unit} expire${count === 1 ? "s" : ""} ${formatUtcTimestamp(expiry)} (in ${formatDuration(expiry - now)})`,
 			);
 	}
 	if (missing < 0)
@@ -141,7 +144,7 @@ function resetExpiryLines(
 		);
 	return lines;
 }
-function percentage(value: number | undefined): string {
+function formatPercentageBar(value: number | undefined): string {
 	if (
 		value === undefined ||
 		!Number.isFinite(value) ||
@@ -162,7 +165,7 @@ export function formatQuotaView(view: View): string[] {
 	const delay =
 		view.schedule.delayMs < 1000
 			? `${view.schedule.delayMs}ms`
-			: duration(view.schedule.delayMs);
+			: formatDuration(view.schedule.delayMs);
 	const lines = [
 		`Quota Keeper · ${view.snapshots.length} accounts · ${available} available · ${view.snapshots.length - available} unavailable`,
 		`${view.owner ? "Owner" : "Follower"} · ${view.schedule.mode === "reset" ? `reset +${delay}` : "every 5h"}`,
@@ -180,13 +183,17 @@ export function formatQuotaView(view: View): string[] {
 	for (const s of ordered) {
 		lines.push(
 			"",
-			`${s.status === "available" ? "✓" : "!"} ${title(s)}${s.status === "unavailable" ? " · Unavailable" : ""}`,
+			`${s.status === "available" ? "✓" : "!"} ${formatSnapshotTitle(s)}${s.status === "unavailable" ? " · Unavailable" : ""}`,
 		);
 		if (detailed)
-			lines.push(`  ID: ${clean(s.id)}`, `  Checked: ${utc(s.fetchedAt)}`);
-		if (s.status === "unavailable") lines.push(`  ${failure(s, detailed)}`);
+			lines.push(
+				`  ID: ${clean(s.id)}`,
+				`  Checked: ${formatUtcTimestamp(s.fetchedAt)}`,
+			);
+		if (s.status === "unavailable")
+			lines.push(`  ${formatFailureReason(s, detailed)}`);
 		else {
-			if (s.provider === "openai" || s.provider === "openai-codex") {
+			if (isCodexProvider(s.provider)) {
 				lines.push(
 					`  Rate-limit resets: ${s.resetCredits === undefined ? "unknown (not reported)" : `${s.resetCredits.availableCount} available`}`,
 				);
@@ -201,13 +208,13 @@ export function formatQuotaView(view: View): string[] {
 					? "reset unknown"
 					: w.resetAt <= now
 						? "reset due"
-						: `resets in ${duration(w.resetAt - now)}`;
+						: `resets in ${formatDuration(w.resetAt - now)}`;
 				lines.push(
-					`  ${label.padEnd(10)} ${percentage(w.remainingPercent)} · ${reset}${w.shared ? " · shared pool" : ""}`,
+					`  ${label.padEnd(10)} ${formatPercentageBar(w.remainingPercent)} · ${reset}${w.shared ? " · shared pool" : ""}`,
 				);
 				if (detailed)
 					lines.push(
-						`    Reset: ${w.resetAt === undefined ? "unknown" : utc(w.resetAt)}`,
+						`    Reset: ${w.resetAt === undefined ? "unknown" : formatUtcTimestamp(w.resetAt)}`,
 					);
 			}
 			if (visible.length < s.windows.length)
@@ -251,7 +258,7 @@ export function formatQuotaView(view: View): string[] {
 	if (checked.length)
 		lines.push(
 			"",
-			`Latest check ${duration(Math.max(0, now - Math.max(...checked)))} ago`,
+			`Latest check ${formatDuration(Math.max(0, now - Math.max(...checked)))} ago`,
 		);
 	if (!detailed)
 		lines.push(

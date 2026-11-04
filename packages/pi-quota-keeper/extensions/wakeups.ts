@@ -4,6 +4,8 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	type Account,
 	antigravityHeaders,
+	isCodexProvider,
+	isAntigravityProvider as isGoogle,
 	readJson,
 	record,
 	type Snapshot,
@@ -17,9 +19,6 @@ const nativeProviders = new Set([
 	"github-copilot",
 	"xai",
 ]);
-function isGoogle(provider: string): boolean {
-	return provider === "antigravity" || provider === "google-antigravity";
-}
 function canWake(account: Account): boolean {
 	if (account.credentialType !== "oauth" || account.unavailable) return false;
 	if (isGoogle(account.provider))
@@ -162,10 +161,7 @@ export async function sendWakeup(
 		if (!provider || !auth)
 			return "Wake-up blocked: registered provider or pinned model auth unavailable.";
 		const headers = { ...auth.headers };
-		if (
-			(account.provider === "openai" || account.provider === "openai-codex") &&
-			account.accountId
-		)
+		if (isCodexProvider(account.provider) && account.accountId)
 			headers["ChatGPT-Account-Id"] = account.accountId;
 		// Discard static credential headers; the account's resolved auth must win.
 		const modelHeaders = Object.fromEntries(

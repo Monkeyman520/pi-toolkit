@@ -2,7 +2,15 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Owner, readState, writeState } from "../extensions/coordination.ts";
+import {
+	defaultQuotaConfig,
+	executeQuotaConfigCommand,
+	Owner,
+	readQuotaConfig,
+	readState,
+	writeQuotaConfig,
+	writeState,
+} from "../extensions/coordination.ts";
 import type { Snapshot } from "../extensions/providers.ts";
 import {
 	type ActivationConfig,
@@ -64,6 +72,60 @@ describe("OS-owned maintenance", () => {
 		});
 		await writeFile(join(d, "pi-quota-keeper-state.json"), "{corrupt");
 		await expect(readState(d)).rejects.toThrow("refusing activation");
+	});
+	it("atomically reads and writes pi-quota-keeper.json and rejects invalid schema values", async () => {
+		const d = await scope();
+		expect(await readQuotaConfig(d)).toEqual(defaultQuotaConfig);
+		await writeQuotaConfig(d, {
+			...defaultQuotaConfig,
+			delayMs: 45000,
+			enabledAccounts: ["anthropic:acct1"],
+			models: { "anthropic:acct1": "claude-sonnet-4-5" },
+		});
+		const loaded = await readQuotaConfig(d);
+		expect(loaded.delayMs).toBe(45000);
+		expect(loaded.enabledAccounts).toEqual(["anthropic:acct1"]);
+		expect(loaded.models).toEqual({ "anthropic:acct1": "claude-sonnet-4-5" });
+		await expect(
+			writeQuotaConfig(d, { ...defaultQuotaConfig, pollIntervalMs: 100 }),
+		).rejects.toThrow();
+
+		const en = await executeQuotaConfigCommand(d, {
+			kind: "enable",
+			id: "ag:acct2",
+			model: "gemini-fixture",
+			resetWindow: "gemini-5h",
+		});
+		expect(en.ok).toBe(true);
+		if (en.ok) {
+			expect(en.mutated).toBe(true);
+			expect(en.config.enabledAccounts).toContain("ag:acct2");
+			expect(en.config.models["ag:acct2"]).toBe("gemini-fixture");
+			expect(en.config.resetWindows["ag:acct2"]).toBe("gemini-5h");
+		}
+
+		const dis = await executeQuotaConfigCommand(d, {
+			kind: "disable",
+			id: "anthropic:acct1",
+		});
+		expect(dis.ok).toBe(true);
+		if (dis.ok) {
+			expect(dis.config.enabledAccounts).not.toContain("anthropic:acct1");
+		}
+
+		const badMode = await executeQuotaConfigCommand(d, {
+			kind: "config",
+			key: "mode",
+			value: "invalid",
+		});
+		expect(badMode.ok).toBe(false);
+
+		const badRange = await executeQuotaConfigCommand(d, {
+			kind: "config",
+			key: "pollIntervalMs",
+			value: "50",
+		});
+		expect(badRange.ok).toBe(false);
 	});
 });
 

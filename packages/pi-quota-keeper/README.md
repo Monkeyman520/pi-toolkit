@@ -24,14 +24,17 @@ Runtime imports use Node, host-provided peers, and the declared dependency `prop
 
 ## Commands
 
-| Command                       | Result                                                                                        |
-| ----------------------------- | --------------------------------------------------------------------------------------------- |
-| `/quota`                      | Compact cached quota for all accounts                                                         |
-| `/quota details`              | Detailed cached quota, including exact UTC reset-credit expiries                              |
-| `/quota list`                 | Copyable account IDs, masked account labels, and type (provider / OAuth, API key, or unknown) |
-| `/quota <account-id>`         | Only that exact account's compact cached quota                                                |
-| `/quota <account-id> details` | Detailed quota for that exact account; `/quota details <account-id>` is also accepted         |
-| `/quota refresh`              | Force an owner-only fresh poll, bypassing the configured interval, then show its results      |
+| Command                               | Result                                                                                                                  |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `/quota`                              | Compact cached quota for all accounts                                                                                   |
+| `/quota details`                      | Detailed cached quota, including exact UTC reset-credit expiries                                                        |
+| `/quota list`                         | Copyable account IDs, masked account labels, and type (provider / OAuth, API key, or unknown)                           |
+| `/quota <account-id>`                 | Only that exact account's compact cached quota                                                                          |
+| `/quota <account-id> details`         | Detailed quota for that exact account; `/quota details <account-id>` is also accepted                                   |
+| `/quota refresh`                      | Force an owner-only fresh poll, bypassing the configured interval, then show its results                                |
+| `/quota enable <id> <model> [window]` | Persist account wake-up opt-in and model (plus optional reset window) in `pi-quota-keeper.json` and refresh owner state |
+| `/quota disable <id>`                 | Remove account from `enabledAccounts` in `pi-quota-keeper.json` and refresh owner state                                 |
+| `/quota config [key [value]]`         | View or update `mode` (`reset`\|`fixed`), `delayMs` (`delay`), or `pollIntervalMs` (`poll`) in `pi-quota-keeper.json`   |
 
 IDs come from `/quota list` and are matched exactly; unknown/partial IDs never fall back to other accounts. List/ID/details views do not trigger extra provider requests. Old caches with no credential-type metadata show unknown until refreshed. Lists are capped at 196 entries with an explicit truncation notice.
 

@@ -1,4 +1,9 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+	createHash,
+	randomBytes,
+	randomUUID,
+	timingSafeEqual,
+} from "node:crypto";
 import {
 	mkdir,
 	readFile,
@@ -17,7 +22,7 @@ import {
 import { join } from "node:path";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import type { Snapshot } from "./providers.ts";
+import { MAX_JSON_BYTES, type Snapshot } from "./providers.ts";
 import type { Ledger } from "./schedule.ts";
 
 const windowSchema = Type.Object(
@@ -117,10 +122,208 @@ export interface State {
 		enabledAccounts: string[];
 	};
 }
+
+export const configSchema = Type.Object(
+	{
+		pollIntervalMs: Type.Optional(
+			Type.Integer({ minimum: 10000, maximum: 86400000 }),
+		),
+		mode: Type.Optional(
+			Type.Union([Type.Literal("reset"), Type.Literal("fixed")]),
+		),
+		delayMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 86400000 })),
+		enabledAccounts: Type.Optional(
+			Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
+		),
+		models: Type.Optional(Type.Record(Type.String(), Type.String())),
+		resetWindows: Type.Optional(Type.Record(Type.String(), Type.String())),
+	},
+	{ additionalProperties: false },
+);
+
+export interface QuotaKeeperConfig {
+	pollIntervalMs: number;
+	mode: "reset" | "fixed";
+	delayMs: number;
+	enabledAccounts: string[];
+	models: Record<string, string>;
+	resetWindows: Record<string, string>;
+}
+
+export const defaultQuotaConfig: QuotaKeeperConfig = {
+	pollIntervalMs: 60000,
+	mode: "reset",
+	delayMs: 30000,
+	enabledAccounts: [],
+	models: {},
+	resetWindows: {},
+};
+
+export async function readQuotaConfig(dir: string): Promise<QuotaKeeperConfig> {
+	try {
+		const rawText = await readFile(join(dir, "pi-quota-keeper.json"), "utf8");
+		if (Buffer.byteLength(rawText) > MAX_JSON_BYTES) {
+			throw new Error("Configuration too large");
+		}
+		const raw: unknown = JSON.parse(rawText);
+		if (!Check(configSchema, raw)) throw new Error("Invalid configuration");
+		return {
+			pollIntervalMs: raw.pollIntervalMs ?? defaultQuotaConfig.pollIntervalMs,
+			mode: raw.mode ?? defaultQuotaConfig.mode,
+			delayMs: raw.delayMs ?? defaultQuotaConfig.delayMs,
+			enabledAccounts: [...(raw.enabledAccounts ?? [])],
+			models: { ...(raw.models ?? {}) },
+			resetWindows: { ...(raw.resetWindows ?? {}) },
+		};
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+			return {
+				...defaultQuotaConfig,
+				enabledAccounts: [],
+				models: {},
+				resetWindows: {},
+			};
+		}
+		throw new Error(
+			"Invalid/unreadable pi-quota-keeper.json; maintenance paused.",
+		);
+	}
+}
+
+export async function writeQuotaConfig(
+	dir: string,
+	config: QuotaKeeperConfig,
+): Promise<void> {
+	if (!Check(configSchema, config)) {
+		throw new Error("Configuration does not match schema.");
+	}
+	await mkdir(dir, { recursive: true, mode: 0o700 });
+	const temp = join(dir, `.quota-cfg-${process.pid}-${randomUUID()}.tmp`);
+	try {
+		await writeFile(temp, `${JSON.stringify(config, null, "\t")}\n`, {
+			encoding: "utf8",
+			mode: 0o600,
+			flag: "wx",
+		});
+		await rename(temp, join(dir, "pi-quota-keeper.json"));
+	} catch (error) {
+		await unlink(temp).catch(() => {});
+		throw error;
+	}
+}
+
+export async function executeQuotaConfigCommand(
+	dir: string,
+	command:
+		| { kind: "enable"; id: string; model: string; resetWindow?: string }
+		| { kind: "disable"; id: string }
+		| {
+				kind: "config";
+				key?: "mode" | "delayMs" | "pollIntervalMs";
+				value?: string;
+		  },
+): Promise<
+	| {
+			ok: true;
+			mutated: boolean;
+			config: QuotaKeeperConfig;
+			message: string;
+	  }
+	| { ok: false; error: string }
+> {
+	const configPath = join(dir, "pi-quota-keeper.json");
+	let currentCfg: QuotaKeeperConfig;
+	try {
+		currentCfg = await readQuotaConfig(dir);
+	} catch (error) {
+		return {
+			ok: false,
+			error:
+				error instanceof Error
+					? error.message
+					: "Invalid/unreadable pi-quota-keeper.json.",
+		};
+	}
+
+	if (command.kind === "config") {
+		if (!command.key) {
+			return {
+				ok: true,
+				mutated: false,
+				config: currentCfg,
+				message: `Quota Keeper Config (${configPath})\nActive: ${JSON.stringify(currentCfg)}\nDefaults: ${JSON.stringify(defaultQuotaConfig)}`,
+			};
+		}
+		if (command.value === undefined) {
+			return {
+				ok: true,
+				mutated: false,
+				config: currentCfg,
+				message: `${command.key} = ${JSON.stringify(currentCfg[command.key])} (config: ${configPath})`,
+			};
+		}
+		if (command.key === "mode") {
+			if (command.value !== "reset" && command.value !== "fixed") {
+				return {
+					ok: false,
+					error: 'Invalid mode. Expected "reset" or "fixed".',
+				};
+			}
+			currentCfg.mode = command.value;
+		} else {
+			if (!/^\d+$/.test(command.value)) {
+				return {
+					ok: false,
+					error: `Invalid integer value "${command.value}" for ${command.key}.`,
+				};
+			}
+			currentCfg[command.key] = Number.parseInt(command.value, 10);
+		}
+	} else if (command.kind === "enable") {
+		if (!currentCfg.enabledAccounts.includes(command.id)) {
+			currentCfg.enabledAccounts.push(command.id);
+		}
+		currentCfg.models[command.id] = command.model;
+		if (command.resetWindow) {
+			currentCfg.resetWindows[command.id] = command.resetWindow;
+		}
+	} else if (command.kind === "disable") {
+		currentCfg.enabledAccounts = currentCfg.enabledAccounts.filter(
+			(id) => id !== command.id,
+		);
+	}
+
+	try {
+		await writeQuotaConfig(dir, currentCfg);
+	} catch {
+		return {
+			ok: false,
+			error:
+				"Configuration update rejected: value out of allowed schema range.",
+		};
+	}
+
+	const summary =
+		command.kind === "enable"
+			? `Enabled wake-up for ${command.id} (model=${command.model}${command.resetWindow ? `, resetWindow=${command.resetWindow}` : ""})`
+			: command.kind === "disable"
+				? `Disabled wake-up for ${command.id}`
+				: command.key
+					? `Updated ${command.key}=${JSON.stringify(currentCfg[command.key])}`
+					: "Updated configuration";
+
+	return {
+		ok: true,
+		mutated: true,
+		config: currentCfg,
+		message: `${summary} in ${configPath}.`,
+	};
+}
+
 export async function readState(dir: string): Promise<State> {
 	try {
 		const raw = await readFile(join(dir, "pi-quota-keeper-state.json"), "utf8");
-		if (Buffer.byteLength(raw) > 2 * 1024 * 1024)
+		if (Buffer.byteLength(raw) > MAX_JSON_BYTES)
 			throw new Error("State too large");
 		const data: unknown = JSON.parse(raw);
 		if (!Check(stateSchema, data)) throw new Error("Invalid state");
@@ -183,19 +386,10 @@ export class Owner {
 				)
 				.digest("hex");
 			if (process.platform === "win32") {
-				const slash = String.fromCharCode(92);
 				return {
 					scope,
 					listen: {
-						path:
-							slash +
-							slash +
-							"." +
-							slash +
-							"pipe" +
-							slash +
-							"pi-quota-keeper-" +
-							scope,
+						path: `\\\\.\\pipe\\pi-quota-keeper-${scope}`,
 						exclusive: true,
 					},
 				};
@@ -252,9 +446,14 @@ export class Owner {
 				socket.end(scope);
 				return;
 			}
+			const expected = this.refreshSecret
+				? Buffer.from(`refresh ${scope} ${this.refreshSecret}`, "utf8")
+				: undefined;
+			const actual = Buffer.from(request.trim(), "utf8");
 			if (
-				!this.refreshSecret ||
-				request.trim() !== `refresh ${scope} ${this.refreshSecret}`
+				!expected ||
+				expected.byteLength !== actual.byteLength ||
+				!timingSafeEqual(expected, actual)
 			) {
 				socket.end("rejected");
 				return;

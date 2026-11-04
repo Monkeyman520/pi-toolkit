@@ -38,6 +38,29 @@ describe("quota command contract", () => {
 		[" details ", { kind: "view", detailed: true }],
 		["list", { kind: "list" }],
 		["refresh", { kind: "refresh" }],
+		["help", { kind: "usage" }],
+		["--help", { kind: "usage" }],
+		[
+			"enable anthropic:one claude-sonnet-4-5",
+			{ kind: "enable", id: "anthropic:one", model: "claude-sonnet-4-5" },
+		],
+		[
+			"enable ag:one gemini-fixture gemini-5h",
+			{
+				kind: "enable",
+				id: "ag:one",
+				model: "gemini-fixture",
+				resetWindow: "gemini-5h",
+			},
+		],
+		["disable anthropic:one", { kind: "disable", id: "anthropic:one" }],
+		["config", { kind: "config" }],
+		["config mode fixed", { kind: "config", key: "mode", value: "fixed" }],
+		["config delay 15000", { kind: "config", key: "delayMs", value: "15000" }],
+		[
+			"config poll 120000",
+			{ kind: "config", key: "pollIntervalMs", value: "120000" },
+		],
 		["anthropic:one", { kind: "view", id: "anthropic:one", detailed: false }],
 		[
 			"anthropic:one details",
@@ -56,6 +79,11 @@ describe("quota command contract", () => {
 		"details details",
 		"list details",
 		"a b c",
+		"enable",
+		"enable anthropic:one",
+		"disable",
+		"enable list model",
+		"config unknown 1",
 	])("rejects ambiguous arguments %s", (args) => {
 		expect(parseQuotaArgs(args)).toEqual({ kind: "usage" });
 	});
