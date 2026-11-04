@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import {
 	type ExtensionCommandContext,
@@ -31,6 +32,14 @@ import {
 	type SessionMetrics,
 } from "./summarizer.ts";
 
+const MAX_SESSION_FILE_BYTES = 8 * 1024 * 1024;
+const ENRICH_CONCURRENCY = 16;
+
+function extractPrintableInput(data: string): string {
+	if (!data || data.includes("\u001b")) return "";
+	return data.replace(/\p{Cc}/gu, "");
+}
+
 export type BrowserResult =
 	| { type: "switch"; sessionPath: string; title: string }
 	| { type: "summarize" }
@@ -53,6 +62,7 @@ export function enrichSessionInfo(
 	options?: {
 		currentSessionFile?: string;
 		homeDir?: string;
+		rawContent?: string;
 	},
 ): EnrichedSessionItem {
 	const currentKey = normalizePathKey(options?.currentSessionFile);
@@ -62,7 +72,12 @@ export function enrichSessionInfo(
 	let header: SessionHeader | null = null;
 	let entries: SessionEntry[] = [];
 	try {
-		const fileEntries = parseSessionEntries(readFileSync(info.path, "utf8"));
+		const rawContent =
+			options?.rawContent ??
+			(statSync(info.path).size <= MAX_SESSION_FILE_BYTES
+				? readFileSync(info.path, "utf8")
+				: "");
+		const fileEntries = rawContent ? parseSessionEntries(rawContent) : [];
 		for (const entry of fileEntries) {
 			if (entry.type === "session") {
 				header = entry;
@@ -145,12 +160,29 @@ export async function loadEnrichedSessions(options: {
 		rawList = [];
 	}
 
-	const enriched = rawList.map((info) =>
-		enrichSessionInfo(info, {
-			currentSessionFile: options.currentSessionFile,
-			homeDir: options.homeDir,
-		}),
-	);
+	const enriched: EnrichedSessionItem[] = [];
+	for (let i = 0; i < rawList.length; i += ENRICH_CONCURRENCY) {
+		const batch = rawList.slice(i, i + ENRICH_CONCURRENCY);
+		const batchItems = await Promise.all(
+			batch.map(async (info) => {
+				let rawContent = "";
+				try {
+					const fileStat = await stat(info.path);
+					if (fileStat.size <= MAX_SESSION_FILE_BYTES) {
+						rawContent = await readFile(info.path, "utf8");
+					}
+				} catch {
+					rawContent = "";
+				}
+				return enrichSessionInfo(info, {
+					currentSessionFile: options.currentSessionFile,
+					homeDir: options.homeDir,
+					rawContent,
+				});
+			}),
+		);
+		enriched.push(...batchItems);
+	}
 
 	return enriched.sort(
 		(a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
@@ -256,8 +288,9 @@ export async function openPrettySessionBrowser(params: {
 					tui.requestRender();
 					return;
 				}
-				if (data.length === 1 && data >= " " && data !== "\u007f") {
-					renameDraft += data;
+				const printable = extractPrintableInput(data);
+				if (printable) {
+					renameDraft += printable;
 					tui.requestRender();
 				}
 				return;
@@ -276,6 +309,19 @@ export async function openPrettySessionBrowser(params: {
 				selectedIndex = Math.min(
 					Math.max(0, filtered.length - 1),
 					selectedIndex + 1,
+				);
+				tui.requestRender();
+				return;
+			}
+			if (matchesKey(data, Key.pageUp)) {
+				selectedIndex = Math.max(0, selectedIndex - maxVisible);
+				tui.requestRender();
+				return;
+			}
+			if (matchesKey(data, Key.pageDown)) {
+				selectedIndex = Math.min(
+					Math.max(0, filtered.length - 1),
+					selectedIndex + maxVisible,
 				);
 				tui.requestRender();
 				return;
@@ -318,8 +364,9 @@ export async function openPrettySessionBrowser(params: {
 				}
 				return;
 			}
-			if (data.length === 1 && data >= " " && data !== "\u007f") {
-				query += data;
+			const printable = extractPrintableInput(data);
+			if (printable) {
+				query += printable;
 				refreshFilter();
 			}
 		};

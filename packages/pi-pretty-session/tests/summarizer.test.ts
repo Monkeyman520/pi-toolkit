@@ -246,6 +246,42 @@ describe("summarizer & session metrics", () => {
 		expect(renamedExternally?.title).toBe("User Custom Name");
 		expect(renamedExternally?.source).toBe("manual");
 		expect(renamedExternally?.manualLocked).toBe(true);
+
+		const entriesWithControlChars: SessionEntry[] = [
+			...entries,
+			{
+				type: "custom",
+				id: "c2",
+				parentId: "e2",
+				timestamp: "2026-04-20T08:03:00.000Z",
+				customType: CUSTOM_ENTRY_TYPE,
+				data: {
+					version: 1,
+					title: "Evil\nTitle\u001b[31m",
+					description: "Line1\r\nLine2\u0007",
+					source: "llm",
+					manualLocked: false,
+					createdAt: "2026-04-20T08:00:00.000Z",
+					updatedAt: "2026-04-20T08:02:00.000Z",
+					turnCount: 1,
+					messageCount: 2,
+					contextTokens: 1550,
+					contextWindow: 100000,
+					contextPercent: 1.55,
+					summarizedAtTurn: 1,
+					summarizedAtTokens: 1550,
+					projectName: "proj\nname",
+					gitBranch: "main\u001b",
+				},
+			},
+		];
+		const sanitized = reconstructMetadata(entriesWithControlChars, undefined);
+		expect(sanitized?.title).toBe("Evil Title [31m");
+		expect(sanitized?.title).not.toContain("\u001b");
+		expect(sanitized?.description).toBe("Line1 Line2");
+		expect(sanitized?.description).not.toContain("\u0007");
+		expect(sanitized?.projectName).toBe("proj name");
+		expect(sanitized?.gitBranch).not.toContain("\u001b");
 	});
 
 	it("parses LLM JSON and falls back cleanly to heuristic summary on failure", async () => {

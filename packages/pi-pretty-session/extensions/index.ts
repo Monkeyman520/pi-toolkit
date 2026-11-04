@@ -45,9 +45,14 @@ export default function (pi: ExtensionAPI) {
 	let lastPluginSetTitle: string | undefined;
 	let summaryAbort: AbortController | undefined;
 	let watchTimer: ReturnType<typeof setInterval> | undefined;
+	let lastStatusLine: string | undefined;
+	let lastWidgetKey: string | undefined;
 
 	function setNativeSessionName(title: string) {
-		const sanitized = title.replace(/[\r\n]+/g, " ").trim();
+		const sanitized = title
+			.replace(/\p{Cc}/gu, " ")
+			.replace(/\s+/g, " ")
+			.trim();
 		if (!sanitized) return;
 		isApplyingPluginName = true;
 		lastPluginSetTitle = sanitized;
@@ -96,37 +101,46 @@ export default function (pi: ExtensionAPI) {
 		return { metrics, metadata };
 	}
 
-	function renderUI(ctx = currentCtx) {
+	function renderUI(
+		ctx = currentCtx,
+		precomputed?: {
+			metrics: SessionMetrics;
+			metadata: PrettySessionEntryData | undefined;
+		},
+	) {
 		if (!ctx?.hasUI) return;
-		const { metrics, metadata } = recomputeSessionState(ctx);
+		const { metrics, metadata } = precomputed ?? recomputeSessionState(ctx);
 		const config = configManager.config;
 
-		if (config.showStatus) {
-			ctx.ui.setStatus(
-				STATUS_KEY,
-				formatStatusLine({
+		const nextStatus = config.showStatus
+			? formatStatusLine({
 					meta: metadata,
 					metrics,
 					project: currentProject,
 					config,
-				}),
-			);
-		} else {
-			ctx.ui.setStatus(STATUS_KEY, undefined);
+				})
+			: undefined;
+		if (nextStatus !== lastStatusLine) {
+			lastStatusLine = nextStatus;
+			ctx.ui.setStatus(STATUS_KEY, nextStatus);
 		}
 
 		if (config.showWidget) {
-			ctx.ui.setWidget(
-				WIDGET_KEY,
-				formatWidgetLines({
-					meta: metadata,
-					metrics,
-					project: currentProject,
-					config,
-				}),
-				{ placement: config.widgetPlacement },
-			);
-		} else {
+			const widgetLines = formatWidgetLines({
+				meta: metadata,
+				metrics,
+				project: currentProject,
+				config,
+			});
+			const nextWidgetKey = `${config.widgetPlacement}:${widgetLines.join("\n")}`;
+			if (nextWidgetKey !== lastWidgetKey) {
+				lastWidgetKey = nextWidgetKey;
+				ctx.ui.setWidget(WIDGET_KEY, widgetLines, {
+					placement: config.widgetPlacement,
+				});
+			}
+		} else if (lastWidgetKey !== undefined) {
+			lastWidgetKey = undefined;
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 		}
 	}
@@ -210,7 +224,7 @@ export default function (pi: ExtensionAPI) {
 
 		pi.appendEntry(CUSTOM_ENTRY_TYPE, data);
 		currentMetadata = data;
-		renderUI(ctx);
+		renderUI(ctx, { metrics, metadata: data });
 		return data;
 	}
 
@@ -291,7 +305,7 @@ export default function (pi: ExtensionAPI) {
 				updateTitle: decision.updateTitle,
 			});
 		} else {
-			renderUI(ctx);
+			renderUI(ctx, { metrics, metadata });
 		}
 	}
 
@@ -302,6 +316,8 @@ export default function (pi: ExtensionAPI) {
 		}
 		summaryAbort?.abort();
 		summaryAbort = undefined;
+		lastStatusLine = undefined;
+		lastWidgetKey = undefined;
 		currentCtx = undefined;
 	}
 
@@ -310,8 +326,8 @@ export default function (pi: ExtensionAPI) {
 		currentCtx = ctx;
 		await syncConfig(ctx, true);
 		await ensureProjectInfo(ctx, true);
-		recomputeSessionState(ctx);
-		renderUI(ctx);
+		const state = recomputeSessionState(ctx);
+		renderUI(ctx, state);
 
 		watchTimer = setInterval(() => {
 			if (currentCtx) {
@@ -324,17 +340,19 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", stop);
 
 	pi.on("session_tree", async (_event, ctx) => {
+		summaryAbort?.abort();
+		summaryAbort = undefined;
 		currentCtx = ctx;
 		await syncConfig(ctx);
-		recomputeSessionState(ctx);
-		renderUI(ctx);
+		const state = recomputeSessionState(ctx);
+		renderUI(ctx, state);
 	});
 
 	pi.on("model_select", async (_event, ctx) => {
 		currentCtx = ctx;
 		await syncConfig(ctx);
-		recomputeSessionState(ctx);
-		renderUI(ctx);
+		const state = recomputeSessionState(ctx);
+		renderUI(ctx, state);
 	});
 
 	pi.on("session_info_changed", (event, ctx) => {
@@ -357,6 +375,8 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
+		summaryAbort?.abort();
+		summaryAbort = undefined;
 		const fallbackDesc =
 			metadata?.description ??
 			buildHeuristicSummary(
@@ -464,6 +484,8 @@ export default function (pi: ExtensionAPI) {
 						configManager.config.maxDescriptionLength,
 					).description;
 
+				summaryAbort?.abort();
+				summaryAbort = undefined;
 				const saved = persistMetadata(ctx, {
 					title,
 					description: desc,

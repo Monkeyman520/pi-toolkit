@@ -39,6 +39,8 @@ export interface ProjectInfo {
 	inspectedAt: number;
 }
 
+const MAX_MANIFEST_BYTES = 256 * 1024;
+
 const PRIORITY_SCRIPTS = [
 	"dev",
 	"start",
@@ -114,6 +116,18 @@ async function defaultExec(
 	}
 }
 
+async function readBoundedTextFile(path: string): Promise<string> {
+	const info = await stat(path);
+	if (!info.isFile() || info.size > MAX_MANIFEST_BYTES) {
+		throw new Error("Manifest missing or too large");
+	}
+	const content = await readFile(path, "utf8");
+	if (Buffer.byteLength(content) > MAX_MANIFEST_BYTES) {
+		throw new Error("Manifest too large");
+	}
+	return content;
+}
+
 async function directoryExists(path: string): Promise<boolean> {
 	try {
 		const info = await stat(path);
@@ -148,8 +162,9 @@ function extractTomlSectionValue(
 	const rest = content.slice(start);
 	const nextSection = /^\s*\[/m.exec(rest);
 	const body = nextSection ? rest.slice(0, nextSection.index) : rest;
+	const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, (m) => `\\${m}`);
 	const keyRegex = new RegExp(
-		`^\\s*${key}\\s*=\\s*["']([^"'\\r\\n]+)["']`,
+		`^\\s*${escapedKey}\\s*=\\s*["']([^"'\\r\\n]+)["']`,
 		"m",
 	);
 	return keyRegex.exec(body)?.[1]?.trim();
@@ -160,7 +175,7 @@ export async function inspectManifest(
 ): Promise<ProjectManifestInfo | undefined> {
 	// 1. package.json
 	try {
-		const raw = await readFile(join(cwd, "package.json"), "utf8");
+		const raw = await readBoundedTextFile(join(cwd, "package.json"));
 		const parsed: unknown = JSON.parse(raw);
 		if (parsed && typeof parsed === "object") {
 			const obj = parsed as Record<string, unknown>;
@@ -195,7 +210,7 @@ export async function inspectManifest(
 
 	// 2. pyproject.toml
 	try {
-		const raw = await readFile(join(cwd, "pyproject.toml"), "utf8");
+		const raw = await readBoundedTextFile(join(cwd, "pyproject.toml"));
 		const name =
 			extractTomlSectionValue(raw, /^\s*\[project\]/m, "name") ??
 			extractTomlSectionValue(raw, /^\s*\[tool\.poetry\]/m, "name");
@@ -217,7 +232,7 @@ export async function inspectManifest(
 
 	// 3. Cargo.toml
 	try {
-		const raw = await readFile(join(cwd, "Cargo.toml"), "utf8");
+		const raw = await readBoundedTextFile(join(cwd, "Cargo.toml"));
 		const name = extractTomlSectionValue(raw, /^\s*\[package\]/m, "name");
 		const version = extractTomlSectionValue(raw, /^\s*\[package\]/m, "version");
 		const workspaces = /^\s*\[workspace\]/m.test(raw);
@@ -235,7 +250,7 @@ export async function inspectManifest(
 
 	// 4. go.mod
 	try {
-		const raw = await readFile(join(cwd, "go.mod"), "utf8");
+		const raw = await readBoundedTextFile(join(cwd, "go.mod"));
 		const moduleMatch = /^\s*module\s+([^\s\r\n]+)/m.exec(raw);
 		const goMatch = /^\s*go\s+([^\s\r\n]+)/m.exec(raw);
 		return {

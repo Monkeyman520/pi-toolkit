@@ -280,11 +280,23 @@ export function reconstructMetadata(
 			entry.customType === CUSTOM_ENTRY_TYPE &&
 			isPrettySessionEntryData(entry.data)
 		) {
-			latest = { ...entry.data };
+			latest = {
+				...entry.data,
+				title: sanitizeSingleLine(entry.data.title, 120),
+				description: sanitizeSingleLine(entry.data.description, 280),
+				projectName: entry.data.projectName
+					? sanitizeSingleLine(entry.data.projectName, 80)
+					: undefined,
+				gitBranch: entry.data.gitBranch
+					? sanitizeSingleLine(entry.data.gitBranch, 80)
+					: undefined,
+			};
 		}
 	}
 
-	const normalizedName = currentSessionName?.trim() || undefined;
+	const normalizedName = currentSessionName
+		? sanitizeSingleLine(currentSessionName, 120) || undefined
+		: undefined;
 	if (latest) {
 		if (normalizedName && normalizedName !== latest.title) {
 			latest = {

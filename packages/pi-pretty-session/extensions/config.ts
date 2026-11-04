@@ -1,10 +1,19 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import {
+	mkdir,
+	readFile,
+	rename,
+	stat,
+	unlink,
+	writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 
 export const CONFIG_FILE_NAME = "pi-pretty-session.json";
+const MAX_CONFIG_BYTES = 1024 * 1024;
 
 export const configSchema = Type.Object(
 	{
@@ -148,7 +157,13 @@ export class ConfigManager {
 	async reloadIfChanged(force = false): Promise<ConfigReloadResult> {
 		try {
 			const fileStat = await stat(this.configPath);
+			if (fileStat.size > MAX_CONFIG_BYTES) {
+				throw new Error("Configuration file exceeds maximum size");
+			}
 			const rawText = await readFile(this.configPath, "utf8");
+			if (Buffer.byteLength(rawText) > MAX_CONFIG_BYTES) {
+				throw new Error("Configuration file exceeds maximum size");
+			}
 			if (
 				!force &&
 				this.lastMtimeMs === fileStat.mtimeMs &&
@@ -361,9 +376,24 @@ export class ConfigManager {
 	}
 
 	private async persistCurrent(): Promise<void> {
-		await mkdir(dirname(this.configPath), { recursive: true });
+		const dir = dirname(this.configPath);
+		await mkdir(dir, { recursive: true, mode: 0o700 });
 		const serialized = `${JSON.stringify(this.rawPersisted, null, "\t")}\n`;
-		await writeFile(this.configPath, serialized, "utf8");
+		const tempPath = join(
+			dir,
+			`.${CONFIG_FILE_NAME}.${process.pid}-${randomUUID()}.tmp`,
+		);
+		try {
+			await writeFile(tempPath, serialized, {
+				encoding: "utf8",
+				mode: 0o600,
+				flag: "wx",
+			});
+			await rename(tempPath, this.configPath);
+		} catch (error) {
+			await unlink(tempPath).catch(() => {});
+			throw error;
+		}
 		try {
 			const fileStat = await stat(this.configPath);
 			this.lastMtimeMs = fileStat.mtimeMs;
