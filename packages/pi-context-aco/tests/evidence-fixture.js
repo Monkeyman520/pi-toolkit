@@ -10,6 +10,10 @@ export default function fixture(pi) {
 					leaf: ctx.sessionManager.getLeafId(),
 					branch: ctx.sessionManager.getBranch(),
 					projection: ctx.sessionManager.buildSessionProjection().messages,
+					projectionSourceIds: ctx.sessionManager
+						.buildSessionProjection()
+						.entries.filter((e) => e.messages.length)
+						.map((e) => e.sourceEntry.id),
 				}),
 				"info",
 			);
@@ -59,19 +63,24 @@ export default function fixture(pi) {
 				: null;
 			const readSource =
 				last?.role === "user" && contentText.startsWith("READ_SOURCE:");
-			const reason = recall || readSource ? "toolUse" : "stop";
+			const repeated = last?.role === "user" && contentText === "V3_RESEARCH";
+			const reason = recall || readSource || repeated ? "toolUse" : "stop";
 			const message = {
 				role: "assistant",
 				api: model.api,
 				provider: model.provider,
 				model: model.id,
 				content:
-					recall || readSource
+					recall || readSource || repeated
 						? [
 								{
 									type: "toolCall",
 									id: "fixture-" + Date.now(),
-									name: recall ? "aco_recall" : "read",
+									name: repeated
+										? "v3_research"
+										: recall
+											? "aco_recall"
+											: "read",
 									arguments: recall ? args : { path: contentText.slice(12) },
 								},
 							]

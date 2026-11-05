@@ -315,7 +315,7 @@ function apply(
 		"planStatus",
 	] as const) {
 		if (update[key] === undefined) continue;
-		Object.assign(t, { [key]: update[key] });
+		Object.assign(t, { [key]: structuredClone(update[key]) });
 		t.provenance[key] = prov(
 			origin,
 			source,
@@ -420,7 +420,8 @@ export function linkCheckpoints(
 	}[],
 ) {
 	for (const r of snapshot.references) {
-		if (r.storage) continue;
+		r.storage = null;
+		r.recoverability = "unverified";
 		for (const ckpt of receipts) {
 			const segmentIds =
 				ckpt.segmentIds ?? ckpt.sources?.map((s) => s.id) ?? [];

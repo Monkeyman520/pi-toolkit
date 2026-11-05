@@ -154,6 +154,7 @@ try {
 		})}`,
 	);
 	assert.equal(checkpointResult.recoverable, true);
+	const verifiedLeaf = (await query("/evidence-probe")).leaf;
 
 	// 4. In default observe mode: exact pruning does not execute (C1)
 	let status = await query("/aco status");
@@ -209,7 +210,8 @@ try {
 
 	// 7. Restoration makes original contribution available again (C7)
 	const restoreResult = await query(`/aco restore ${toolResultId}`);
-	assert.equal(restoreResult.restored, true);
+	assert.equal(restoreResult.scheduled, true);
+	assert.equal(restoreResult.restored, false);
 	assert.ok(restoreResult.targetIds.includes(toolResultId));
 
 	// Trigger boundary commit for restore draft
@@ -250,6 +252,40 @@ try {
 			(e) => e.type === "context_edit" && e.targetId === toolResultId,
 		),
 		"Pruned branch should preserve its context_edits",
+	);
+
+	// Corruption after successful checkpoint/readback must invalidate execution authority.
+	await command(`/evidence-tree ${verifiedLeaf}`);
+	probe = await query("/evidence-probe");
+	const receipt = probe.branch.find(
+		(e) => e.type === "custom" && e.customType === "aco-evidence-commit",
+	).data;
+	const directory = join(
+		agent,
+		"pi-context-aco",
+		"evidence",
+		receipt.scope.project,
+		receipt.id,
+	);
+	const manifest = JSON.parse(
+		await readFile(join(directory, "manifest.json"), "utf8"),
+	);
+	const archived = manifest.segments.find((s) => s.id === toolResultId);
+	await rm(join(directory, archived.file));
+	const invalid = await query("/aco evidence");
+	assert.equal(invalid.checkpoints[0].status, "invalid");
+	await prompt("Continue safely after archived original becomes inaccessible");
+	assert.ok(
+		JSON.stringify((await jsonLines(requests)).at(-1)).includes(
+			"PRECISE_RESEARCH_DATA_0xDEADBEEF",
+		),
+	);
+	probe = await query("/evidence-probe");
+	assert.ok(
+		!probe.branch.some(
+			(e) => e.type === "context_edit" && e.targetId === toolResultId,
+		),
+		"Corrupt checkpoint must not authorize request-local or durable pruning",
 	);
 
 	await client.close();

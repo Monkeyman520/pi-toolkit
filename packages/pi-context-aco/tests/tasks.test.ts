@@ -509,3 +509,21 @@ it("marks resource attribution overflow incomplete instead of silently certifyin
 	expect(s.coverage).toBe("limited");
 	expect(s.issues.join(" ")).toContain("Resource attribution");
 });
+
+it("repeated branch analysis cannot mutate persisted declaration arrays or poison later validation", () => {
+	const branch = [
+		user("goal"),
+		note("declare", {
+			taskId: "work",
+			active: true,
+			requiredContextIds: ["exact"],
+			references: [{ id: "exact", kind: "evidence", sourceEntryIds: ["goal"] }],
+		}),
+		user("followup"),
+	];
+	const original = JSON.stringify(branch);
+	buildTasks(branch);
+	buildTasks(branch);
+	expect(JSON.stringify(branch)).toBe(original);
+	expect(buildTasks(branch).coverage).toBe("complete");
+});

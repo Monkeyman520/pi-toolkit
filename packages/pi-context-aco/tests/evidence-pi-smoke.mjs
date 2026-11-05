@@ -247,7 +247,9 @@ try {
 	await command("/aco on");
 	const status = await query("/aco trace");
 	assert.ok(status.stage.includes("T0003"));
-	assert.ok(status.strategyExecution.includes("not delivered"));
+	assert.equal(status.mode, "observe-only");
+	assert.deepEqual(status.authorizedStrategies, []);
+	assert.ok(status.strategyExecution.includes("observation-only"));
 	assert.deepEqual(status.authorizedStrategies, []);
 	assert.equal(
 		client.events.filter((e) => e.type === "extension_error").length,

@@ -1,3 +1,10 @@
+/** Verified bytes are request-local evidence, never cached authority. */
+export interface VerifiedCheckpoint {
+	id: string;
+	segmentIds: string[];
+	originals: ReadonlyMap<string, string>;
+}
+
 import { randomUUID } from "node:crypto";
 import type {
 	ExtensionContext,
@@ -13,6 +20,7 @@ import {
 	type Receipt,
 	receiptSchema,
 } from "./evidence.ts";
+import { exchangeTargets } from "./prune.ts";
 import { buildTasks } from "./tasks.ts";
 
 const sourceId = Type.String({ minLength: 1, maxLength: 128 });
@@ -76,7 +84,6 @@ export class Continuity {
 	private append: (type: string, data: unknown) => void;
 	private busy = false;
 	private generation = 0;
-	private manifestCache = new Map<string, string[]>();
 
 	constructor(
 		root: string,
@@ -88,26 +95,34 @@ export class Continuity {
 	}
 	invalidate() {
 		this.generation++;
-		this.manifestCache.clear();
-	}
-	async getReceiptSegments(receipt: Receipt): Promise<string[]> {
-		const cached = this.manifestCache.get(receipt.id);
-		if (cached) return cached;
-		const m = await this.store.manifest(receipt);
-		const ids = m.segments.map((s) => s.id);
-		this.manifestCache.set(receipt.id, ids);
-		return ids;
 	}
 	async getActiveCheckpoints(
 		ctx: ExtensionContext,
-	): Promise<{ id: string; segmentIds: string[] }[]> {
+		isCurrent: () => boolean = () => true,
+	): Promise<VerifiedCheckpoint[]> {
+		const check = this.guard(ctx, isCurrent);
 		const access = await this.access(ctx);
-		const result: { id: string; segmentIds: string[] }[] = [];
-		for (const r of access.receipts) {
+		check();
+		const result: VerifiedCheckpoint[] = [];
+		let retainedBytes = 0;
+		for (const receipt of access.receipts.slice(-64).reverse()) {
 			try {
-				const segmentIds = await this.getReceiptSegments(r);
-				result.push({ id: r.id, segmentIds });
-			} catch {}
+				const { originals } = await this.store.readCheckpoint(receipt, access);
+				const bytes = [...originals.values()].reduce(
+					(n, raw) => n + Buffer.byteLength(raw),
+					0,
+				);
+				if (retainedBytes + bytes > 32 * 1024 * 1024) break;
+				retainedBytes += bytes;
+				result.push({
+					id: receipt.id,
+					segmentIds: [...originals.keys()],
+					originals,
+				});
+			} catch {
+				// Invalid evidence cannot authorize an edit; inspection exposes the fault.
+			}
+			check();
 		}
 		return result;
 	}
@@ -213,6 +228,10 @@ export class Continuity {
 				...Object.values(task.provenance).flatMap((p) => p.sourceEntryIds),
 				...references.flatMap((r) => r.sourceEntryIds),
 			]);
+			// Omitting/restoring a tool result also needs its complete protocol exchange.
+			for (const sourceId of [...sourceIds])
+				for (const pairedId of exchangeTargets(sourceId, branch))
+					sourceIds.add(pairedId);
 			const sources = [...sourceIds].map((id) => {
 				const entry = branch.find((e) => e.id === id);
 				if (!entry)

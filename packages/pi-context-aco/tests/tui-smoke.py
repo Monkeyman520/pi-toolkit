@@ -95,7 +95,7 @@ try:
     until(lambda: '"executed":false' in output[marker:], "recommendation is non-executing")
     child.write("/aco config\r")
     time.sleep(0.5)
-    child.write("\x1b[B" * 5 + "\r")
+    child.write("\x1b[B" * len(json.loads(config.read_text("utf8"))) + "\r")
     until(lambda: "Fixture Panel" in output, "only other loaded panel offered")
     child.write("\r")
     until(lambda: "Fixture panel alive" in output, "loaded-panel switch worked")

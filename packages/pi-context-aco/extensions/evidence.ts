@@ -285,14 +285,18 @@ export class EvidenceStore {
 		}
 		return receipt;
 	}
-	async verify(receipt: Receipt, access: Access) {
+	async readCheckpoint(receipt: Receipt, access: Access) {
 		const authorized = this.authorized(receipt.id, access);
 		if (JSON.stringify(authorized) !== JSON.stringify(receipt))
 			throw Error("Receipt authority mismatch");
 		const manifest = await this.manifest(receipt);
+		const originals = new Map<string, string>();
 		for (const segment of manifest.segments)
-			await this.original(receipt, segment);
-		return manifest;
+			originals.set(segment.id, await this.original(receipt, segment));
+		return { manifest, originals };
+	}
+	async verify(receipt: Receipt, access: Access) {
+		return (await this.readCheckpoint(receipt, access)).manifest;
 	}
 	/** Host-only policy seam for T0006; no tool/command can mint a grant. Runtime-local and revocable on reload. */
 	async grant(

@@ -3,7 +3,7 @@ import { settingCandidates } from "pi-plugin-support/settings";
 import { options, type Settings, schema, settingKey } from "./config.ts";
 
 export const usage =
-	"Usage: /aco [status | trace | tasks | recommend | prune | restore <id|all> | declare <JSON> | checkpoint <JSON> | evidence | recall <JSON> | on | off | config [reload | <key> [value]] | help] — observation + explicit recovery + exact pruning";
+	"Usage: /aco [status | trace | tasks | recommend | prune | restore <id|all> | summarize <JSON> | compact | compaction | authorize <JSON> | revoke | declare <JSON> | checkpoint <JSON> | evidence | recall <JSON> | on | off | config [reload | <key> [value]] | help] — observation + verified recovery + scoped V3 actions";
 export type Command =
 	| {
 			kind:
@@ -15,14 +15,21 @@ export type Command =
 				| "tasks"
 				| "recommend"
 				| "evidence"
-				| "prune";
+				| "prune"
+				| "compact"
+				| "compaction"
+				| "revoke";
 	  }
-	| { kind: "declare" | "checkpoint" | "recall"; json: string }
+	| {
+			kind: "declare" | "checkpoint" | "recall" | "summarize" | "authorize";
+			json: string;
+	  }
 	| { kind: "restore"; targetId: string }
 	| { kind: "get"; key: string }
 	| { kind: "set"; key: string; value: string };
 export function parse(args: string): Command {
-	const jsonAction = /^(declare|checkpoint|recall)\s+/i.exec(args.trim());
+	const jsonAction =
+		/^(declare|checkpoint|recall|summarize|authorize)\s+/i.exec(args.trim());
 	if (jsonAction)
 		return args.length <=
 			(jsonAction[1].toLowerCase() === "declare" ? 32768 : 65536)
@@ -30,7 +37,9 @@ export function parse(args: string): Command {
 					kind: jsonAction[1].toLowerCase() as
 						| "declare"
 						| "checkpoint"
-						| "recall",
+						| "recall"
+						| "summarize"
+						| "authorize",
 					json: args.trim().slice(jsonAction[0].length),
 				}
 			: { kind: "help" };
@@ -39,6 +48,12 @@ export function parse(args: string): Command {
 	if (!p.length) return { kind: "panel" };
 	if (p.length === 1) {
 		switch (p[0].toLowerCase()) {
+			case "compact":
+				return { kind: "compact" };
+			case "compaction":
+				return { kind: "compaction" };
+			case "revoke":
+				return { kind: "revoke" };
 			case "status":
 				return { kind: "status" };
 			case "evidence":
@@ -95,6 +110,11 @@ export function complete(
 				"tasks",
 				"recommend",
 				"prune",
+				"summarize",
+				"compact",
+				"compaction",
+				"authorize",
+				"revoke",
 				"restore",
 				"declare",
 				"checkpoint",

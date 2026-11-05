@@ -3,7 +3,7 @@ import type {
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import type { EvidenceStore, Receipt } from "../extensions/evidence.ts";
+import type { VerifiedCheckpoint } from "../extensions/continuity.ts";
 import {
 	type AgentMessage,
 	createPruneBoundaryDrafts,
@@ -126,18 +126,17 @@ const contextEdit = (
 
 const mockReceipt = (
 	id: string,
-	anchorId: string,
-	_segmentIds: string[],
-): Receipt => ({
-	version: 1,
+	_anchorId: string,
+	segmentIds: string[],
+	branch: readonly SessionEntry[],
+): VerifiedCheckpoint => ({
 	id,
-	digest: "a".repeat(64),
-	scope: {
-		project: "b".repeat(64),
-		taskId: "task:test",
-		sessionId: "session:test",
-	},
-	anchorId,
+	segmentIds,
+	originals: new Map(
+		branch
+			.filter((e) => segmentIds.includes(e.id))
+			.map((e) => [e.id, JSON.stringify(e)]),
+	),
 });
 
 describe("V2 recovery-gated exact pruning candidate evaluation (C1, C2, C3)", () => {
@@ -165,7 +164,7 @@ describe("V2 recovery-gated exact pruning candidate evaluation (C1, C2, C3)", ()
 		];
 
 		const snapshot = buildTasks(branch);
-		const receipt = mockReceipt("ckpt-1", "n1", ["continuity", "r1"]);
+		const receipt = mockReceipt("ckpt-1", "n1", ["continuity", "r1"], branch);
 		linkCheckpoints(snapshot, [{ id: "ckpt-1", segmentIds: ["r1"] }]);
 
 		const evalResult = evaluatePruneCandidates(snapshot, branch, [receipt], {
@@ -261,7 +260,7 @@ describe("V2 recovery-gated exact pruning candidate evaluation (C1, C2, C3)", ()
 		const evalResult = evaluatePruneCandidates(
 			snapshot,
 			branch,
-			[mockReceipt("ckpt-1", "n1", ["u1", "r1", "r2"])],
+			[mockReceipt("ckpt-1", "n1", ["u1", "r1", "r2"], branch)],
 			{
 				mode: "exact-prune",
 				maxPruneTokens: 10000,
@@ -329,7 +328,7 @@ describe("V2 recovery-gated exact pruning candidate evaluation (C1, C2, C3)", ()
 		const evalResult = evaluatePruneCandidates(
 			snapshot,
 			branch,
-			[mockReceipt("ckpt-1", "n1", ["r1", "r2"])],
+			[mockReceipt("ckpt-1", "n1", ["r1", "r2"], branch)],
 			{
 				mode: "exact-prune",
 				maxPruneTokens: 10000,
@@ -372,14 +371,14 @@ describe("V2 recovery-gated exact pruning candidate evaluation (C1, C2, C3)", ()
 		const evalResult = evaluatePruneCandidates(
 			snapshot,
 			branch,
-			[mockReceipt("ckpt-1", "n1", ["r1"])],
+			[mockReceipt("ckpt-1", "n1", ["a1", "r1"], branch)],
 			{
 				mode: "exact-prune",
 				maxPruneTokens: 10000,
 			},
 		);
 
-		expect(evalResult.eligible).toHaveLength(1);
+		expect(evalResult.eligible, JSON.stringify(evalResult)).toHaveLength(1);
 		expect(evalResult.eligible[0].sourceEntryId).toBe("r1");
 		expect(evalResult.eligible[0].pairedEntryId).toBe("a1");
 	});
@@ -519,12 +518,9 @@ describe("Request-local projection vs durable boundary draft lifecycles (C4, C5,
 			contextEdit("e1", "r1", null, "r1"),
 		];
 
-		const receipt = mockReceipt("ckpt-1", "r1", ["r1"]);
-		const store = {} as unknown as EvidenceStore; // Mock store
+		const receipt = mockReceipt("ckpt-1", "r1", ["a1", "r1"], branch);
 
-		const restore = await createRestoreBoundaryDrafts("r1", branch, store, [
-			receipt,
-		]);
+		const restore = await createRestoreBoundaryDrafts("r1", branch, [receipt]);
 
 		expect(restore.drafts).toHaveLength(1);
 		expect(restore.drafts[0]).toMatchObject({
@@ -545,10 +541,63 @@ describe("Request-local projection vs durable boundary draft lifecycles (C4, C5,
 			contextEdit("e2", "orphan-target", null, "e1"),
 		];
 
-		const receipt = mockReceipt("ckpt-1", "r1", ["r1"]);
+		const receipt = mockReceipt("ckpt-1", "r1", ["a1", "r1"], branch);
 		const reconciliation = reconcileBranchPrunes(branch, [receipt]);
 
 		expect(reconciliation.omittedTargetIds).toContain("r1");
 		expect(reconciliation.omittedTargetIds).toContain("orphan-target");
 	});
+});
+
+it("cannot discard extra conclusions bundled with a paired assistant tool call", () => {
+	const a = toolCall("a", "call", "read", { path: "doc" }, "u");
+	if (a.type !== "message" || a.message.role !== "assistant")
+		throw Error("fixture");
+	a.message.content.push({
+		type: "text",
+		text: "A still-required conclusion not declared redundant",
+	});
+	const branch = [
+		user("u", "Goal"),
+		a,
+		toolResult("r", "call", "read", "research", false, "a"),
+		taskNote("n", {
+			taskId: "work",
+			active: true,
+			status: "completed",
+			references: [
+				{
+					id: "ref",
+					kind: "evidence",
+					sourceEntryIds: ["r"],
+					completedResearch: true,
+				},
+			],
+		}),
+	];
+	const state = buildTasks(branch);
+	const evaluation = evaluatePruneCandidates(
+		state,
+		branch,
+		[mockReceipt("checkpoint", "n", ["a", "r"], branch)],
+		{ mode: "exact-prune" },
+	);
+	expect(evaluation.eligible).toEqual([]);
+});
+
+it("compact mode cannot grant exact-prune eligibility", () => {
+	const branch = [
+		user("u", "Goal"),
+		toolCall("a", "call", "read", {}, "u"),
+		toolResult("r", "call", "read", "research", false, "a"),
+	];
+	const snapshot = buildTasks(branch);
+	expect(
+		evaluatePruneCandidates(
+			snapshot,
+			branch,
+			[mockReceipt("c", "r", ["a", "r"], branch)],
+			{ mode: "compact" },
+		).eligible,
+	).toEqual([]);
 });

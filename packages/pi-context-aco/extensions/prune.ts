@@ -1,10 +1,11 @@
-import type {
-	ContextEditEntryDraft,
-	SessionBoundaryDraft,
-	SessionEntry,
+import {
+	buildSessionProjection,
+	type ContextEditEntryDraft,
+	type SessionBoundaryDraft,
+	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import type { ACOMode } from "./config.ts";
-import type { EvidenceStore, Receipt } from "./evidence.ts";
+import type { VerifiedCheckpoint } from "./continuity.ts";
 import { textTokens } from "./pressure.ts";
 import type { SegmentCategory, TaskSnapshot } from "./tasks.ts";
 
@@ -12,13 +13,6 @@ export type AgentMessage = Record<string, unknown> & {
 	role: string;
 	content?: unknown;
 };
-
-interface ContextEditLike {
-	type: "context_edit";
-	targetId: string;
-	replacement: { content: unknown } | null;
-}
-
 export interface PruneCandidate {
 	referenceId: string;
 	sourceEntryId: string;
@@ -27,13 +21,11 @@ export interface PruneCandidate {
 	checkpointId: string;
 	pairedEntryId?: string;
 }
-
 export interface PruneEvaluationResult {
 	eligible: PruneCandidate[];
 	ineligible: { referenceId: string; reason: string }[];
 	totalEstimatedTokens: number;
 }
-
 export interface ContextProjectionResult {
 	messages: AgentMessage[];
 	excludedEntryIds: string[];
@@ -43,9 +35,9 @@ export interface ContextProjectionResult {
 	beforeMessages: number;
 	afterMessages: number;
 }
-
 export interface PruneExecutionOutcome {
 	success: boolean;
+	status?: "proposed" | "committed" | "partial" | "not-committed";
 	mode: "request-projection" | "durable-edit";
 	targetIds: string[];
 	beforeTokens: number;
@@ -55,422 +47,330 @@ export interface PruneExecutionOutcome {
 	drafts?: SessionBoundaryDraft[];
 	error?: string;
 }
-
-function object(v: unknown): Record<string, unknown> {
-	return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+const object = (v: unknown): Record<string, unknown> =>
+	v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+export function messageTokens(message: unknown): number | null {
+	const m = object(message);
+	const content = m.content;
+	if (typeof content === "string") return Math.ceil(content.length / 4);
+	if (
+		!Array.isArray(content) ||
+		content.some((b) => !["text", "toolCall"].includes(String(object(b).type)))
+	)
+		return null;
+	return textTokens(message) ?? Math.ceil(JSON.stringify(content).length / 4);
 }
-
-function asContextEdit(entry: SessionEntry): ContextEditLike | undefined {
-	if (entry.type === "context_edit" && "targetId" in entry) {
-		const rec = entry as unknown as Record<string, unknown>;
-		return {
-			type: "context_edit",
-			targetId: String(rec.targetId),
-			replacement:
-				rec.replacement === null
-					? null
-					: (rec.replacement as { content: unknown }),
-		};
-	}
+export function latestEdits(branch: readonly SessionEntry[]) {
+	const edits = new Map<string, ContextEditEntryDraft["replacement"]>();
+	for (const e of branch)
+		if (e.type === "context_edit") edits.set(e.targetId, e.replacement);
+	return edits;
+}
+export function verifiedOriginal(
+	id: string,
+	branch: readonly SessionEntry[],
+	checkpoints: readonly VerifiedCheckpoint[],
+) {
+	const entry = branch.find((e) => e.id === id);
+	if (!entry) return undefined;
+	const raw = JSON.stringify(entry);
+	for (const checkpoint of checkpoints)
+		if (checkpoint.originals.get(id) === raw)
+			return {
+				checkpointId: checkpoint.id,
+				entry: JSON.parse(raw) as SessionEntry,
+			};
 	return undefined;
 }
-
-function getOmittedEntryIds(branch: readonly SessionEntry[]): Set<string> {
-	const latestEdits = new Map<string, ContextEditLike>();
-	for (const entry of branch) {
-		const edit = asContextEdit(entry);
-		if (edit) {
-			latestEdits.set(edit.targetId, edit);
+export function legalMessages(
+	messages: readonly { role: string; content?: unknown }[],
+) {
+	const pending = new Map<string, string>();
+	const seen = new Set<string>();
+	for (const m of messages) {
+		if (m.role === "toolResult") {
+			const id = object(m).toolCallId;
+			if (
+				typeof id !== "string" ||
+				!pending.has(id) ||
+				pending.get(id) !== object(m).toolName
+			)
+				return false;
+			pending.delete(id);
+		} else {
+			if (pending.size) return false;
+			if (m.role === "assistant" && Array.isArray(m.content))
+				for (const block of m.content) {
+					const b = object(block);
+					if (b.type !== "toolCall") continue;
+					if (
+						typeof b.id !== "string" ||
+						typeof b.name !== "string" ||
+						seen.has(b.id)
+					)
+						return false;
+					pending.set(b.id, b.name);
+					seen.add(b.id);
+				}
 		}
 	}
-	const omitted = new Set<string>();
-	for (const [targetId, edit] of latestEdits) {
-		if (edit.replacement === null) {
-			omitted.add(targetId);
-		}
-	}
-	return omitted;
+	return pending.size === 0;
 }
-
+export function previewEdits(
+	branch: readonly SessionEntry[],
+	drafts: readonly SessionBoundaryDraft[],
+) {
+	const entries = [...branch];
+	for (const [i, draft] of drafts.entries())
+		entries.push({
+			...draft,
+			id: `aco-preview-${i}`,
+			parentId: entries.at(-1)?.id ?? null,
+			timestamp: "preview",
+		} as SessionEntry);
+	return buildSessionProjection(entries).messages;
+}
+export function validateEdits(
+	branch: readonly SessionEntry[],
+	drafts: readonly SessionBoundaryDraft[],
+) {
+	try {
+		return legalMessages(previewEdits(branch, drafts));
+	} catch {
+		return false;
+	}
+}
+function calls(entry: SessionEntry) {
+	return entry.type === "message" &&
+		entry.message.role === "assistant" &&
+		Array.isArray(entry.message.content)
+		? entry.message.content.filter((b) => b.type === "toolCall")
+		: [];
+}
+export function exchangeTargets(
+	id: string,
+	branch: readonly SessionEntry[],
+): string[] {
+	const entry = branch.find((e) => e.id === id);
+	if (entry?.type !== "message") return [id];
+	if (entry.message.role === "toolResult") {
+		const callId = entry.message.toolCallId;
+		const assistant = branch.find((e) => calls(e).some((c) => c.id === callId));
+		return assistant
+			? [...new Set([id, ...exchangeTargets(assistant.id, branch)])]
+			: [id];
+	}
+	const toolCalls = calls(entry);
+	return [
+		...new Set([
+			id,
+			...branch
+				.filter(
+					(e) =>
+						e.type === "message" &&
+						e.message.role === "toolResult" &&
+						toolCalls.some(
+							(c) => c.id === (e.message as { toolCallId?: string }).toolCallId,
+						),
+				)
+				.map((e) => e.id),
+		]),
+	];
+}
 export function evaluatePruneCandidates(
 	snapshot: TaskSnapshot,
 	branch: readonly SessionEntry[],
-	_receipts: readonly Receipt[],
-	options: {
-		mode: ACOMode;
-		maxPruneTokens?: number;
-	},
+	checkpoints: readonly VerifiedCheckpoint[],
+	options: { mode: ACOMode; maxPruneTokens?: number },
 ): PruneEvaluationResult {
-	if (options.mode === "observe") {
-		return {
-			eligible: [],
-			ineligible: [
-				{
-					referenceId: "*",
-					reason: "V1 observe mode cannot execute exact pruning",
-				},
-			],
-			totalEstimatedTokens: 0,
-		};
+	const result: PruneEvaluationResult = {
+		eligible: [],
+		ineligible: [],
+		totalEstimatedTokens: 0,
+	};
+	if (options.mode !== "exact-prune") {
+		result.ineligible.push({
+			referenceId: "*",
+			reason:
+				options.mode === "observe"
+					? "V1 observe mode cannot execute exact pruning"
+					: "Exact pruning requires exact-prune mode",
+		});
+		return result;
 	}
-
-	const maxTokens = options.maxPruneTokens ?? 64000;
-	const omittedOnBranch = getOmittedEntryIds(branch);
-	const branchById = new Map(branch.map((e) => [e.id, e]));
-	const eligible: PruneCandidate[] = [];
-	const seenSources = new Set<string>();
-	const ineligible: { referenceId: string; reason: string }[] = [];
-	let totalEstimatedTokens = 0;
-
+	const edits = latestEdits(branch);
+	const seen = new Set<string>();
 	for (const ref of snapshot.references) {
-		const isCandidateKind =
-			ref.completedResearch ||
-			ref.redundant ||
-			ref.reproducibleData ||
-			ref.category === "completed-research" ||
-			ref.category === "redundant-content" ||
-			ref.category === "reproducible-data";
-
-		if (!isCandidateKind) {
+		if (!(ref.completedResearch || ref.redundant || ref.reproducibleData))
+			continue;
+		let reason = "";
+		const id = ref.sourceEntryIds[0];
+		const source = branch.find((e) => e.id === id);
+		const group = exchangeTargets(id, branch);
+		if (ref.protectedReasons.length)
+			reason = `Protected: ${ref.protectedReasons.join("; ")}`;
+		else if (ref.activeConsumers.length)
+			reason = "Active consumers depend on this reference";
+		else if (
+			snapshot.coverage !== "complete" ||
+			ref.sourceEntryIds.length !== 1
+		)
+			reason = "Incomplete analysis or multi-source candidate";
+		else if (source?.type !== "message" || source.message.role === "user")
+			reason = "Only expendable assistant/tool messages can be pruned";
+		else if (source.message.role === "assistant" && calls(source).length)
+			reason = "Cannot prune a tool call independently of its result";
+		else if (source.message.role === "toolResult" && group.length < 2)
+			reason = "Missing paired assistant toolCall";
+		else if (group.length > 2)
+			reason =
+				"Paired assistant message has multiple tool calls; cannot omit exchange without breaking protocol";
+		else if (
+			group.some((t) => {
+				const e = branch.find((e) => e.id === t);
+				return (
+					e?.type === "message" &&
+					e.message.role === "assistant" &&
+					e.message.content.some((b) => b.type !== "toolCall")
+				);
+			})
+		)
+			reason = "Paired assistant carries additional reasoning or text";
+		else if (group.some((t) => edits.has(t)))
+			reason = "Source already edited on active branch";
+		else if (group.some((t) => !verifiedOriginal(t, branch, checkpoints)))
+			reason =
+				"Unverified recovery: original source or paired assistant not verified in active-branch checkpoint";
+		else if (
+			group.some((t) =>
+				snapshot.references.some(
+					(r) =>
+						r.sourceEntryIds.includes(t) &&
+						(r.protectedReasons.length || r.activeConsumers.length),
+				),
+			)
+		)
+			reason = "Paired source is protected";
+		const size = group.reduce((n, t) => {
+			const e = branch.find((e) => e.id === t);
+			return (
+				n +
+				(e?.type === "message"
+					? (messageTokens(e.message) ?? Number.POSITIVE_INFINITY)
+					: Number.POSITIVE_INFINITY)
+			);
+		}, 0);
+		if (
+			!reason &&
+			result.totalEstimatedTokens + size > (options.maxPruneTokens ?? 64000)
+		)
+			reason = "Pruning would exceed budget limit";
+		if (reason) {
+			result.ineligible.push({ referenceId: ref.id, reason });
 			continue;
 		}
-
-		if (ref.protectedReasons.length > 0) {
-			ineligible.push({
-				referenceId: ref.id,
-				reason: `Protected: ${ref.protectedReasons.join("; ")}`,
-			});
-			continue;
-		}
-
-		if (ref.activeConsumers.length > 0) {
-			ineligible.push({
-				referenceId: ref.id,
-				reason: `Active consumers depend on this reference: ${ref.activeConsumers.join(", ")}`,
-			});
-			continue;
-		}
-
-		if (ref.recoverability !== "recoverable" || !ref.storage?.verified) {
-			ineligible.push({
-				referenceId: ref.id,
-				reason:
-					"Unverified recovery: original source not verified in active-branch checkpoint",
-			});
-			continue;
-		}
-
-		let structurallyLegal = true;
-		let pairedAssistantEntryId: string | undefined;
-
-		for (const sourceId of ref.sourceEntryIds) {
-			const entry = branchById.get(sourceId);
-			if (!entry) {
-				ineligible.push({
-					referenceId: ref.id,
-					reason: `Source entry ${sourceId} not found on active branch`,
-				});
-				structurallyLegal = false;
-				break;
-			}
-
-			if (omittedOnBranch.has(sourceId)) {
-				ineligible.push({
-					referenceId: ref.id,
-					reason: `Source entry ${sourceId} is already omitted on active branch`,
-				});
-				structurallyLegal = false;
-				break;
-			}
-
-			if (entry.type === "message") {
-				const m = entry.message;
-				if (m.role === "user") {
-					ineligible.push({
-						referenceId: ref.id,
-						reason:
-							"User message contains user requirements/constraints and cannot be pruned",
-					});
-					structurallyLegal = false;
-					break;
-				}
-
-				if (m.role === "toolResult") {
-					const callId = String(object(m).toolCallId ?? "");
-					const assistantEntry = branch.find((e) => {
-						if (e.type !== "message" || e.message.role !== "assistant")
-							return false;
-						const content =
-							"content" in e.message && Array.isArray(e.message.content)
-								? (e.message.content as unknown[])
-								: [];
-						return content.some(
-							(b) =>
-								object(b).type === "toolCall" &&
-								String(object(b).id) === callId,
-						);
-					});
-
-					if (!assistantEntry) {
-						ineligible.push({
-							referenceId: ref.id,
-							reason: `Cannot prune toolResult without paired assistant toolCall entry (${callId})`,
-						});
-						structurallyLegal = false;
-						break;
-					}
-
-					const assistantContent =
-						assistantEntry.type === "message" &&
-						"content" in assistantEntry.message &&
-						Array.isArray(assistantEntry.message.content)
-							? (assistantEntry.message.content as unknown[])
-							: [];
-					const otherCalls = assistantContent.filter(
-						(b) =>
-							object(b).type === "toolCall" && String(object(b).id) !== callId,
-					);
-
-					if (otherCalls.length > 0) {
-						ineligible.push({
-							referenceId: ref.id,
-							reason:
-								"Paired assistant message has multiple tool calls; cannot omit exchange without breaking protocol",
-						});
-						structurallyLegal = false;
-						break;
-					}
-
-					const assistantRef = snapshot.references.find((r) =>
-						r.sourceEntryIds.includes(assistantEntry.id),
-					);
-					if (assistantRef?.protectedReasons.length) {
-						ineligible.push({
-							referenceId: ref.id,
-							reason: `Paired assistant entry is protected: ${assistantRef.protectedReasons.join("; ")}`,
-						});
-						structurallyLegal = false;
-						break;
-					}
-
-					pairedAssistantEntryId = assistantEntry.id;
-				}
-			}
-		}
-
-		if (!structurallyLegal) {
-			continue;
-		}
-
-		const estTokens = ref.estimatedTokens ?? 100;
-		if (totalEstimatedTokens + estTokens > maxTokens) {
-			ineligible.push({
-				referenceId: ref.id,
-				reason: `Pruning would exceed budget limit (${maxTokens} tokens)`,
-			});
-			continue;
-		}
-
-		if (seenSources.has(ref.sourceEntryIds[0])) continue;
-		seenSources.add(ref.sourceEntryIds[0]);
-		totalEstimatedTokens += estTokens;
-		eligible.push({
+		if (group.some((t) => seen.has(t))) continue;
+		for (const t of group) seen.add(t);
+		result.totalEstimatedTokens += size;
+		result.eligible.push({
 			referenceId: ref.id,
-			sourceEntryId: ref.sourceEntryIds[0],
+			sourceEntryId: id,
 			category: ref.category,
-			estimatedTokens: estTokens,
-			checkpointId: ref.storage?.checkpointId ?? "",
-			pairedEntryId: pairedAssistantEntryId,
+			estimatedTokens: size,
+			checkpointId:
+				verifiedOriginal(id, branch, checkpoints)?.checkpointId ?? "",
+			pairedEntryId: group.find((t) => t !== id),
 		});
 	}
-
-	return {
-		eligible,
-		ineligible,
-		totalEstimatedTokens,
-	};
+	return result;
 }
-
-function matchMessageToEntry(msg: AgentMessage, entry: SessionEntry): boolean {
-	if (entry.type !== "message") return false;
-	const em = entry.message;
-	if (msg.role !== em.role) return false;
-	if (msg.role === "toolResult" && em.role === "toolResult") {
-		return object(msg).toolCallId === object(em).toolCallId;
-	}
-	if (msg.role === "assistant" && em.role === "assistant") {
-		return JSON.stringify(msg.content) === JSON.stringify(em.content);
-	}
-	if (msg.role === "user" && em.role === "user") {
-		return JSON.stringify(msg.content) === JSON.stringify(em.content);
-	}
-	return false;
-}
-
 export function projectRequestContext(
 	messages: AgentMessage[],
 	candidates: readonly PruneCandidate[],
 	branch: readonly SessionEntry[],
 ): ContextProjectionResult {
-	const beforeMessages = messages.length;
-	const beforeTokens = messages.reduce((n, m) => n + (textTokens(m) ?? 0), 0);
-
-	if (!candidates.length) {
-		return {
-			messages,
-			excludedEntryIds: [],
-			beforeTokens,
-			afterTokens: beforeTokens,
-			reclaimedTokens: 0,
-			beforeMessages,
-			afterMessages: beforeMessages,
-		};
-	}
-
-	const excludedEntryIds = new Set<string>();
-	for (const c of candidates) {
-		excludedEntryIds.add(c.sourceEntryId);
-		if (c.pairedEntryId) {
-			excludedEntryIds.add(c.pairedEntryId);
-		}
-	}
-
-	const branchById = new Map(branch.map((e) => [e.id, e]));
-	const excludedEntries = [...excludedEntryIds]
-		.map((id) => branchById.get(id))
-		.filter((e): e is SessionEntry => e !== undefined);
-
-	const filtered: AgentMessage[] = [];
-	for (const msg of messages) {
-		const isExcluded = excludedEntries.some((entry) =>
-			matchMessageToEntry(msg, entry),
-		);
-		if (!isExcluded) {
-			filtered.push(msg);
-		}
-	}
-
-	const toolCalls = new Set<string>();
-	const toolResults = new Set<string>();
-
-	for (const m of filtered) {
-		if (m.role === "assistant" && Array.isArray(m.content)) {
-			for (const b of m.content) {
-				const obj = object(b);
-				if (obj.type === "toolCall" && typeof obj.id === "string") {
-					toolCalls.add(obj.id);
-				}
-			}
-		} else if (
-			m.role === "toolResult" &&
-			typeof object(m).toolCallId === "string"
-		) {
-			toolResults.add(String(object(m).toolCallId));
-		}
-	}
-
-	for (const callId of toolCalls) {
-		if (!toolResults.has(callId)) {
-			return {
-				messages,
-				excludedEntryIds: [],
-				beforeTokens,
-				afterTokens: beforeTokens,
-				reclaimedTokens: 0,
-				beforeMessages,
-				afterMessages: beforeMessages,
-			};
-		}
-	}
-
-	for (const resultId of toolResults) {
-		if (!toolCalls.has(resultId)) {
-			return {
-				messages,
-				excludedEntryIds: [],
-				beforeTokens,
-				afterTokens: beforeTokens,
-				reclaimedTokens: 0,
-				beforeMessages,
-				afterMessages: beforeMessages,
-			};
-		}
-	}
-
-	const hasUserOrAssistant = filtered.some(
-		(m) => m.role === "user" || m.role === "assistant",
+	const beforeTokens = messages.reduce(
+		(n, m) => n + (messageTokens(m) ?? 0),
+		0,
 	);
-	if (!hasUserOrAssistant) {
-		return {
-			messages,
-			excludedEntryIds: [],
-			beforeTokens,
-			afterTokens: beforeTokens,
-			reclaimedTokens: 0,
-			beforeMessages,
-			afterMessages: beforeMessages,
-		};
+	const unchanged = (): ContextProjectionResult => ({
+		messages,
+		excludedEntryIds: [],
+		beforeTokens,
+		afterTokens: beforeTokens,
+		reclaimedTokens: 0,
+		beforeMessages: messages.length,
+		afterMessages: messages.length,
+	});
+	const ids = [
+		...new Set(
+			candidates.flatMap((c) => [
+				c.sourceEntryId,
+				...(c.pairedEntryId ? [c.pairedEntryId] : []),
+			]),
+		),
+	];
+	const indexes = new Set<number>();
+	for (const id of ids) {
+		const entry = branch.find((e) => e.id === id);
+		if (entry?.type !== "message") return unchanged();
+		const matches = messages
+			.map((m, i) => ({ m, i }))
+			.filter(
+				({ m }) =>
+					m.role === entry.message.role &&
+					JSON.stringify(m.content) ===
+						JSON.stringify(object(entry.message).content) &&
+					(m.role !== "toolResult" ||
+						object(m).toolCallId === object(entry.message).toolCallId),
+			);
+		if (matches.length !== 1) return unchanged();
+		indexes.add(matches[0].i);
 	}
-
-	const afterTokens = filtered.reduce((n, m) => n + (textTokens(m) ?? 0), 0);
-	const reclaimedTokens = Math.max(0, beforeTokens - afterTokens);
-
+	const filtered = messages.filter((_, i) => !indexes.has(i));
+	if (
+		!legalMessages(filtered) ||
+		!filtered.some((m) => m.role === "user" || m.role === "assistant")
+	)
+		return unchanged();
+	const afterTokens = filtered.reduce((n, m) => n + (messageTokens(m) ?? 0), 0);
 	return {
 		messages: filtered,
-		excludedEntryIds: [...excludedEntryIds],
+		excludedEntryIds: ids,
 		beforeTokens,
 		afterTokens,
-		reclaimedTokens,
-		beforeMessages,
+		reclaimedTokens: Math.max(0, beforeTokens - afterTokens),
+		beforeMessages: messages.length,
 		afterMessages: filtered.length,
 	};
 }
-
 export function createPruneBoundaryDrafts(
 	candidates: readonly PruneCandidate[],
 	branch: readonly SessionEntry[],
 	existingDrafts: readonly SessionBoundaryDraft[] = [],
-): {
-	drafts: SessionBoundaryDraft[];
-	prunedTargetIds: string[];
-	beforeTokens: number;
-	afterTokens: number;
-	reclaimedTokens: number;
-} {
-	const omittedOnBranch = getOmittedEntryIds(branch);
-	const draftsInEvent = new Set(
+) {
+	const occupied = new Set(
 		existingDrafts
-			.filter(
-				(
-					d,
-				): d is SessionBoundaryDraft & {
-					type: "context_edit";
-					targetId: string;
-				} => d.type === "context_edit" && "targetId" in d,
-			)
+			.filter((d) => d.type === "context_edit")
 			.map((d) => d.targetId),
 	);
-
-	const targetIdsToOmit: string[] = [];
+	const edits = latestEdits(branch);
+	const targets = new Set<string>();
 	for (const c of candidates) {
-		if (
-			!omittedOnBranch.has(c.sourceEntryId) &&
-			!draftsInEvent.has(c.sourceEntryId) &&
-			!targetIdsToOmit.includes(c.sourceEntryId)
-		) {
-			targetIdsToOmit.push(c.sourceEntryId);
-		}
-		if (
-			c.pairedEntryId &&
-			!omittedOnBranch.has(c.pairedEntryId) &&
-			!draftsInEvent.has(c.pairedEntryId) &&
-			!targetIdsToOmit.includes(c.pairedEntryId)
-		) {
-			targetIdsToOmit.push(c.pairedEntryId);
-		}
+		const group = [
+			c.sourceEntryId,
+			...(c.pairedEntryId ? [c.pairedEntryId] : []),
+		];
+		if (group.some((id) => edits.has(id) || occupied.has(id))) continue;
+		for (const id of group) targets.add(id);
 	}
-
-	if (!targetIdsToOmit.length) {
+	const additions: SessionBoundaryDraft[] = [...targets].map((targetId) => ({
+		type: "context_edit",
+		targetId,
+		replacement: null,
+	}));
+	const drafts = [...existingDrafts, ...additions];
+	if (!validateEdits(branch, drafts)) {
 		return {
 			drafts: [...existingDrafts],
 			prunedTargetIds: [],
@@ -479,147 +379,101 @@ export function createPruneBoundaryDrafts(
 			reclaimedTokens: 0,
 		};
 	}
-
-	const branchById = new Map(branch.map((e) => [e.id, e]));
-	let beforeTokens = 0;
-	const newDrafts: SessionBoundaryDraft[] = [];
-
-	for (const targetId of targetIdsToOmit) {
-		const entry = branchById.get(targetId);
-		if (entry?.type === "message") {
-			beforeTokens += textTokens(entry.message) ?? 0;
-		}
-		newDrafts.push({
-			type: "context_edit",
-			targetId,
-			replacement: null,
-		});
-	}
-
+	const beforeTokens = [...targets].reduce((n, id) => {
+		const e = branch.find((e) => e.id === id);
+		return n + (e?.type === "message" ? (messageTokens(e.message) ?? 0) : 0);
+	}, 0);
 	return {
-		drafts: [...existingDrafts, ...newDrafts],
-		prunedTargetIds: targetIdsToOmit,
+		drafts,
+		prunedTargetIds: [...targets],
 		beforeTokens,
 		afterTokens: 0,
 		reclaimedTokens: beforeTokens,
 	};
 }
-
 export async function createRestoreBoundaryDrafts(
 	targetId: string,
 	branch: readonly SessionEntry[],
-	_store: EvidenceStore,
-	receipts: readonly Receipt[],
+	checkpoints: readonly VerifiedCheckpoint[],
 	existingDrafts: readonly SessionBoundaryDraft[] = [],
 ): Promise<{
 	drafts: SessionBoundaryDraft[];
 	restoredTargetIds: string[];
 	error?: string;
 }> {
-	const omittedOnBranch = getOmittedEntryIds(branch);
-	const targets =
+	const fail = (error: string) => ({
+		drafts: [...existingDrafts],
+		restoredTargetIds: [],
+		error,
+	});
+	const edits = latestEdits(branch);
+	const modified = [...edits]
+		.filter(([id, value]) => {
+			const e = branch.find((e) => e.id === id);
+			return (
+				e?.type !== "message" ||
+				JSON.stringify(value?.content) !==
+					JSON.stringify(object(e.message).content)
+			);
+		})
+		.map(([id]) => id);
+	const selected =
 		targetId === "all"
-			? [...omittedOnBranch]
-			: omittedOnBranch.has(targetId)
+			? modified
+			: modified.includes(targetId)
 				? [targetId]
 				: [];
-
-	if (!targets.length) {
-		return {
-			drafts: [...existingDrafts],
-			restoredTargetIds: [],
-			error:
-				targetId === "all"
-					? "No omitted entries to restore"
-					: `Target ${targetId} is not currently omitted`,
-		};
+	if (!selected.length) return fail("No edited entries to restore");
+	const targets = [
+		...new Set(selected.flatMap((id) => exchangeTargets(id, branch))),
+	].filter((id) => modified.includes(id));
+	const occupied = new Set(
+		existingDrafts
+			.filter((d) => d.type === "context_edit")
+			.map((d) => d.targetId),
+	);
+	const additions: SessionBoundaryDraft[] = [];
+	for (const id of targets) {
+		if (occupied.has(id)) return fail("Conflicting restoration draft");
+		const verified = verifiedOriginal(id, branch, checkpoints);
+		if (
+			verified?.entry.type !== "message" ||
+			!("content" in verified.entry.message)
+		)
+			return fail(
+				`No verified original found on active branch to restore ${id}`,
+			);
+		additions.push({
+			type: "context_edit",
+			targetId: id,
+			replacement: { content: verified.entry.message.content },
+		});
 	}
-
-	const restoreDrafts: SessionBoundaryDraft[] = [];
-	const restoredTargetIds: string[] = [];
-
-	for (const tid of targets) {
-		let matchingReceipt: Receipt | undefined;
-		for (const r of receipts) {
-			matchingReceipt = r;
-			break;
-		}
-
-		if (!matchingReceipt) {
-			return {
-				drafts: [...existingDrafts],
-				restoredTargetIds,
-				error: `No verified receipt found on active branch to restore ${tid}`,
-			};
-		}
-
-		try {
-			const originalEntry = branch.find((e) => e.id === tid);
-			if (originalEntry?.type !== "message") {
-				continue;
-			}
-
-			const content =
-				"content" in originalEntry.message
-					? (originalEntry.message as { content: unknown }).content
-					: "";
-
-			const draft: ContextEditEntryDraft = {
-				type: "context_edit",
-				targetId: tid,
-				replacement: {
-					content: content as NonNullable<
-						ContextEditEntryDraft["replacement"]
-					>["content"],
-				},
-			};
-			restoreDrafts.push(draft);
-			restoredTargetIds.push(tid);
-		} catch (error) {
-			return {
-				drafts: [...existingDrafts],
-				restoredTargetIds,
-				error: error instanceof Error ? error.message : String(error),
-			};
-		}
-	}
-
-	return {
-		drafts: [...existingDrafts, ...restoreDrafts],
-		restoredTargetIds,
-	};
+	const drafts = [...existingDrafts, ...additions];
+	if (!validateEdits(branch, drafts))
+		return fail("Restoration would leave invalid tool relationships");
+	return { drafts, restoredTargetIds: targets };
 }
-
 export function reconcileBranchPrunes(
 	branch: readonly SessionEntry[],
-	receipts: readonly Receipt[],
-): {
-	omittedTargetIds: string[];
-	verifiedTargetIds: string[];
-	unverifiedTargetIds: string[];
-	issues: string[];
-} {
-	const omitted = getOmittedEntryIds(branch);
-	const omittedTargetIds = [...omitted];
-	const verifiedTargetIds: string[] = [];
-	const unverifiedTargetIds: string[] = [];
-	const issues: string[] = [];
-
-	for (const tid of omittedTargetIds) {
-		if (receipts.length > 0) {
-			verifiedTargetIds.push(tid);
-		} else {
-			unverifiedTargetIds.push(tid);
-			issues.push(
-				`Omitted entry ${tid} has no verified recovery receipt on active branch`,
-			);
-		}
-	}
-
+	checkpoints: readonly VerifiedCheckpoint[],
+) {
+	const omittedTargetIds = [...latestEdits(branch)]
+		.filter(([, v]) => v === null)
+		.map(([id]) => id);
+	const verifiedTargetIds = omittedTargetIds.filter((id) =>
+		verifiedOriginal(id, branch, checkpoints),
+	);
+	const unverifiedTargetIds = omittedTargetIds.filter(
+		(id) => !verifiedTargetIds.includes(id),
+	);
 	return {
 		omittedTargetIds,
 		verifiedTargetIds,
 		unverifiedTargetIds,
-		issues,
+		issues: unverifiedTargetIds.map(
+			(id) =>
+				`Omitted entry ${id} has no verified recovery receipt on active branch`,
+		),
 	};
 }

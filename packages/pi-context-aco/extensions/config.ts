@@ -4,12 +4,14 @@ import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { ForecastSettings } from "./pressure.ts";
 
-export type ACOMode = "observe" | "exact-prune";
+export type ACOMode = "observe" | "exact-prune" | "compact";
 export interface Settings extends ForecastSettings {
 	enabled: boolean;
 	persistTraces: boolean;
 	mode: ACOMode;
 	maxPruneTokens: number;
+	maxCompactInputTokens: number;
+	maxSummaryTokens: number;
 }
 export const defaults: Settings = {
 	enabled: true,
@@ -19,6 +21,8 @@ export const defaults: Settings = {
 	persistTraces: false,
 	mode: "observe",
 	maxPruneTokens: 64000,
+	maxCompactInputTokens: 64000,
+	maxSummaryTokens: 8000,
 };
 export const schema = Type.Partial(
 	Type.Object({
@@ -27,8 +31,14 @@ export const schema = Type.Partial(
 		horizonTurns: Type.Integer({ minimum: 1, maximum: 20 }),
 		reserveTokens: Type.Integer({ minimum: 0, maximum: 1000000 }),
 		persistTraces: Type.Boolean(),
-		mode: Type.Union([Type.Literal("observe"), Type.Literal("exact-prune")]),
+		mode: Type.Union([
+			Type.Literal("observe"),
+			Type.Literal("exact-prune"),
+			Type.Literal("compact"),
+		]),
 		maxPruneTokens: Type.Integer({ minimum: 0, maximum: 1000000 }),
+		maxCompactInputTokens: Type.Integer({ minimum: 1, maximum: 1000000 }),
+		maxSummaryTokens: Type.Integer({ minimum: 1, maximum: 100000 }),
 	}),
 	{ additionalProperties: false },
 );
@@ -58,14 +68,24 @@ export const options: Record<
 	},
 	mode: {
 		description:
-			"Execution mode ('observe' for V1 observation, 'exact-prune' for V2 exact pruning)",
-		values: ["observe", "exact-prune"],
+			"Execution mode: observe (V1), exact-prune (V2), compact (explicit V3 proposals; no authority)",
+		values: ["observe", "exact-prune", "compact"],
 	},
 	maxPruneTokens: {
 		description: "Maximum tokens pruned per turn (0–1000000)",
 		values: ["16000", "32000", "64000", "128000"],
 	},
+	maxCompactInputTokens: {
+		description:
+			"Finite estimated input budget for V3 actions; not authorization",
+		values: ["16000", "64000", "128000"],
+	},
+	maxSummaryTokens: {
+		description: "Finite estimated summary output budget; not authorization",
+		values: ["2000", "8000", "16000"],
+	},
 };
+
 export function settingKey(raw: string): keyof Settings | undefined {
 	return (Object.keys(defaults) as (keyof Settings)[]).find(
 		(k) => k.toLowerCase() === raw.toLowerCase(),
@@ -112,8 +132,9 @@ export class Config {
 			if (!key) throw Error(`Unknown configuration key: ${rawKey}`);
 			const value =
 				key === "mode"
-					? rawValue.toLowerCase() === "exact-prune" ||
-						rawValue.toLowerCase() === "observe"
+					? ["exact-prune", "observe", "compact"].includes(
+							rawValue.toLowerCase(),
+						)
 						? (rawValue.toLowerCase() as ACOMode)
 						: undefined
 					: typeof defaults[key] === "boolean"

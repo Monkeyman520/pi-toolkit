@@ -5,10 +5,11 @@ import {
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { DISCOVER_EVENT, isDiscoverPayload } from "pi-plugin-support/discovery";
+import { actionDrafts, reconcileActions } from "./actions.ts";
 import { complete, parse, usage } from "./commands.ts";
+import { Compactor } from "./compaction.ts";
 import { Config, settingKey } from "./config.ts";
 import { Continuity, recallSchema } from "./continuity.ts";
-import type { Access, Receipt } from "./evidence.ts";
 import {
 	type Metric,
 	type Pressure,
@@ -22,6 +23,7 @@ import {
 	createPruneBoundaryDrafts,
 	createRestoreBoundaryDrafts,
 	evaluatePruneCandidates,
+	latestEdits,
 	type PruneExecutionOutcome,
 	projectRequestContext,
 	reconcileBranchPrunes,
@@ -123,6 +125,9 @@ export default function contextMonitor(
 		(type, data) => pi.appendEntry(type, data),
 	);
 
+	const compactor = new Compactor(pi, continuity, () =>
+		active ? { owner: active, settings: active.config.settings } : undefined,
+	);
 	function assess(s: State, ctx: ExtensionContext, event: string) {
 		if (!s.pressure) return;
 		const branch =
@@ -292,68 +297,87 @@ export default function contextMonitor(
 		}
 		if (ctx.hasUI) ctx.ui.setStatus("aco", `ACO · ${brief(s)}`);
 	}
+	function executionGuard(s: State, ctx: ExtensionContext) {
+		const fingerprint = () =>
+			JSON.stringify([
+				ctx.sessionManager.getSessionId(),
+				ctx.sessionManager.getBranch().map((e) => e.id),
+				s.config.settings,
+			]);
+		const key = fingerprint();
+		return () => {
+			if (active !== s || !s.config.settings.enabled || fingerprint() !== key)
+				throw Error(
+					"ACO session/task/branch/configuration changed; action cancelled",
+				);
+		};
+	}
+	async function verifiedRecovery(s: State, ctx: ExtensionContext) {
+		const check = executionGuard(s, ctx);
+		const checkpoints = await continuity.getActiveCheckpoints(
+			ctx,
+			() => active === s,
+		);
+		check();
+		s.tasks = buildTasks(ctx.sessionManager.getBranch(), ctx.cwd);
+		linkCheckpoints(s.tasks, checkpoints);
+		return checkpoints;
+	}
 	function syncHooks(s: State) {
 		if (s.config.settings.enabled && s.config.settings.mode === "exact-prune") {
-			if (!s.contextUnlisten) {
+			if (!s.contextUnlisten)
 				s.contextUnlisten = pi.on("context", async (event, ctx) => {
 					if (
-						!active ||
 						active !== s ||
 						!s.config.settings.enabled ||
 						s.config.settings.mode !== "exact-prune"
 					)
 						return;
-					const branch =
-						typeof ctx.sessionManager?.getBranch === "function"
-							? ctx.sessionManager.getBranch()
-							: [];
-					let access: Access;
 					try {
-						access = await continuity.access(ctx);
+						if (s.pendingRestores.length) return;
+						const checkpoints = await verifiedRecovery(s, ctx);
+						const branch = ctx.sessionManager.getBranch();
+						if (reconcileActions(branch).some((a) => !a.success)) return;
+						const result = evaluatePruneCandidates(
+							s.tasks,
+							branch,
+							checkpoints,
+							{
+								mode: s.config.settings.mode,
+								maxPruneTokens: s.config.settings.maxPruneTokens,
+							},
+						);
+						const candidates = result.eligible.filter(
+							(c) =>
+								!s.pendingRestores.includes(c.sourceEntryId) &&
+								(!c.pairedEntryId ||
+									!s.pendingRestores.includes(c.pairedEntryId)),
+						);
+						if (!candidates.length) return;
+						const projection = projectRequestContext(
+							event.messages as unknown as AgentMessage[],
+							candidates,
+							branch,
+						);
+						if (projection.reclaimedTokens > 0) {
+							s.lastProjection = projection;
+							return {
+								messages:
+									projection.messages as unknown as typeof event.messages,
+							};
+						}
 					} catch {
 						return;
 					}
-					if (active !== s) return;
-					const checkpoints = await continuity.getActiveCheckpoints(ctx);
-					linkCheckpoints(s.tasks, checkpoints);
-					const evalResult = evaluatePruneCandidates(
-						s.tasks,
-						branch,
-						access.receipts,
-						{
-							mode: "exact-prune",
-							maxPruneTokens: s.config.settings.maxPruneTokens,
-						},
-					);
-					const candidates = evalResult.eligible.filter(
-						(c) =>
-							!s.pendingRestores.includes(c.sourceEntryId) &&
-							(!c.pairedEntryId ||
-								!s.pendingRestores.includes(c.pairedEntryId)),
-					);
-					if (!candidates.length) return;
-					const projection = projectRequestContext(
-						event.messages as unknown as AgentMessage[],
-						candidates,
-						branch,
-					);
-					if (projection.reclaimedTokens > 0) {
-						s.lastProjection = projection;
-						return {
-							messages: projection.messages as unknown as typeof event.messages,
-						};
-					}
 				});
-			}
 		} else {
-			if (s.contextUnlisten) {
-				s.contextUnlisten();
-				s.contextUnlisten = undefined;
-			}
+			s.contextUnlisten?.();
+			s.contextUnlisten = undefined;
 		}
 	}
 
 	function stop() {
+		compactor.reset();
 		continuity.invalidate();
 		const old = active;
 		active = undefined;
@@ -382,15 +406,41 @@ export default function contextMonitor(
 		observe(s, ctx, "status", false, false);
 		const isExactPrune = s.config.settings.mode === "exact-prune";
 		return {
-			stage: "V1 + V2 recovery foundation/T0003 + V2 exact-pruning/T0004",
-			mode: isExactPrune ? "exact-prune" : "observe-only",
+			stage:
+				"V1 + V2 recovery/T0003 + V2 exact-pruning/T0004 + V3 scoped extractive/native compaction/T0005",
+			compaction: compactor.report(ctx),
+			mode:
+				s.config.settings.mode === "compact"
+					? "compact"
+					: isExactPrune
+						? "exact-prune"
+						: "observe-only",
 			sampling: s.config.settings.enabled
 				? "enabled"
 				: "disabled; event snapshots may be stale",
-			authorizedStrategies: isExactPrune ? ["exact-prune"] : [],
-			strategyExecution: isExactPrune
-				? "active; recovery-gated exact pruning available; compaction/delegation not delivered"
-				: "unavailable; exact pruning/compaction/delegation not delivered in observe mode",
+			authorizedStrategies: !s.config.settings.enabled
+				? []
+				: isExactPrune
+					? ["exact-prune"]
+					: s.config.settings.mode === "compact"
+						? [
+								...new Set(
+									compactor.permissions.inspect(ctx).map((g) => g.operation),
+								),
+							]
+						: [],
+			availableStrategies:
+				s.config.settings.mode === "compact"
+					? ["semantic", "native"]
+					: isExactPrune
+						? ["exact-prune"]
+						: [],
+			strategyExecution:
+				s.config.settings.mode === "compact"
+					? "V3 explicit proposals only; confirmation or scoped automation and independent safety verification required; delegation unavailable"
+					: isExactPrune
+						? "V2 recovery-gated exact pruning; compaction requires separate compact mode"
+						: "V1 observation-only; no ACO strategy execution",
 			evidence:
 				"explicit local checkpoint and bounded historical recall available; /aco evidence re-verifies active-task receipts",
 			tasks: s.tasks,
@@ -399,8 +449,14 @@ export default function contextMonitor(
 				mode: s.config.settings.mode,
 				maxPruneTokens: s.config.settings.maxPruneTokens,
 				lastProjection: s.lastProjection ?? null,
-				lastExecution: s.pruneOutcome ?? null,
-				omittedEntries: s.omittedEntries,
+				lastExecution:
+					reconcileActions(ctx.sessionManager.getBranch()).at(-1) ??
+					s.pruneOutcome ??
+					null,
+				actions: reconcileActions(ctx.sessionManager.getBranch()),
+				omittedEntries: [...latestEdits(ctx.sessionManager.getBranch())]
+					.filter(([, replacement]) => replacement === null)
+					.map(([id]) => id),
 			},
 			analysis: {
 				...s.analysis,
@@ -460,11 +516,12 @@ export default function contextMonitor(
 			typeof ctx.sessionManager?.getBranch === "function"
 				? ctx.sessionManager.getBranch()
 				: [];
-		let accessReceipts: Receipt[] = [];
+		let checkpoints: Awaited<ReturnType<typeof verifiedRecovery>> = [];
 		try {
-			accessReceipts = (await continuity.access(ctx)).receipts;
+			checkpoints = await verifiedRecovery(s, ctx);
 		} catch {}
-		const prunes = reconcileBranchPrunes(branch, accessReceipts);
+		if (active !== s) return;
+		const prunes = reconcileBranchPrunes(branch, checkpoints);
 		s.omittedEntries = prunes.omittedTargetIds;
 		if (prunes.unverifiedTargetIds.length > 0) {
 			ctx.ui.notify(
@@ -514,6 +571,7 @@ export default function contextMonitor(
 		const s = active;
 		if (!s) return;
 		continuity.invalidate();
+		compactor.reset();
 		reset("session_tree", ctx);
 		const recovery = await continuity.reconcile(ctx);
 		if (
@@ -526,11 +584,12 @@ export default function contextMonitor(
 			typeof ctx.sessionManager?.getBranch === "function"
 				? ctx.sessionManager.getBranch()
 				: [];
-		let accessReceipts: Receipt[] = [];
+		let checkpoints: Awaited<ReturnType<typeof verifiedRecovery>> = [];
 		try {
-			accessReceipts = (await continuity.access(ctx)).receipts;
+			checkpoints = await verifiedRecovery(s, ctx);
 		} catch {}
-		const prunes = reconcileBranchPrunes(branch, accessReceipts);
+		if (active !== s) return;
+		const prunes = reconcileBranchPrunes(branch, checkpoints);
 		s.omittedEntries = prunes.omittedTargetIds;
 		s.lastProjection = undefined;
 		s.pendingRestores = [];
@@ -574,88 +633,94 @@ export default function contextMonitor(
 		if (!s?.config.settings.enabled) return;
 		s.providerUsage = providerUsage(event.message);
 		observe(s, ctx, "turn_end", true);
-
-		if (s.config.settings.mode !== "exact-prune") {
+		if (
+			s.config.settings.mode === "observe" ||
+			(event.outcome && event.outcome !== "completed")
+		)
 			return;
-		}
-
-		const branch =
-			typeof ctx.sessionManager?.getBranch === "function"
-				? ctx.sessionManager.getBranch()
-				: [];
-
-		let access: Access;
 		try {
-			access = await continuity.access(ctx);
-		} catch {
-			return;
-		}
-		if (active !== s) return;
-
-		// Handle pending restores
-		if (s.pendingRestores.length > 0) {
-			const restoreTargets = [...s.pendingRestores];
-			s.pendingRestores = [];
-			let combinedDrafts = [...event.entries];
-			for (const tid of restoreTargets) {
-				const restore = await createRestoreBoundaryDrafts(
-					tid,
-					branch,
-					continuity.store,
-					access.receipts,
-					combinedDrafts,
-				);
-				combinedDrafts = restore.drafts;
-				for (const restoredId of restore.restoredTargetIds) {
-					s.omittedEntries = s.omittedEntries.filter((id) => id !== restoredId);
+			const check = executionGuard(s, ctx);
+			const checkpoints = await verifiedRecovery(s, ctx);
+			check();
+			const branch = ctx.sessionManager.getBranch();
+			if (s.pendingRestores.length) {
+				const targets = [...s.pendingRestores];
+				const own: import("@earendil-works/pi-coding-agent").SessionBoundaryDraft[] =
+					[];
+				for (const id of targets) {
+					const restore = await createRestoreBoundaryDrafts(
+						id,
+						branch,
+						checkpoints,
+						[...event.entries, ...own],
+					);
+					check();
+					if (restore.error) {
+						s.pendingRestores = [];
+						ctx.ui.notify(`ACO restore refused: ${restore.error}`, "error");
+						return;
+					}
+					own.splice(
+						0,
+						own.length,
+						...restore.drafts.slice(event.entries.length),
+					);
 				}
+				s.pendingRestores = [];
+				return {
+					entries: [
+						...event.entries,
+						...actionDrafts(
+							"restore",
+							own,
+							checkpoints.map((c) => c.id),
+							0,
+							0,
+						),
+					],
+				};
 			}
-			return { entries: combinedDrafts, continue: event.continue };
-		}
-
-		// Durable exact pruning
-		const checkpoints = await continuity.getActiveCheckpoints(ctx);
-		linkCheckpoints(s.tasks, checkpoints);
-		const evalResult = evaluatePruneCandidates(
-			s.tasks,
-			branch,
-			access.receipts,
-			{
-				mode: "exact-prune",
+			if (s.config.settings.mode !== "exact-prune") return;
+			if (reconcileActions(branch).some((a) => !a.success)) return;
+			const evaluation = evaluatePruneCandidates(s.tasks, branch, checkpoints, {
+				mode: s.config.settings.mode,
 				maxPruneTokens: s.config.settings.maxPruneTokens,
-			},
-		);
-
-		if (!evalResult.eligible.length) {
-			return;
-		}
-
-		const pruneResult = createPruneBoundaryDrafts(
-			evalResult.eligible,
-			branch,
-			event.entries,
-		);
-
-		if (pruneResult.prunedTargetIds.length > 0) {
+			});
+			const prune = createPruneBoundaryDrafts(
+				evaluation.eligible,
+				branch,
+				event.entries,
+			);
+			if (!prune.prunedTargetIds.length) return;
 			s.pruneOutcome = {
-				success: true,
+				success: false,
+				status: "proposed",
 				mode: "durable-edit",
-				targetIds: pruneResult.prunedTargetIds,
-				beforeTokens: pruneResult.beforeTokens,
-				afterTokens: pruneResult.afterTokens,
-				reclaimedTokens: pruneResult.reclaimedTokens,
+				targetIds: prune.prunedTargetIds,
+				beforeTokens: prune.beforeTokens,
+				afterTokens: prune.afterTokens,
+				reclaimedTokens: prune.reclaimedTokens,
 				timestamp: Date.now(),
-				drafts: pruneResult.drafts,
 			};
-			for (const id of pruneResult.prunedTargetIds) {
-				if (!s.omittedEntries.includes(id)) {
-					s.omittedEntries.push(id);
-				}
-			}
-			return { entries: pruneResult.drafts, continue: event.continue };
+			return {
+				entries: [
+					...event.entries,
+					...actionDrafts(
+						"prune",
+						prune.drafts.slice(event.entries.length),
+						checkpoints.map((c) => c.id),
+						prune.beforeTokens,
+						prune.afterTokens,
+					),
+				],
+			};
+		} catch (error) {
+			if (active === s)
+				ctx.ui.notify(
+					`ACO edit cancelled: ${error instanceof Error ? error.message : String(error)}`,
+					"warning",
+				);
 		}
-
-		return;
 	});
 
 	pi.on("agent_start", () => {
@@ -780,69 +845,94 @@ export default function contextMonitor(
 				return;
 			}
 
-			if (cmd.kind === "prune") {
-				const branch =
-					typeof ctx.sessionManager?.getBranch === "function"
-						? ctx.sessionManager.getBranch()
-						: [];
-				let receipts: Receipt[] = [];
+			if (
+				cmd.kind === "summarize" ||
+				cmd.kind === "compact" ||
+				cmd.kind === "compaction" ||
+				cmd.kind === "authorize" ||
+				cmd.kind === "revoke"
+			) {
 				try {
-					receipts = (await continuity.access(ctx)).receipts;
-				} catch {}
-				const checkpoints = await continuity.getActiveCheckpoints(ctx);
-				linkCheckpoints(s.tasks, checkpoints);
-				const evalResult = evaluatePruneCandidates(s.tasks, branch, receipts, {
-					mode: s.config.settings.mode,
-					maxPruneTokens: s.config.settings.maxPruneTokens,
-				});
-				const info = {
-					mode: s.config.settings.mode,
-					eligible: evalResult.eligible,
-					ineligible: evalResult.ineligible,
-					omittedEntries: s.omittedEntries,
-					lastProjection: s.lastProjection ?? null,
-					lastExecution: s.pruneOutcome ?? null,
-				};
-				ctx.ui.notify(JSON.stringify(info, null, 2), "info");
-				return;
-			}
-
-			if (cmd.kind === "restore") {
-				const branch =
-					typeof ctx.sessionManager?.getBranch === "function"
-						? ctx.sessionManager.getBranch()
-						: [];
-				let receipts: Receipt[] = [];
-				try {
-					receipts = (await continuity.access(ctx)).receipts;
-				} catch {}
-				const restore = await createRestoreBoundaryDrafts(
-					cmd.targetId,
-					branch,
-					continuity.store,
-					receipts,
-					[],
-				);
-				if (restore.error) {
-					ctx.ui.notify(`ACO restore failed: ${restore.error}`, "error");
-					return;
-				}
-				s.pendingRestores.push(...restore.restoredTargetIds);
-				if (s.lastProjection) {
-					s.lastProjection.excludedEntryIds =
-						s.lastProjection.excludedEntryIds.filter(
-							(id) => !restore.restoredTargetIds.includes(id),
+					let result: unknown;
+					if (cmd.kind === "summarize")
+						result = await compactor.summarize(ctx, JSON.parse(cmd.json));
+					else if (cmd.kind === "compact") result = await compactor.native(ctx);
+					else if (cmd.kind === "authorize")
+						result = {
+							authorized: compactor.permissions.grant(
+								ctx,
+								JSON.parse(cmd.json),
+							),
+							persistent: false,
+						};
+					else if (cmd.kind === "revoke") {
+						compactor.reset();
+						result = { revoked: true };
+					} else result = compactor.report(ctx);
+					if (active === s) ctx.ui.notify(JSON.stringify(result), "info");
+				} catch (error) {
+					if (active === s)
+						ctx.ui.notify(
+							`ACO compaction refused: ${error instanceof Error ? error.message : String(error)}`,
+							"error",
 						);
 				}
-				ctx.ui.notify(
-					JSON.stringify({
-						restored: true,
-						targetIds: restore.restoredTargetIds,
-						message:
-							"Restoration scheduled for next boundary commit; un-filtered in request projection",
-					}),
-					"info",
-				);
+				return;
+			}
+			if (cmd.kind === "prune" || cmd.kind === "restore") {
+				try {
+					if (!s.config.settings.enabled) throw Error("ACO disabled");
+					const checkpoints = await verifiedRecovery(s, ctx);
+					const branch = ctx.sessionManager.getBranch();
+					if (cmd.kind === "prune") {
+						const result = evaluatePruneCandidates(
+							s.tasks,
+							branch,
+							checkpoints,
+							{
+								mode: s.config.settings.mode,
+								maxPruneTokens: s.config.settings.maxPruneTokens,
+							},
+						);
+						ctx.ui.notify(
+							JSON.stringify({
+								...result,
+								mode: s.config.settings.mode,
+								lastProjection: s.lastProjection ?? null,
+								actions: reconcileActions(branch),
+							}),
+							"info",
+						);
+					} else if (cmd.kind === "restore") {
+						if (s.config.settings.mode === "observe")
+							throw Error("V1 observe mode cannot restore context");
+						const restore = await createRestoreBoundaryDrafts(
+							cmd.targetId,
+							branch,
+							checkpoints,
+						);
+						if (restore.error) throw Error(restore.error);
+						// Store only the requested root: the boundary expands its legal exchange again.
+						if (!s.pendingRestores.includes(cmd.targetId))
+							s.pendingRestores.push(cmd.targetId);
+						ctx.ui.notify(
+							JSON.stringify({
+								restored: false,
+								scheduled: true,
+								targetIds: restore.restoredTargetIds,
+								message:
+									"Restoration scheduled for the next completed turn boundary; not yet committed",
+							}),
+							"info",
+						);
+					}
+				} catch (error) {
+					if (active === s)
+						ctx.ui.notify(
+							`ACO: ${error instanceof Error ? error.message : String(error)}`,
+							"error",
+						);
+				}
 				return;
 			}
 

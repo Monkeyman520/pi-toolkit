@@ -93,3 +93,11 @@ From `packages/pi-context-aco/`, separately executed and passing after the final
 - `npm run smoke:prune` — T0004 installed Pi exact pruning in real RPC session: V1 observe passivity, request-local projection, durable context_edit omission, verified restoration from evidence store, and branch-relative isolation.
 
 From the root: `node scripts/package-support.mjs --check` (archive parity) and `git diff --check` passed.
+
+## Authorized prerequisite repair during T0005
+
+The T0005 loop independently reproduced gaps behind this ticket's earlier Done receipt: manifest membership could authorize pruning after an original vanished, restoration ignored the store, unrelated omitted targets were labelled verified, and declarations could be mutated through shared arrays during later analysis. The user explicitly authorized repairing this producer before continuing T0005.
+
+The repairs bind freshly verified original bytes to exact branch sources/protocol partners; restore verified content and report scheduling separately; reconcile digest-bound action intents/partial outcomes; reset stale storage links; prohibit dropping extra assistant conclusions and cap retained verification bytes. Stored declaration arrays are cloned before inference mutates task state. Original receipt text above is historical, not proof that these previously missing guards existed.
+
+Failing-then-passing regressions, an actual installed Pi corrupt-original pruning/restoration/branch check, final 114-test suite, package static gates and all installed/TUI smokes are recorded in the [T0005 receipt](./T0005-v3-authorized-semantic-and-native-compaction.md#t0005-execution-receipt). Status remains Done after these corrections; this does not claim a live-Pi local process-crash/partial-write experiment.

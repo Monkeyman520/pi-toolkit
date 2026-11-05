@@ -1,6 +1,6 @@
 # Pi Context ACO
 
-**V1 observation/recommendations, T0003 recovery foundation and T0004 recovery-gated exact pruning** for the Adaptive Context Orchestrator: pressure/task monitoring, full R04 semantic context graph, protected references, explicit local evidence checkpoints, bounded historical recall, request-local context projection, durable context_edit boundary drafts and verified restoration. Semantic replacement, compaction or delegation strategies remain pending (T0005/T0006).
+**V1 observation/recommendations, V2 verified recovery/exact pruning, and T0005 V3 scoped extractive/native compaction** for the Adaptive Context Orchestrator. V1 remains observation-only. V3 explicitly proposes mechanically verified local summaries or native prefix compaction, requiring confirmation by default or operation/source/task/session-scoped automation authorization. Delegation and adaptive composition remain pending (T0006/T0007).
 
 ## Compatibility and resources
 
@@ -24,19 +24,24 @@ From the collection root after setup: `pi -e ./packages/pi-context-aco`. Persist
 
 ## Commands and declaration tool
 
-| Command                                  | Result                                                                                                                       |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `/aco`, `/aco config`                    | Standard interactive status/settings panel in TUI; current JSON report in non-TUI modes.                                     |
-| `/aco status`                            | Current pressure, task/reference state, provenance, recommendation, capability and management measurements.                  |
-| `/aco trace`                             | Current report plus the latest 50 in-memory numeric/assessment snapshots.                                                    |
-| `/aco tasks`                             | Active-branch tasks, protected source references, signal families, dependency conflicts and coverage limits.                 |
-| `/aco recommend`                         | Conditional actions/no-op, reasons, risks, recovery/authority prerequisites, estimated/unknown gains and costs.              |
-| `/aco prune`                             | Inspect prune candidates, active exclusions, and before/after measurements.                                                  |
-| `/aco restore <id\|all>`                 | Restore omitted entries from verified evidence store originals via boundary edits.                                           |
-| `/aco declare <JSON>`                    | Validate and append an explicit partial task update as `aco-task` metadata. No strategy authorization.                       |
-| `/aco on`, `/aco off`                    | Persistently enable/disable sampling, declarations and explicit checkpoint/recall operations. Status inspection still works. |
-| `/aco config reload`                     | Reload settings and reset the growth baseline.                                                                               |
-| `/aco config <key> [value]`, `/aco help` | Read/validate/save a setting, or show usage.                                                                                 |
+| Command                                  | Result                                                                                                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/aco`, `/aco config`                    | Standard interactive status/settings panel in TUI; current JSON report in non-TUI modes.                                                                            |
+| `/aco status`                            | Current pressure, task/reference state, provenance, recommendation, capability and management measurements.                                                         |
+| `/aco trace`                             | Current report plus the latest 50 in-memory numeric/assessment snapshots.                                                                                           |
+| `/aco tasks`                             | Active-branch tasks, protected source references, signal families, dependency conflicts and coverage limits.                                                        |
+| `/aco recommend`                         | Conditional actions/no-op, reasons, risks, recovery/authority prerequisites, estimated/unknown gains and costs.                                                     |
+| `/aco prune`                             | Inspect prune candidates, active exclusions, and before/after measurements.                                                                                         |
+| `/aco restore <id\|all>`                 | Schedule exact restoration of edited entries and necessary tool pairs from freshly verified originals at the next completed turn boundary; not an immediate commit. |
+| `/aco summarize <JSON>`                  | Propose one complete text tool-result replacement; accepts `sourceEntryIds` (one ID) and optional `summary` to verify.                                              |
+| `/aco compact`                           | Propose native host-selected history-prefix compaction, not arbitrary-range compression.                                                                            |
+| `/aco compaction`                        | Inspect scoped grants, pending/proposed versus observed actions, native outcomes and recovery references.                                                           |
+| `/aco authorize <JSON>`                  | Explicit runtime-only automation grant for one operation, active task and source set with finite input/summary budgets.                                             |
+| `/aco revoke`                            | Revoke grants and cancel pending ACO work; already-issued native request tokens remain guarded against default-generation fallback.                                 |
+| `/aco declare <JSON>`                    | Validate and append an explicit partial task update as `aco-task` metadata. No strategy authorization.                                                              |
+| `/aco on`, `/aco off`                    | Persistently enable/disable sampling, declarations and explicit checkpoint/recall operations. Status inspection still works.                                        |
+| `/aco config reload`                     | Reload settings and reset the growth baseline.                                                                                                                      |
+| `/aco config <key> [value]`, `/aco help` | Read/validate/save a setting, or show usage.                                                                                                                        |
 
 Tab suggestions preserve the entire argument prefix, including `config <key> <value>`; JSON is free-form schema-validated input. Numeric presets are suggestions, not the allowed-value boundary. The TUI switcher lists only loaded collection-protocol panels, never a static catalog or injected native `/settings` rows.
 
@@ -83,7 +88,7 @@ Reference examples (replace placeholders with IDs from `/aco tasks`, checkpoint 
 
 Checkpoint input accepts 1–64 unique source IDs and optional `unresolvedWork` (at most 32 strings, each 1024 characters). It captures the active task's declared/observed plan/status, latest test/resource facts and their source provenance, selected/required decision/reference dependency closure, unresolved relationships and caller-declared unresolved work. Unknown/limited task analysis remains labelled, not silently complete. Related source entries are included automatically; more than 128 originals rejects the checkpoint rather than claiming partial continuity is complete. Original segments are exact JSON serialization of the host's raw source-entry objects, including structured tool results and error semantics—not summaries or a later re-read of file paths.
 
-The three tiers remain distinct: current Pi working set (untouched), structured continuity/index, and original segment files. Storage is `<getAgentDir()>/pi-context-aco/evidence/<canonical-cwd-sha256>/<checkpoint-uuid>/`, normally under `~/.pi/agent`. The canonical session cwd defines this project's scope, not a guessed Git root. Each checkpoint is immutable: an intent metadata entry precedes exclusive local writes, rename and SHA-256 readback of the captured originals; only then is a digest-bound commit receipt appended. Files alone or a write acknowledgement cannot authorize recall. No direct session JSONL edits or storage backend dependency.
+The three tiers remain distinct: current Pi working set (unchanged by checkpoint/recall themselves), structured continuity/index, and original segment files. Storage is `<getAgentDir()>/pi-context-aco/evidence/<canonical-cwd-sha256>/<checkpoint-uuid>/`, normally under `~/.pi/agent`. The canonical session cwd defines this project's scope, not a guessed Git root. Each checkpoint is immutable: an intent metadata entry precedes exclusive local writes, rename and SHA-256 readback of the captured originals; only then is a digest-bound commit receipt appended. Files alone or a write acknowledgement cannot authorize recall. No direct session JSONL edits or storage backend dependency.
 
 Active raw-branch intent/commit pairs and task identity supply authority; possession of an ID does not. Resume/reload and tree navigation re-verify active-path receipts; forks inherit only receipts on their copied path and retain the origin session/task/source provenance. Unrelated project/task/branch and ungranted child scopes are denied. The host-only `EvidenceStore.grant` seam can issue a runtime-local child-session capability for an explicit necessary segment subset; it is not exposed to tools/commands and does not dispatch children. T0006 must bind actual child sessions to this trusted boundary; caller-supplied identity is not authentication.
 
@@ -91,13 +96,59 @@ Recall takes `checkpointId`, `segmentId` (a source ID or `continuity`), required
 
 Safety bounds: 4 MiB per segment, 16 MiB per checkpoint, 256 KiB manifest, one checkpoint writer per extension instance. Invalid/oversized requests, readback failures, append failures and cancelled/stale session/branch work never justify unloading. Restart marks intent-only attempts incomplete and corrupt commits invalid; earlier verified checkpoints remain usable. Snapshots remain historical, never silently restored over current task decisions. Storage is not a transaction with Pi's session writer and does not promise fsync/power-loss durability; reconciliation and future consumers must verify persisted receipts/content again. Orphan/partial files are retained, not automatically retried, adopted or deleted.
 
+## V3 extractive summaries and native prefix compaction
+
+`mode=compact` makes these explicit command-driven capabilities available; it does **not** grant automation or enable adaptive policy execution. This mode does not automatically run V2 pruning. Default `mode=observe` refuses all ACO strategy execution, even with a grant.
+
+### Verification boundary
+
+The delivered verifier is intentionally conservative: **verbatim extractive summaries**, not general LLM paraphrase equivalence. It deduplicates repeated text lines into a readable dictionary with ordered repetition runs, retains complete source-message metadata (including tool identity, error state and structured details), and includes source/task/dependency/checkpoint provenance. An independent decoder must reproduce every persisted JSON source field and continuity field exactly. Thus conclusions, constraints, rationale and required precision are retained rather than guessed disposable. A plausible paraphrase, changed provenance, unsupported content (including multimodal/thinking blocks), inaccessible originals, unknown dependencies or a non-beneficial/over-budget summary is rejected with the existing representation intact. Unique text may not compress at all; no general semantic-losslessness or real-model task-quality claim is made.
+
+Local replacement currently supports **one complete text tool-result message** per request. The result's role, call ID, tool name, error semantics and details stay unchanged; the supported append-only `context_edit` replaces only its content. No raw-history rewrite or extra provider/model call occurs. System prompts/tool declarations are untouched. No new model-callable authorization/execution tool is registered.
+
+### Usage and authority
+
+Reference examples: replace every placeholder with IDs from `/aco tasks`, a proposal and `/aco evidence`.
+
+```text
+/aco config mode compact
+/aco checkpoint {"sourceEntryIds":["REAL_RESULT_ID"]}
+/aco summarize {"sourceEntryIds":["REAL_RESULT_ID"]}
+```
+
+A verified active-task checkpoint must already cover every affected original. Checkpointing a tool result also captures its complete call/result exchange. Verification re-reads digest-bound original bytes, not cached manifest membership; executors bind those bytes to the actual branch source. Verification retains at most the latest 64 receipts and 32 MiB of originals per request; exceeding this coverage is not permission to mutate.
+
+In a TUI, each strategy requests confirmation by default. Escape/denial leaves it unapplied. **RPC/print/non-interactive mode never waits for a confirmation dialog:** without applicable prior authorization it returns a recommendation and does not mutate context.
+
+Explicit automation is separate from enablement, a model proposal or permission to store evidence:
+
+```text
+/aco authorize {"operation":"semantic","taskId":"ACTIVE_TASK_ID","sourceEntryIds":["REAL_RESULT_ID"],"maxInputTokens":64000,"maxSummaryTokens":8000}
+/aco summarize {"sourceEntryIds":["REAL_RESULT_ID"]}
+/aco revoke
+```
+
+Use `operation:"native"` for native compaction. Grants are bounded to the current cwd/session/task, existing branch anchor, selected source IDs and finite budgets. They are runtime-only, not inherited by restarted/forked sessions, and cleared on tree navigation/reload/shutdown. An inapplicable grant does not approve another strategy or source. No generic auto-compact boolean is provided. Commands are the trusted user-facing authorization boundary; other privileged extensions, tools or OS processes are not sandboxed by it.
+
+For native compaction, an unauthorized `/aco compact` proposal reports the currently visible source IDs. Checkpoint that scope and confirm or authorize `native` for it before retrying. The `session_before_compact` hook customizes **only ACO's uniquely identified request**, using Pi's actual prefix preparation and kept boundary, including any previous summary. Raw history remains. Other user/host/extension compactions are neither cancelled nor customized by ACO.
+
+### Completion, recovery and costs
+
+Local work is scheduled for a completed `turn_end`; no continuation/model turn is requested automatically. Drafts mean **proposed**, not committed. Digest-bound action intents are reconciled against actual raw-branch edits; partial/not-committed actions inhibit dependent strategies and are never blindly replayed. Conflicting drafts, changed task/session/branch/config/model, revoked authority or failed re-verification cancel the proposal. `/aco restore` re-verifies and restores exact original content and any omitted protocol partners. A restoration command's scheduling acknowledgement is not completion.
+
+Native `ctx.compact()` initiation means **requested**, not success. Actual persisted completion/callbacks and error/cancellation events establish terminal outcomes; a different summary from another extension is reported as interference, not successful ACO verification. Session-append failure may leave in-memory state different from disk: outcomes expose observed compaction IDs/uncertainty and never promise an atomic transaction. Interrupted native intents without terminal evidence block blind retry. A lost/replaced session cannot receive stale completion writes.
+
+Inspect `/aco compaction` and `/aco evidence` after a failure. Verified `aco_recall`/command recall remains historical. Native recovery can navigate through Pi's ordinary `/tree` to the recorded pre-compaction `anchorId`, then re-verify the checkpoint; ACO does not silently overwrite newer task decisions or auto-navigate the user's tree.
+
+Sizes/savings and finite budgets are **UTF-16/JSON-length ÷ 4 estimates**, not tokenizer measurements. Checkpoints, current scope/dependencies, legal tool sequences, configured input/output ceilings and known model capacity are required independently of authorization. Local generation/verification latency is measured; deterministic summary generation makes zero additional model calls/tokens. Ordinary tool declarations/results, retained summary content and host/other-extension work still have costs. Native reported usage is retained when available; aggregate provider input/cache-read/cache-write/cost gaps remain unavailable. Prefix-cache disruption and model interpretation of this extractive format are not claimed beneficial universally.
+
 ## Task understanding and protection
 
 The active **raw branch**, not all session entries or cached global state, reconstructs declarations on resume/tree/fork/reload. An undeclared conversation starts with an observed task tied to the first user source; follow-ups remain evidence for it until an explicit task switch. Declaration provenance is `command` or `tool`, not a claim of authenticated human authorship or independently verified success.
 
 The rules-first analyzer combines user-intent hints, available declared/observed plan state, finalized tool activity, successful tool-reported file touches and test outcomes. Inferred phases require corroborating independent signal families and remain **tentative**. Assistant prose alone cannot prove phase, plan completion, passing tests or task success. Numeric tool exit status may establish a reported test result; an absent exit status is unknown. A successful test does not complete the task. Resource touches are not a Git/workspace audit.
 
-User-message requirement/acceptance sources, pinned constraints/critical decisions, precision-sensitive/error sources and unfinished task dependencies are protected. Protection follows declared reference dependencies, source aliases and task dependencies, including completed producer tasks still needed by unfinished consumers. Planning completion or `completedResearch: true` cannot override protection. Full semantic segmentation/equivalence validation remains T0004.
+User-message requirement/acceptance sources, pinned constraints/critical decisions, precision-sensitive/error sources and unfinished task dependencies are protected. Protection follows declared reference dependencies, source aliases and task dependencies, including completed producer tasks still needed by unfinished consumers. Planning completion or `completedResearch: true` cannot override protection. V2 graph/dependency protection is enforced by the pruning boundary; V3's bounded extractive equivalence verification is separate from declaration claims.
 
 Write overlaps use normalized relative/absolute paths within the active session cwd, case-folded on Windows. Concrete overlap overrides a declared zero risk with an inferred overlap indicator (1, **not** a calibrated probability). Symlinks, shell-script modifications and true task independence still require verification.
 
@@ -109,15 +160,17 @@ Assessments are reused for unchanged active-branch/pressure inputs; substantive 
 
 Configuration is `<getAgentDir()>/pi-context-aco.json` (normally `~/.pi/agent/pi-context-aco.json`). Read on startup/reload and explicit `config reload`; no polling timer/watcher. Panel/command saves apply immediately after successful serialized atomic replacement. Invalid/unreadable/oversized settings disable sampling without silent rewrite. Cross-process locking/merging/fsync durability is not promised.
 
-| Setting          | Default | Allowed values / meaning                                                                  |
-| ---------------- | ------- | ----------------------------------------------------------------------------------------- |
-| `enabled`        | true    | Boolean; sampling/declaration control, never authority.                                   |
-| `historySize`    | 6       | Integer 2–50; recent comparable completed-turn deltas.                                    |
-| `horizonTurns`   | 3       | Integer 1–20; prediction horizon.                                                         |
-| `reserveTokens`  | 4096    | Integer 0–1000000; forecast reserve, not an execution budget.                             |
-| `persistTraces`  | false   | Boolean; append numeric/assessment counters as `aco-monitor` metadata on completed turns. |
-| `mode`           | observe | `observe` (V1 observation-only) or `exact-prune` (V2 recovery-gated exact pruning).       |
-| `maxPruneTokens` | 64000   | Integer 0–1000000; maximum tokens pruned per turn/request.                                |
+| Setting                 | Default | Allowed values / meaning                                                                          |
+| ----------------------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `enabled`               | true    | Boolean; sampling/declaration control, never authority.                                           |
+| `historySize`           | 6       | Integer 2–50; recent comparable completed-turn deltas.                                            |
+| `horizonTurns`          | 3       | Integer 1–20; prediction horizon.                                                                 |
+| `reserveTokens`         | 4096    | Integer 0–1000000; forecast reserve, not an execution budget.                                     |
+| `persistTraces`         | false   | Boolean; append numeric/assessment counters as `aco-monitor` metadata on completed turns.         |
+| `mode`                  | observe | `observe` (V1), `exact-prune` (V2), or `compact` (explicit V3 proposals; no authority by itself). |
+| `maxCompactInputTokens` | 64000   | Integer 1–1000000; estimated input ceiling for V3, not permission.                                |
+| `maxSummaryTokens`      | 8000    | Integer 1–100000; estimated summary ceiling for V3, not permission.                               |
+| `maxPruneTokens`        | 64000   | Integer 0–1000000; maximum tokens pruned per turn/request.                                        |
 
 Defaults are **uncalibrated tunables**. Pi current context tokens are estimated (last usage plus trailing-message estimates), not exact post-filter/request counts. Capacity is observed model configuration. Growth uses recent comparable completed-turn means; model/window/projection/compaction/tree changes, unknown usage and shrinking readings invalidate baselines.
 
@@ -131,9 +184,9 @@ The monitor retains at most 50 trace snapshots, 50 growth deltas, 64 tool-histor
 
 Extensions have Pi's OS privileges; this is not a sandbox. ACO reads host session/usage/tool metadata, writes its own settings, declarations and optional numeric traces. **Explicit checkpoints copy selected original source-entry content and task continuity into a separate local archive**, which may contain sensitive user/tool data and resource paths. No encryption or automatic expiry/garbage collection is provided; protect the agent directory and remove its evidence directory manually when no longer needed (retained receipts then correctly fail verification). Other privileged extensions/tools or local users with filesystem access are outside these policy isolation guarantees. Ordinary model tool arguments/results still follow Pi's session/provider lifecycle. Unrequested bodies are never automatically archived or injected; numeric traces omit bodies.
 
-No extra network/credential access, remote upload, workspace writes, context/result/argument rewriting, evidence deletion/offloading, native compaction initiation, continuation or subagent dispatch occurs. Native user/host/other-extension behavior is not governed by ACO. Only ACO-owned listeners/status/state are closed.
+No extra network/credential access, remote upload, workspace writes, evidence deletion, automatic continuation or child dispatch is added. Explicitly authorized V3 actions can replace model-visible text results or initiate native prefix compaction; they preserve raw history and use only the declared local evidence archive. Native user/host/other-extension behavior is not governed by ACO. Only ACO-owned listeners/status/state are closed.
 
-T0004 V2 recovery-gated exact pruning and restoration is delivered. V3 semantic replacement and native compaction, V4 child delegation and V5 adaptive combinations remain pending.
+T0004 V2 verified exact pruning/restoration and T0005 V3 bounded extractive/native compaction are delivered. V4 child delegation and V5 adaptive combinations remain pending.
 
 ## Verification
 
@@ -147,6 +200,7 @@ npm run smoke
 npm run smoke:tasks
 npm run smoke:evidence
 npm run smoke:prune
+npm run smoke:compact
 ```
 
 Smoke tests require installed Pi/npm and the prepared npm cache. All install actual plugin tarballs outside the checkout, use an isolated agent directory and deterministic in-process provider, and make no live provider requests.
@@ -155,6 +209,8 @@ Smoke tests require installed Pi/npm and the prepared npm cache. All install act
 - `smoke:tasks`: actual E02/E03 workload/no-op decisions, protected exact evidence, command/tool declaration provenance, atomic invalid-update rejection, tree isolation, persisted resume and no strategy/extra model calls.
 - `smoke:evidence`: actual Pi command/tool recall and provider-bound visibility, historical replay after workspace changes, real persistence failure, corrupt restart fallback, incomplete records, task/project/tree/fork isolation and disabled control. Child-subset grants, verification fault injection, append cancellation and selective/Unicode pagination are real-filesystem Vitest evidence, not live worker dispatch.
 - `smoke:prune`: installed Pi exact pruning in real RPC session, covering V1 observe passivity, request-local projection, durable context_edit omission, verified restoration from evidence store, and branch-relative isolation.
+- `smoke:compact`: installed Pi local summary/rejection/restoration, protected exact evidence, unauthorized RPC no-UI behavior, scoped grants, actual native prefix completion, cancellation, real session-file append failure, foreign-handler interference, restart continuity and supported tree recovery. Deterministic fixture provider, not a general-model quality benchmark.
+- Optional V3 terminal check: `python tests/compaction-tui-smoke.py` in the same isolated Python 3.12 / `pywinpty==3.1.2` environment. Actual ConPTY dialogs verify local/native default confirmation, Escape denial, approved local commit/restoration and native completion.
 - Optional actual Windows ConPTY keyboard test: `python tests/tui-smoke.py`, using Python 3.12 with test-only `pywinpty==3.1.2` in an isolated Python environment. It covers settings/persistence, full-prefix Tab completion, task/recommendation inspection, loaded-only panel switching, real reload and orderly exit. Its `--approve` flag applies only to its disposable directory.
 
-Evidence is recorded in [T0001](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0001-v1-context-monitor-and-plugin-control.md), [T0002](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0002-v1-task-context-graph-and-recommendations.md), [T0003](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0003-v2-scoped-evidence-store-checkpoints-and-recall.md) and [T0004](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0004-v2-recovery-gated-exact-pruning.md). Controlled fixtures, unit assertions and actual host/terminal interaction are separate evidence classes. Manual visual GUI testing, other host/Node/platform versions, real-project inference accuracy and adaptive-policy superiority are not claimed.
+Evidence is recorded in [T0001](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0001-v1-context-monitor-and-plugin-control.md), [T0002](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0002-v1-task-context-graph-and-recommendations.md), [T0003](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0003-v2-scoped-evidence-store-checkpoints-and-recall.md) and [T0004](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0004-v2-recovery-gated-exact-pruning.md). The T0005 receipt records V3 and prerequisite repair evidence. Controlled fixtures, unit assertions and actual host/terminal interaction are separate evidence classes. Manual visual GUI testing, other host/Node/platform versions, real-project inference accuracy and adaptive-policy superiority are not claimed.
