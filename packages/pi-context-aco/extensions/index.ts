@@ -6,11 +6,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { DISCOVER_EVENT, isDiscoverPayload } from "pi-plugin-support/discovery";
 import { actionDrafts, reconcileActions } from "./actions.ts";
+import { Adaptive } from "./adaptive.ts";
 import { complete, parse, usage } from "./commands.ts";
 import { Compactor } from "./compaction.ts";
 import { Config, settingKey } from "./config.ts";
 import { Continuity, recallSchema } from "./continuity.ts";
 import { Delegator } from "./delegation.ts";
+import { branchAccounting } from "./evaluation.ts";
+import { type Decision, decide } from "./policy.ts";
 import {
 	type Metric,
 	type Pressure,
@@ -73,6 +76,7 @@ function providerUsage(message: unknown) {
 }
 type ProviderUsage = ReturnType<typeof providerUsage>;
 interface Trace {
+	adaptive?: Pick<Decision, "selected" | "triggers" | "predictionComparison">;
 	assessment?: {
 		reassessments: number;
 		taskCount: number;
@@ -90,6 +94,7 @@ interface Trace {
 interface State {
 	tasks: TaskSnapshot;
 	recommendation?: Recommendation;
+	decision?: Decision;
 	assessmentKey: string;
 	analysis: {
 		reassessments: number;
@@ -134,6 +139,9 @@ export default function contextMonitor(
 	const compactor = new Compactor(pi, continuity, () =>
 		active ? { owner: active, settings: active.config.settings } : undefined,
 	);
+	const adaptive = new Adaptive(pi, continuity, compactor, delegator, () =>
+		active ? { owner: active, settings: active.config.settings } : undefined,
+	);
 	function assess(s: State, ctx: ExtensionContext, event: string) {
 		if (!s.pressure) return;
 		const branch =
@@ -159,6 +167,12 @@ export default function contextMonitor(
 			s.tasks.issues.push("active branch unavailable");
 		}
 		s.recommendation = recommend(s.tasks, s.pressure);
+		s.decision = decide(
+			s.tasks,
+			s.pressure,
+			s.decision,
+			new Set(latestEdits(branch).keys()),
+		);
 		s.analysis = {
 			reassessments: s.analysis.reassessments + 1,
 			modelCalls: 0,
@@ -192,6 +206,7 @@ export default function contextMonitor(
 		);
 		if (JSON.stringify(update).length > 32768)
 			throw Error("Task declaration too large");
+		adaptive.cancel("Task/config/model/authorization changed");
 		delegator.reset(ctx);
 		pi.appendEntry("aco-task", { version: 1, origin, update });
 		if (origin === "tool") s.declarationCalls++;
@@ -248,12 +263,16 @@ export default function contextMonitor(
 				? "unknown"
 				: `${(p.projectedUsage.value * 100).toFixed(1)}%`;
 		const strat =
-			s.config.settings.mode === "exact-prune"
-				? "exact-pruning active"
-				: s.config.settings.mode === "delegate"
-					? "bounded delegation proposals"
-					: "strategies unavailable";
-		return `V2 ${s.config.settings.mode} ${s.config.settings.enabled ? "on" : "off"} · context ${value} est · projected ${future} est · ${s.recommendation?.kind ?? "no-op"} · ${strat}`;
+			s.config.settings.mode === "adaptive"
+				? "ordered guarded composition"
+				: s.config.settings.mode === "compact"
+					? "scoped compaction proposals"
+					: s.config.settings.mode === "delegate"
+						? "bounded delegation proposals"
+						: s.config.settings.mode === "exact-prune"
+							? "exact-pruning active"
+							: "observation only";
+		return `ACO ${s.config.settings.mode} ${s.config.settings.enabled ? "on" : "off"} · context ${value} est · projected ${future} est · ${s.recommendation?.kind ?? "no-op"} · ${strat}`;
 	};
 	function observe(
 		s: State,
@@ -277,6 +296,13 @@ export default function contextMonitor(
 				timestamp: Date.now(),
 				event,
 				pressure: s.pressure,
+				adaptive: s.decision
+					? {
+							selected: s.decision.selected,
+							triggers: s.decision.triggers,
+							predictionComparison: s.decision.predictionComparison,
+						}
+					: undefined,
 				assessment: {
 					reassessments: s.analysis.reassessments,
 					taskCount: s.tasks.tasks.length,
@@ -386,6 +412,7 @@ export default function contextMonitor(
 	}
 
 	function stop() {
+		adaptive.cancel("Session/tree/reload changed");
 		delegator.reset();
 		compactor.reset();
 		continuity.invalidate();
@@ -397,6 +424,7 @@ export default function contextMonitor(
 	}
 	const update = (s: State, ctx: ExtensionContext) => {
 		if (active !== s) return;
+		adaptive.cancel("Task/config/model/authorization changed");
 		delegator.reset(ctx);
 		s.monitor.reset("configuration changed");
 		syncHooks(s);
@@ -417,47 +445,67 @@ export default function contextMonitor(
 		observe(s, ctx, "status", false, false);
 		const isExactPrune = s.config.settings.mode === "exact-prune";
 		const delegation = delegator.report(ctx);
+		const isAdaptive = s.config.settings.mode === "adaptive";
 		return {
 			stage:
-				"V1 + V2 recovery/T0003 + V2 exact-pruning/T0004 + V3 scoped extractive/native compaction/T0005 + V4 bounded delegation/T0006",
+				"V1 + V2 recovery/T0003 + V2 exact-pruning/T0004 + V3 scoped extractive/native compaction/T0005 + V4 bounded delegation/T0006 + V5 controlled composition/T0007",
+			composition: adaptive.report(),
+			adaptiveDecision: s.decision,
+			aggregateUsage: branchAccounting(ctx.sessionManager.getBranch()),
 			compaction: compactor.report(ctx),
 			delegation,
-			mode:
-				s.config.settings.mode === "delegate"
-					? "delegate"
-					: s.config.settings.mode === "compact"
-						? "compact"
-						: isExactPrune
-							? "exact-prune"
-							: "observe-only",
+			mode: isAdaptive
+				? "adaptive"
+				: s.config.settings.mode === "observe"
+					? "observe-only"
+					: s.config.settings.mode,
 			sampling: s.config.settings.enabled
 				? "enabled"
 				: "disabled; event snapshots may be stale",
 			authorizedStrategies: !s.config.settings.enabled
 				? []
+				: isAdaptive
+					? [
+							"exact-prune",
+							...compactor.permissions.inspect(ctx).map((g) => g.operation),
+							...(delegation.authority.length ? ["delegate"] : []),
+						]
+					: s.config.settings.mode === "delegate"
+						? delegation.authority.length
+							? ["delegate"]
+							: []
+						: isExactPrune
+							? ["exact-prune"]
+							: s.config.settings.mode === "compact"
+								? [
+										...new Set(
+											compactor.permissions
+												.inspect(ctx)
+												.map((g) => g.operation),
+										),
+									]
+								: [],
+			availableStrategies: isAdaptive
+				? [
+						"checkpoint",
+						"offload",
+						"exact-prune",
+						"semantic",
+						"native",
+						...(typeof ctx.modelRegistry?.streamSimple === "function"
+							? ["delegate"]
+							: []),
+					]
 				: s.config.settings.mode === "delegate"
-					? delegation.authority.length
-						? ["delegate"]
-						: []
-					: isExactPrune
-						? ["exact-prune"]
-						: s.config.settings.mode === "compact"
-							? [
-									...new Set(
-										compactor.permissions.inspect(ctx).map((g) => g.operation),
-									),
-								]
-							: [],
-			availableStrategies:
-				s.config.settings.mode === "delegate"
 					? ["delegate"]
 					: s.config.settings.mode === "compact"
 						? ["semantic", "native"]
 						: isExactPrune
 							? ["exact-prune"]
 							: [],
-			strategyExecution:
-				s.config.settings.mode === "delegate"
+			strategyExecution: isAdaptive
+				? "V5 command-only ordered composition; every executor retains authority/safety/budget gates; advance verifies persisted outcomes"
+				: s.config.settings.mode === "delegate"
 					? "V4 explicit bounded independent children; confirmation/scoped authorization required; staged deliverables, parent verification"
 					: s.config.settings.mode === "compact"
 						? "V3 explicit proposals only; confirmation or scoped automation and independent safety verification required; delegation unavailable"
@@ -594,6 +642,7 @@ export default function contextMonitor(
 		observe(s, ctx, reason);
 	};
 	pi.on("model_select", (_event, ctx) => {
+		adaptive.cancel("Task/config/model/authorization changed");
 		delegator.reset(ctx);
 		reset("model_select", ctx);
 	});
@@ -605,6 +654,7 @@ export default function contextMonitor(
 		if (!s) return;
 		continuity.invalidate();
 		compactor.reset();
+		adaptive.cancel("Session/tree/reload changed");
 		delegator.reset();
 		reset("session_tree", ctx);
 		const recovery = await continuity.reconcile(ctx);
@@ -849,6 +899,34 @@ export default function contextMonitor(
 			const cmd = parse(args);
 
 			if (
+				cmd.kind === "compose" ||
+				cmd.kind === "advance" ||
+				cmd.kind === "composition"
+			) {
+				try {
+					observe(s, ctx, "composition-request", false, false);
+					const selected = s.decision?.candidates.find(
+						(c) => c.id === s.decision?.selected,
+					);
+					const result =
+						cmd.kind === "compose"
+							? cmd.json
+								? await adaptive.start(ctx, JSON.parse(cmd.json))
+								: selected?.steps.length
+									? await adaptive.start(ctx, { steps: selected.steps })
+									: { status: "recommendation", decision: s.decision }
+							: cmd.kind === "advance"
+								? await adaptive.advance(ctx)
+								: adaptive.report();
+					if (active === s) ctx.ui.notify(JSON.stringify(result), "info");
+				} catch (error) {
+					if (active === s)
+						ctx.ui.notify("ACO composition refused: " + String(error), "error");
+				}
+				return;
+			}
+
+			if (
 				cmd.kind === "delegate" ||
 				cmd.kind === "delegation" ||
 				cmd.kind === "reconcile"
@@ -920,6 +998,7 @@ export default function contextMonitor(
 							persistent: false,
 						};
 					else if (cmd.kind === "revoke") {
+						adaptive.cancel("Task/config/model/authorization changed");
 						delegator.reset(ctx);
 						compactor.reset();
 						result = { revoked: true };

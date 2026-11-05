@@ -23,7 +23,8 @@
 		"smoke:evidence": "node tests/evidence-pi-smoke.mjs",
 		"smoke:prune": "node tests/prune-pi-smoke.mjs",
 		"smoke:compact": "node tests/compaction-pi-smoke.mjs",
-		"smoke:delegate": "node tests/delegation-pi-smoke.mjs"
+		"smoke:delegate": "node tests/delegation-pi-smoke.mjs",
+		"smoke:adaptive": "node tests/adaptive-pi-smoke.mjs"
 	},
 	"pi": {
 		"extensions": [

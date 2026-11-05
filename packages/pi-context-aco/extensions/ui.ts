@@ -78,13 +78,15 @@ export async function openPanel(params: {
 					truncateToWidth(summary(), width),
 					truncateToWidth(recommendation(), width),
 					truncateToWidth(
-						config.settings.mode === "delegate"
-							? "V4 scoped children; staged writes and parent verification; enablement is not authority"
-							: config.settings.mode === "compact"
-								? "V3 requires confirmation or scoped /aco authorize; safety/budgets always apply"
-								: config.settings.mode === "exact-prune"
-									? "V2 recovery-gated pruning; V3 requires compact mode"
-									: "V1 observation only; no strategy permission",
+						config.settings.mode === "adaptive"
+							? "V5 ordered composition; per-step consent/safety/budgets; explicit advance verifies outcomes"
+							: config.settings.mode === "delegate"
+								? "V4 scoped children; staged writes and parent verification; enablement is not authority"
+								: config.settings.mode === "compact"
+									? "V3 requires confirmation or scoped /aco authorize; safety/budgets always apply"
+									: config.settings.mode === "exact-prune"
+										? "V2 recovery-gated pruning; V3 requires compact mode"
+										: "V1 observation only; no strategy permission",
 						width,
 					),
 					truncateToWidth(config.error ?? feedback, width),

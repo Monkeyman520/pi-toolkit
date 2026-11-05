@@ -1,6 +1,6 @@
 # Pi Context ACO
 
-**V1 observation/recommendations, V2 verified recovery/exact pruning, and T0005 V3 scoped extractive/native compaction** for the Adaptive Context Orchestrator. V1 remains observation-only. V3 explicitly proposes mechanically verified local summaries or native prefix compaction, requiring confirmation by default or operation/source/task/session-scoped automation authorization. T0006 V4 adds explicitly authorized independent single-request children with staged deliverables and parent reconciliation. Adaptive composition remains pending (T0007).
+**V1 observation/recommendations, V2 verified recovery/exact pruning, and T0005 V3 scoped extractive/native compaction** for the Adaptive Context Orchestrator. V1 remains observation-only. V3 explicitly proposes mechanically verified local summaries or native prefix compaction, requiring confirmation by default or operation/source/task/session-scoped automation authorization. T0006 V4 adds explicitly authorized independent single-request children with staged deliverables and parent reconciliation. T0007 adds opt-in command-only adaptive composition and controlled comparison reporting. Representative-task evaluation remains pending; V5 is not fully accepted.
 
 ## Compatibility and resources
 
@@ -160,21 +160,21 @@ Assessments are reused for unchanged active-branch/pressure inputs; substantive 
 
 Configuration is `<getAgentDir()>/pi-context-aco.json` (normally `~/.pi/agent/pi-context-aco.json`). Read on startup/reload and explicit `config reload`; no polling timer/watcher. Panel/command saves apply immediately after successful serialized atomic replacement. Invalid/unreadable/oversized settings disable sampling without silent rewrite. Cross-process locking/merging/fsync durability is not promised.
 
-| Setting                    | Default | Allowed values / meaning                                                                                     |
-| -------------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `enabled`                  | true    | Boolean; sampling/declaration control, never authority.                                                      |
-| `historySize`              | 6       | Integer 2–50; recent comparable completed-turn deltas.                                                       |
-| `horizonTurns`             | 3       | Integer 1–20; prediction horizon.                                                                            |
-| `reserveTokens`            | 4096    | Integer 0–1000000; forecast reserve, not an execution budget.                                                |
-| `persistTraces`            | false   | Boolean; append numeric/assessment counters as `aco-monitor` metadata on completed turns.                    |
-| `mode`                     | observe | `observe` (V1), `exact-prune` (V2), `compact` (V3), or `delegate` (V4); none grants higher-impact authority. |
-| `maxCompactInputTokens`    | 64000   | Integer 1–1000000; estimated input ceiling for V3, not permission.                                           |
-| `maxSummaryTokens`         | 8000    | Integer 1–100000; estimated summary ceiling for V3, not permission.                                          |
-| `maxPruneTokens`           | 64000   | Integer 0–1000000; maximum tokens pruned per turn/request.                                                   |
-| `maxDelegationDepth`       | 1       | Integer 0–1; zero refuses dispatch, one permits native children; recursion is unavailable.                   |
-| `maxDelegationConcurrency` | 2       | Integer 1–8; one batch at a time; reject oversized batches rather than silently queue them.                  |
-| `maxDelegationTokens`      | 200000  | Integer 0–10000000; parent + retained child + coordination admission budget; zero refuses dispatch.          |
-| `maxChildOutputTokens`     | 2000    | Integer 128–8000; passed as provider maxTokens (clamped to model maximum), also bounds result bytes.         |
+| Setting                    | Default | Allowed values / meaning                                                                                                                         |
+| -------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enabled`                  | true    | Boolean; sampling/declaration control, never authority.                                                                                          |
+| `historySize`              | 6       | Integer 2–50; recent comparable completed-turn deltas.                                                                                           |
+| `horizonTurns`             | 3       | Integer 1–20; prediction horizon.                                                                                                                |
+| `reserveTokens`            | 4096    | Integer 0–1000000; forecast reserve, not an execution budget.                                                                                    |
+| `persistTraces`            | false   | Boolean; append numeric/assessment counters as `aco-monitor` metadata on completed turns.                                                        |
+| `mode`                     | observe | `observe` (V1), `exact-prune` (V2), `compact` (V3), or `delegate` (V4), plus opt-in `adaptive` composition; none grants higher-impact authority. |
+| `maxCompactInputTokens`    | 64000   | Integer 1–1000000; estimated input ceiling for V3, not permission.                                                                               |
+| `maxSummaryTokens`         | 8000    | Integer 1–100000; estimated summary ceiling for V3, not permission.                                                                              |
+| `maxPruneTokens`           | 64000   | Integer 0–1000000; maximum tokens pruned per turn/request.                                                                                       |
+| `maxDelegationDepth`       | 1       | Integer 0–1; zero refuses dispatch, one permits native children; recursion is unavailable.                                                       |
+| `maxDelegationConcurrency` | 2       | Integer 1–8; one batch at a time; reject oversized batches rather than silently queue them.                                                      |
+| `maxDelegationTokens`      | 200000  | Integer 0–10000000; parent + retained child + coordination admission budget; zero refuses dispatch.                                              |
+| `maxChildOutputTokens`     | 2000    | Integer 128–8000; passed as provider maxTokens (clamped to model maximum), also bounds result bytes.                                             |
 
 Defaults are **uncalibrated tunables**. Pi current context tokens are estimated (last usage plus trailing-message estimates), not exact post-filter/request counts. Capacity is observed model configuration. Growth uses recent comparable completed-turn means; model/window/projection/compaction/tree changes, unknown usage and shrinking readings invalidate baselines.
 
@@ -210,13 +210,38 @@ Admission accounting charges reported parent assistant, summary, auxiliary usage
 
 No general multi-turn child tool execution, shell testing, new-file creation, unrestricted recursion or adaptive selection is claimed. Inseparable work stays local. These restrictions are the delivered provider's conservative capability boundary, not new requirements on other plugins.
 
+## T0007 adaptive composition (opt-in)
+
+Set `/aco config mode adaptive`; enablement is **not** higher-impact authority. Status/trace includes `adaptiveDecision`, `composition` and active-branch `aggregateUsage`. Task/phase changes, deteriorating forecasts and dependency/conflict evidence are named triggers; unchanged assessments are reused. No mandatory classifier or semantic decision request is added. Low occupancy can prompt action for impending growth; bounded near-completion can select no-op at high occupancy.
+
+- `/aco compose`: execute the selected exact-redundancy candidate (checkpoint then prune), or report no-op/parameters-needed recommendations. No idle background strategy scheduler is added.
+- `/aco compose <JSON>`: submit `{"steps":[...]}`, 1–8 ordered steps, at most 65536 serialized characters.
+- `/aco advance`: inspect the pending executor result and advance only after verified completion. This is not an automatic retry or a new authority grant.
+- `/aco composition`: inspect current runtime scheduling/results. Restart never replays a composition.
+
+Steps are `checkpoint`, `offload` or `prune` with `request:{"sourceEntryIds":[...]}`; `semantic` with the normal summarize request; `delegate` with the normal bounded child contract; or `native` without a request. Offload is an alias for the same immutable verified archive operation, not a new strategy or permission. Each executor revalidates availability, branch/task dependencies, originals, legal messages, authority and budgets. Exact pruning does not authorize semantic/native/delegate steps. Default consent and scoped grants are unchanged.
+
+Example structure only (replace real IDs before use):
+
+```text
+/aco compose {"steps":[{"kind":"checkpoint","request":{"sourceEntryIds":["REAL_OLD_ID","REAL_RETAINED_ID"]}},{"kind":"prune","request":{"sourceEntryIds":["REAL_OLD_ID"]}},{"kind":"semantic","request":{"sourceEntryIds":["REAL_RETAINED_ID"]}}]}
+```
+
+Prune/semantic replacements await an ordinary completed turn boundary; no extra parent turn is requested. Native compaction awaits actual persisted completion. Returned children wait for ordinary explicit parent reconciliation before dependent steps. Use `advance` afterward. Failed/denied/partial/stale steps stop dependent work, preserve recovery evidence and make no atomic rollback claim. A restored-but-previously-edited source remains ineligible for another prune. Declaration/configuration/model/tree/revoke/session changes cancel owned scheduling. Do not interleave independent context-edit proposals with a pending composition.
+
+The current selection policy compares task fit/continuity, estimated capacity relief and child isolation, exposes alternatives and recovery/risk/overhead/cache uncertainties, and has **no calibrated weights or optimality claim**. It does not synthesize child contracts or arbitrary semantic summaries. Prediction comparison is the prior horizon projection versus the next assessment's host estimate, explicitly **not** a matched-horizon forecast accuracy score. Action receipts expose estimated before/after sizes separately from persisted execution.
+
+Aggregate usage distinguishes parent, child and management provider-reported input/output/cache-read/cache-write/tokens/cost. Missing fields, missing child results and absent native usage remain unavailable, not measured zero. Local rules/extractive generation add zero decision-model calls; normal tool schemas/results, parent turns, child work, storage, coordination and cache invalidation still cost resources. Totals cover the active branch, not all spending across abandoned branches or hidden third-party calls; currency/tariff comparability is not independently certified.
+
+`npm run smoke:adaptive` packs/installs the real plugin outside the checkout and exercises actual Pi checkpoint→prune, independent semantic consent, summary→offload, restoration, child-return→parent-verification→checkpoint, native→checkpoint and restart/no-replay. It compares the same deterministic task turns against no ACO, reporting outcomes, restoration, fixture tokens/cost/cache, wall time and scripted controls. Optional `ACO_EVALUATION_OUTPUT` saves its JSON report. Fixture usage is length/4 with a zero tariff and no cache simulation: **not live provider measurement or a representative-model benchmark**. Reduced context does not establish lower aggregate cost or superiority. Real representative task evidence and task-dependent policy/weight evaluation are still required for T0007 completion.
+
 ## Permissions and boundaries
 
 Extensions have Pi's OS privileges; this is not a sandbox. ACO reads host session/usage/tool metadata, writes its own settings, declarations and optional numeric traces. **Explicit checkpoints copy selected original source-entry content and task continuity into a separate local archive**, which may contain sensitive user/tool data and resource paths. No encryption or automatic expiry/garbage collection is provided; protect the agent directory and remove its evidence directory manually when no longer needed (retained receipts then correctly fail verification). Other privileged extensions/tools or local users with filesystem access are outside these policy isolation guarantees. Ordinary model tool arguments/results still follow Pi's session/provider lifecycle. Unrequested bodies are never automatically archived or injected; numeric traces omit bodies.
 
 V4 delegation explicitly sends only selected task/resource/evidence bytes to the currently configured Pi model provider, using its existing credentials. Consent or scoped automation is required; there is no default evidence upload. Children have no shell, filesystem tools, provider tools, extension discovery, recursive delegation or direct workspace writes. ACO does not apply staged deliverables: the parent uses ordinary tools independently, then reconciles. No evidence deletion or automatic continuation is added. Explicitly authorized V3 actions can replace model-visible text results or initiate native prefix compaction; they preserve raw history and use only the declared local evidence archive. Native user/host/other-extension behavior is not governed by ACO. Only ACO-owned listeners/status/state are closed.
 
-T0004 V2 verified exact pruning/restoration and T0005 V3 bounded extractive/native compaction are delivered. V4 bounded children/staged proposals are delivered by T0006; V5 adaptive combinations remain pending.
+T0004 V2 verified exact pruning/restoration and T0005 V3 bounded extractive/native compaction are delivered. V4 bounded children/staged proposals are delivered by T0006; T0007 adds controlled V5 combinations; representative-task comparison evidence remains pending.
 
 ## Verification
 
@@ -232,6 +257,7 @@ npm run smoke:evidence
 npm run smoke:prune
 npm run smoke:compact
 npm run smoke:delegate
+npm run smoke:adaptive
 ```
 
 Smoke tests require installed Pi/npm and the prepared npm cache. All install actual plugin tarballs outside the checkout, use an isolated agent directory and deterministic in-process provider, and make no live provider requests.

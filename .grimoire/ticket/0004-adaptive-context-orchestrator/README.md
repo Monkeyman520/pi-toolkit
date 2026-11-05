@@ -2,7 +2,7 @@
 
 **Source:** [Spec 0007](../../spec/0007-adaptive-context-orchestrator.md), including its settled conversation handoff S1–S6.
 **Ticket folder:** `.grimoire/ticket/0004-adaptive-context-orchestrator/`
-**Status:** In Progress — T0001–T0006 verified Done; V1 observation/recommendations, V2 verified recovery/exact pruning and bounded V3 extractive/native compaction delivered. T0006 adds bounded authorized independent children/staged deliverables/parent reconciliation. T0007/T0008 remain Todo; adaptive composition is not delivered.
+**Status:** In Progress — T0001–T0006 verified Done. T0007 now supplies opt-in command-only adaptive composition with controlled Pi comparison evidence; representative-task evaluation/policy validation remain open. T0008 remains Todo and blocked.
 **Architecture:** [ADR 0006](../../adr/0006-task-aware-context-working-set-and-isolation.md), alongside the collection's [package reference](../../../packages/README.md) and ADRs referenced by the spec.
 
 ## Overview and execution handoff
@@ -20,7 +20,7 @@ Settled constraints:
 - Use the established package stack, unified commands/completion/TUI configuration, loaded-only discovery and independent ownership. No host fork or mandatory collection manager.
 - The formulas, interface sketches and percentages in the original proposal are illustrative. No storage engine, delegation provider, publication identity, literal command/package name, calibrated weights, budget values or forecast/benchmark thresholds have been selected. Choose mechanisms within the contract; do not invent approved behavior or measured performance.
 
-**Current permissions:** Explicit grimoire-loop invocations authorized T0001–T0006 implementation and quality checks. During T0005, the user additionally authorized repairing the independently reproduced T0004 recovery defects before resuming V3; their receipts record the corrections and verification. T0007/T0008, staging/committing/publishing and requirement changes remain unauthorized.
+**Current permissions:** Explicit grimoire-loop invocations authorized T0001–T0007 implementation and quality checks, including the T0007 continuation. During T0005, the user additionally authorized repairing reproduced T0004 recovery defects. The user's subsequent request authorizes committing the T0007 changes to local main. T0008, pushing/publishing and requirement changes remain unauthorized.
 
 **Record result:** ACO/Context Working Set concepts and the ADR index are in [CONTEXT](../../CONTEXT.md). ADR 0006 contains the confirmed boundaries and dated authorization clarification. No qualifying knowledge update or blocking behavioral question remains pending.
 
@@ -87,7 +87,7 @@ The dependency graph is acyclic. Each producer has its own tests and Pi smoke ev
 | T0004 | [V2 recovery-gated exact pruning and restoration](./T0004-v2-recovery-gated-exact-pruning.md) | V2 | T0002, T0003 | Done |
 | T0005 | [V3 authorized semantic replacement and native compaction](./T0005-v3-authorized-semantic-and-native-compaction.md) | V3 | T0004 | Done |
 | T0006 | [V4 authorized bounded subagent delegation](./T0006-v4-authorized-bounded-subagent-delegation.md) | V4 | T0002, T0003 | Done |
-| T0007 | [V5 adaptive strategy composition and comparative evaluation](./T0007-v5-adaptive-composition-and-comparative-evaluation.md) | V5 | T0004, T0005, T0006 | Todo |
+| T0007 | [V5 adaptive strategy composition and comparative evaluation](./T0007-v5-adaptive-composition-and-comparative-evaluation.md) | V5 | T0004, T0005, T0006 | In Progress |
 | T0008 | [Integrated Pi lifecycle, recovery and isolation evidence](./T0008-integrated-pi-lifecycle-recovery-and-isolation-evidence.md) | Cross-stage | T0007 | Todo |
 
 ## Requirements coverage

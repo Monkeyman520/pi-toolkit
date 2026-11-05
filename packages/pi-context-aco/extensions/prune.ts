@@ -188,7 +188,7 @@ export function evaluatePruneCandidates(
 		ineligible: [],
 		totalEstimatedTokens: 0,
 	};
-	if (options.mode !== "exact-prune") {
+	if (options.mode !== "exact-prune" && options.mode !== "adaptive") {
 		result.ineligible.push({
 			referenceId: "*",
 			reason:

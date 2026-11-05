@@ -170,7 +170,10 @@ export class Compactor {
 	}
 	private enabled() {
 		const r = this.runtime();
-		if (!r?.settings.enabled || r.settings.mode !== "compact")
+		if (
+			!r?.settings.enabled ||
+			!["compact", "adaptive"].includes(r.settings.mode)
+		)
 			throw Error("V3 compact mode must be explicitly enabled");
 		return r;
 	}

@@ -62,6 +62,7 @@ const outcomeSchema = Type.Object(
 		error: Type.Optional(Type.String()),
 		latencyMs: Type.Number(),
 		budgetVerified: Type.Boolean(),
+		providerUsage: Type.Optional(Type.Unknown()),
 		tokens: Type.Union([Type.Number(), Type.Null()]),
 		cost: Type.Union([Type.Number(), Type.Null()]),
 		cacheRead: Type.Union([Type.Number(), Type.Null()]),
@@ -251,7 +252,7 @@ export class Delegator {
 	}
 	async run(ctx: ExtensionContext, raw: unknown) {
 		const settings = this.settings();
-		if (!settings?.enabled || settings.mode !== "delegate")
+		if (!settings?.enabled || !["delegate", "adaptive"].includes(settings.mode))
 			throw Error("Delegation mode is not enabled");
 		if (!Check(delegationSchema, raw) || bytes(raw) > 65536)
 			throw Error("Invalid bounded delegation contract");
@@ -537,6 +538,7 @@ export class Delegator {
 						const reply = await Promise.race([response, cancelled]).finally(
 							() => removeAbort(),
 						);
+						outcome.providerUsage = reply.usage;
 						outcome.tokens = finite(reply.usage?.totalTokens);
 						outcome.cost = finite(reply.usage?.cost?.total);
 						outcome.cacheRead = finite(reply.usage?.cacheRead);

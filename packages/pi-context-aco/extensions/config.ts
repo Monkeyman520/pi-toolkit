@@ -4,7 +4,12 @@ import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { ForecastSettings } from "./pressure.ts";
 
-export type ACOMode = "observe" | "exact-prune" | "compact" | "delegate";
+export type ACOMode =
+	| "observe"
+	| "exact-prune"
+	| "compact"
+	| "delegate"
+	| "adaptive";
 export interface Settings extends ForecastSettings {
 	enabled: boolean;
 	persistTraces: boolean;
@@ -44,6 +49,7 @@ export const schema = Type.Partial(
 			Type.Literal("exact-prune"),
 			Type.Literal("compact"),
 			Type.Literal("delegate"),
+			Type.Literal("adaptive"),
 		]),
 		maxDelegationDepth: Type.Integer({ minimum: 0, maximum: 1 }),
 		maxDelegationConcurrency: Type.Integer({ minimum: 1, maximum: 8 }),
@@ -81,8 +87,8 @@ export const options: Record<
 	},
 	mode: {
 		description:
-			"Execution mode: observe (V1), exact-prune (V2), compact (V3), delegate (V4); proposals need separate authority",
-		values: ["observe", "exact-prune", "compact", "delegate"],
+			"Execution mode: observe (V1), exact-prune (V2), compact (V3), delegate (V4), adaptive (V5); proposals need separate authority",
+		values: ["observe", "exact-prune", "compact", "delegate", "adaptive"],
 	},
 	maxPruneTokens: {
 		description: "Maximum tokens pruned per turn (0–1000000)",
@@ -162,9 +168,13 @@ export class Config {
 			if (!key) throw Error(`Unknown configuration key: ${rawKey}`);
 			const value =
 				key === "mode"
-					? ["exact-prune", "observe", "compact", "delegate"].includes(
-							rawValue.toLowerCase(),
-						)
+					? [
+							"exact-prune",
+							"observe",
+							"compact",
+							"delegate",
+							"adaptive",
+						].includes(rawValue.toLowerCase())
 						? (rawValue.toLowerCase() as ACOMode)
 						: undefined
 					: typeof defaults[key] === "boolean"
