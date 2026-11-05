@@ -84,7 +84,7 @@ The dependency graph is acyclic. Each producer has its own tests and Pi smoke ev
 | T0001 | [V1 context monitor and independent plugin control](./T0001-v1-context-monitor-and-plugin-control.md) | V1 | None | Done |
 | T0002 | [V1 task/context references and explainable recommendations](./T0002-v1-task-context-graph-and-recommendations.md) | V1 | T0001 | Done |
 | T0003 | [V2 scoped evidence store, checkpoints and recall](./T0003-v2-scoped-evidence-store-checkpoints-and-recall.md) | V2 | T0001 | Done |
-| T0004 | [V2 recovery-gated exact pruning and restoration](./T0004-v2-recovery-gated-exact-pruning.md) | V2 | T0002, T0003 | Todo |
+| T0004 | [V2 recovery-gated exact pruning and restoration](./T0004-v2-recovery-gated-exact-pruning.md) | V2 | T0002, T0003 | Done |
 | T0005 | [V3 authorized semantic replacement and native compaction](./T0005-v3-authorized-semantic-and-native-compaction.md) | V3 | T0004 | Todo |
 | T0006 | [V4 authorized bounded subagent delegation](./T0006-v4-authorized-bounded-subagent-delegation.md) | V4 | T0002, T0003 | Todo |
 | T0007 | [V5 adaptive strategy composition and comparative evaluation](./T0007-v5-adaptive-composition-and-comparative-evaluation.md) | V5 | T0004, T0005, T0006 | Todo |
