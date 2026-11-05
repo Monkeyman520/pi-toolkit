@@ -11,8 +11,9 @@ This repository organizes Pi plugin packages; it is not the Pi host's source tre
 | [pi-auto-resume](./packages/pi-auto-resume/README.md) | Configurable recovery of interrupted Pi tasks |
 | [pi-pretty-session](./packages/pi-pretty-session/README.md) | Automatic session naming, title/description summarization, dynamic config, session metrics, and project info |
 | [pi-quota-keeper](./packages/pi-quota-keeper/README.md) | Coordinated account quota visibility and capability-gated activation |
+| [pi-context-aco](./packages/pi-context-aco/README.md) | V1 passive pressure/task monitoring, protected references and explainable conditional recommendations |
 
-The three plugins have controlled Pi 1.5.0 loading/usage smoke evidence. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is their ordinary versioned dependency, not a fourth activated plugin. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
+The four plugins have controlled Pi 1.5.0 loading/usage smoke evidence. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is their ordinary versioned dependency, not an activated plugin. ACO delivers controlled V1 observation/recommendations only; no strategy executes. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
 
 ## Installation model
 
@@ -50,6 +51,7 @@ pi-packages/
     ├── pi-auto-resume/        # Interrupted-task recovery
     ├── pi-pretty-session/     # Session summarization, metrics, and project info
     ├── pi-quota-keeper/       # Quota visibility and coordinated activation
+    ├── pi-context-aco/        # Passive context-pressure monitoring foundation
     └── pi-plugin-support/    # Ordinary config/discovery/TUI support library
 ```
 
@@ -86,7 +88,7 @@ node tests/plugin-isolation.mjs
 
 Set `PI_BINARY` to the actual Pi executable if needed (for example `$env:PI_BINARY = 'C:\path\to\pi.exe'` in PowerShell). The matrix requires Node.js >= 22.19.0, npm, installed Pi, and the npm cache populated by package setup for the quota plugin's offline production-dependency installation.
 
-This development-only script packs only the selected plugins and installs their tarballs in separate temporary consumer roots outside the checkout. It verifies that only the declared ordinary support library (not host SDKs or sibling plugins) is bundled, checks all seven combinations and three session lifecycles per combination, and tests separate physical library roots plus a frozen baseline discovery reader. It uses an empty isolated auth store and disables LLM summaries; no live provider or personal Pi settings are used. Expected final output is `Pi plugin isolation matrix: all 7 combinations PASS`.
+This development-only script covers the original three plugins (`pi-auto-resume`, `pi-pretty-session`, `pi-quota-keeper`), packing their tarballs into separate temporary consumers. It verifies only the ordinary support library is bundled, all seven combinations and three session lifecycles per combination, separate library roots and a frozen baseline discovery reader. It uses isolated empty auth and no live provider/personal settings. Expected final output is `Pi plugin isolation matrix: all 7 combinations PASS`. ACO has its own outside-checkout control-provider smoke and actual ConPTY keyboard test; it is not silently included in this historical seven-combination claim.
 
 The matrix has been verified on Windows with Pi 1.5.0. It complements, rather than replaces, each package's type checks, Biome checks, Vitest tests, and provider-fixture smoke test. The matrix is not a real terminal test. Separate agent-driven Windows Terminal keyboard checks exercised the shared panels, config persistence/reload, actions, cancel/search/navigation, loaded-plugin switching, Tab completion and orderly exit. Physical sleep/wake remains unverified.
 

@@ -1,0 +1,117 @@
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { settingCandidates } from "pi-plugin-support/settings";
+import { options, type Settings, schema, settingKey } from "./config.ts";
+
+export const usage =
+	"Usage: /aco [status | trace | tasks | recommend | declare <JSON> | on | off | config [reload | <key> [value]] | help] — V1 observation/recommendation only";
+export type Command =
+	| {
+			kind:
+				| "panel"
+				| "status"
+				| "trace"
+				| "reload"
+				| "help"
+				| "tasks"
+				| "recommend";
+	  }
+	| { kind: "declare"; json: string }
+	| { kind: "get"; key: string }
+	| { kind: "set"; key: string; value: string };
+export function parse(args: string): Command {
+	if (/^declare\s/i.test(args.trim()))
+		return args.length <= 32768
+			? { kind: "declare", json: args.trim().replace(/^declare\s+/i, "") }
+			: { kind: "help" };
+	if (args.length > 512) return { kind: "help" };
+	const p = args.trim().split(/\s+/).filter(Boolean);
+	if (!p.length) return { kind: "panel" };
+	if (p.length === 1) {
+		switch (p[0].toLowerCase()) {
+			case "status":
+				return { kind: "status" };
+			case "tasks":
+				return { kind: "tasks" };
+			case "recommend":
+				return { kind: "recommend" };
+			case "trace":
+				return { kind: "trace" };
+			case "config":
+				return { kind: "panel" };
+			case "on":
+				return { kind: "set", key: "enabled", value: "true" };
+			case "off":
+				return { kind: "set", key: "enabled", value: "false" };
+		}
+	}
+	if (p[0].toLowerCase() === "config") {
+		if (p.length === 2)
+			return p[1].toLowerCase() === "reload"
+				? { kind: "reload" }
+				: { kind: "get", key: p[1] };
+		if (p.length === 3) return { kind: "set", key: p[1], value: p[2] };
+	}
+	return { kind: "help" };
+}
+export function complete(
+	prefix: string,
+	settings: Settings,
+): AutocompleteItem[] | null {
+	if (prefix.length > 512) return null;
+	const p = prefix.trimStart().split(/\s+/).filter(Boolean);
+	const at = /\s$/.test(prefix) ? p.length : Math.max(0, p.length - 1);
+	const partial = /\s$/.test(prefix) ? "" : (p.at(-1) ?? "");
+	const filter = (items: AutocompleteItem[]) => {
+		const found = items.filter((x) =>
+			x.label.toLowerCase().startsWith(partial.toLowerCase()),
+		);
+		return found.length ? found : null;
+	};
+	if (at === 0)
+		return filter(
+			[
+				"status",
+				"trace",
+				"tasks",
+				"recommend",
+				"declare",
+				"on",
+				"off",
+				"config",
+				"help",
+			].map((action) => ({
+				value: action,
+				label: action,
+				description: "V1 passive monitor control",
+			})),
+		);
+	if (p[0]?.toLowerCase() !== "config") return null;
+	const action = p[0];
+	if (at === 1)
+		return filter([
+			{
+				value: `${action} reload`,
+				label: "reload",
+				description: "Reload configuration",
+			},
+			...Object.entries(options).map(([key, option]) => ({
+				value: `${action} ${key}`,
+				label: key,
+				description: `${option.description}; current=${settings[key as keyof Settings]}`,
+			})),
+		]);
+	if (at === 2) {
+		const key = settingKey(p[1]);
+		if (!key) return null;
+		return filter(
+			settingCandidates(schema.properties[key], options[key].values).map(
+				(v) => ({
+					value: `${action} ${key} ${v}`,
+					label: v,
+					description: options[key].description,
+				}),
+			),
+		);
+	}
+	return null;
+}

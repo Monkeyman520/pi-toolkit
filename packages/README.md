@@ -1,6 +1,6 @@
 # Package Development Reference
 
-This directory holds independently installable plugins for the [pi-packages collection](../README.md). Current packages are [pi-auto-resume](./pi-auto-resume/README.md), [pi-pretty-session](./pi-pretty-session/README.md), and [pi-quota-keeper](./pi-quota-keeper/README.md). The ordinary [pi-plugin-support](./pi-plugin-support/README.md) library supplies shared configuration/discovery/TUI mechanisms; it is not a fourth Pi plugin. The reference fragments below describe the plugin baseline; each package README documents its actual setup and verified commands.
+This directory holds independently installable plugins for the [pi-packages collection](../README.md). Current packages are [pi-auto-resume](./pi-auto-resume/README.md), [pi-pretty-session](./pi-pretty-session/README.md), [pi-quota-keeper](./pi-quota-keeper/README.md), and the observation-only [pi-context-aco](./pi-context-aco/README.md). The ordinary [pi-plugin-support](./pi-plugin-support/README.md) library supplies shared configuration/discovery/TUI mechanisms; it is not an activated Pi plugin. The reference fragments below describe the plugin baseline; each package README documents its actual setup and verified commands.
 
 Follow [AGENTS.md](../AGENTS.md), [ADR 0001](../.grimoire/adr/0001-independently-installable-pi-packages.md), and [ADR 0002](../.grimoire/adr/0002-typescript-esm-plugin-development-stack.md) when adding or changing packages. Use English for package documentation and written project guidance.
 
@@ -130,7 +130,7 @@ Use the [collection installation examples](../README.md#installation-model) only
 
 Use Pi for runtime verification. Direct `node extensions/index.ts` execution does not establish Pi's resource discovery or host module mapping.
 
-Real plugin sources and package-specific checks now exist in `pi-auto-resume/`, `pi-pretty-session/`, and `pi-quota-keeper/`. Their READMEs distinguish controlled Pi runtime smoke evidence from unperformed live-service and physical sleep/wake checks.
+Real plugin sources and package-specific checks now exist in `pi-auto-resume/`, `pi-pretty-session/`, `pi-quota-keeper/`, and `pi-context-aco/`. Their READMEs distinguish controlled Pi runtime smoke evidence from unperformed live-service, physical sleep/wake, forecast-quality and later-stage checks.
 
 ## Official references
 

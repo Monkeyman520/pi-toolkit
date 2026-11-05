@@ -27,6 +27,7 @@ try {
 		"pi-auto-resume",
 		"pi-pretty-session",
 		"pi-quota-keeper",
+		"pi-context-aco",
 	]) {
 		const vendor = join(root, "packages", plugin, "vendor");
 		const target = join(vendor, info.filename);
