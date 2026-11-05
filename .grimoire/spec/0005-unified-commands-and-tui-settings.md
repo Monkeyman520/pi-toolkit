@@ -5,6 +5,8 @@
 **Date:** 2026-04-20
 **Endpoint:** Requirements and ticket decomposition only.
 
+**Dependency-boundary revision (2026-11-04):** [ADR 0005](../adr/0005-versioned-plugin-support-library.md) and [Spec 0006](./0006-versioned-support-library-and-plugin-migrations.md) permit an explicitly declared ordinary versioned support-library dependency. They supersede only the blanket cross-package code restriction below; sibling source imports, implicit shared dependency instances, a shared runtime owner and a separately activated manager remain excluded. Existing commands, TUI behavior and installed-only discovery remain binding.
+
 ## Sources
 
 - **U1 — Initial user request:** Replace JSON-only and raw-command-only plugin configuration and status display with interactive TUI / settings panels; never display uninstalled plugins or their configurations; add subcommand and argument auto-completion hints (such as `/quota` suggesting `enable ...` and `/auto-resume` suggesting `on`, `off`); and unify slash-command syntax to `/<extension> <action> [other-args]`.

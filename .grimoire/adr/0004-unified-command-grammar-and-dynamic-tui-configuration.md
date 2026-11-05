@@ -2,6 +2,9 @@
 
 **Status:** Completed
 **Date:** 2026-04-20
+**Superseded by:** [ADR 0005](./0005-versioned-plugin-support-library.md), only the blanket cross-package code-dependency restriction; the remaining decisions are retained.
+
+**Boundary revision (2026-11-04):** An explicitly declared ordinary versioned support-library dependency is now permitted. Direct plugin-to-plugin source imports, implicit sibling availability, shared runtime ownership, and a separately activated manager plugin remain excluded. The original decision text below is retained as history.
 
 ## Context
 
