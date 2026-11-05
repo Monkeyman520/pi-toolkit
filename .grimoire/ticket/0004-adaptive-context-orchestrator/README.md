@@ -2,7 +2,7 @@
 
 **Source:** [Spec 0007](../../spec/0007-adaptive-context-orchestrator.md), including its settled conversation handoff S1–S6.
 **Ticket folder:** `.grimoire/ticket/0004-adaptive-context-orchestrator/`
-**Status:** In Progress — T0001/T0002 verified Done; controlled V1 observation/recommendations complete. T0003–T0008 remain Todo.
+**Status:** In Progress — T0001/T0002/T0003 verified Done; V1 observation/recommendations and the V2 recovery foundation complete. T0004–T0008 remain Todo; exact pruning is not delivered.
 **Architecture:** [ADR 0006](../../adr/0006-task-aware-context-working-set-and-isolation.md), alongside the collection's [package reference](../../../packages/README.md) and ADRs referenced by the spec.
 
 ## Overview and execution handoff
@@ -20,7 +20,7 @@ Settled constraints:
 - Use the established package stack, unified commands/completion/TUI configuration, loaded-only discovery and independent ownership. No host fork or mandatory collection manager.
 - The formulas, interface sketches and percentages in the original proposal are illustrative. No storage engine, delegation provider, publication identity, literal command/package name, calibrated weights, budget values or forecast/benchmark thresholds have been selected. Choose mechanisms within the contract; do not invent approved behavior or measured performance.
 
-**Current permissions:** Refinement produced documentation only. Explicit `grimoire-loop T0001` and `grimoire-loop T0002` invocations subsequently authorized those tickets' implementation and quality checks. Their [T0001](./T0001-v1-context-monitor-and-plugin-control.md#t0001-execution-receipt--2026-11-05) and [T0002](./T0002-v1-task-context-graph-and-recommendations.md#t0002-execution-receipt--2026-11-05) receipts record completion. Other tickets, staging/committing/publishing and requirement changes remain unauthorized.
+**Current permissions:** Refinement produced documentation only. Explicit `grimoire-loop` invocations subsequently authorized T0001, T0002 and T0003 implementation and quality checks; their ticket receipts record completion. T0004–T0008, staging/committing/publishing and requirement changes remain unauthorized.
 
 **Record result:** ACO/Context Working Set concepts and the ADR index are in [CONTEXT](../../CONTEXT.md). ADR 0006 contains the confirmed boundaries and dated authorization clarification. No qualifying knowledge update or blocking behavioral question remains pending.
 
@@ -83,7 +83,7 @@ The dependency graph is acyclic. Each producer has its own tests and Pi smoke ev
 | --- | --- | --- | --- | --- |
 | T0001 | [V1 context monitor and independent plugin control](./T0001-v1-context-monitor-and-plugin-control.md) | V1 | None | Done |
 | T0002 | [V1 task/context references and explainable recommendations](./T0002-v1-task-context-graph-and-recommendations.md) | V1 | T0001 | Done |
-| T0003 | [V2 scoped evidence store, checkpoints and recall](./T0003-v2-scoped-evidence-store-checkpoints-and-recall.md) | V2 | T0001 | Todo |
+| T0003 | [V2 scoped evidence store, checkpoints and recall](./T0003-v2-scoped-evidence-store-checkpoints-and-recall.md) | V2 | T0001 | Done |
 | T0004 | [V2 recovery-gated exact pruning and restoration](./T0004-v2-recovery-gated-exact-pruning.md) | V2 | T0002, T0003 | Todo |
 | T0005 | [V3 authorized semantic replacement and native compaction](./T0005-v3-authorized-semantic-and-native-compaction.md) | V3 | T0004 | Todo |
 | T0006 | [V4 authorized bounded subagent delegation](./T0006-v4-authorized-bounded-subagent-delegation.md) | V4 | T0002, T0003 | Todo |

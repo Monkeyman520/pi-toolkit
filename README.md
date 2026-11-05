@@ -11,9 +11,9 @@ This repository organizes Pi plugin packages; it is not the Pi host's source tre
 | [pi-auto-resume](./packages/pi-auto-resume/README.md) | Configurable recovery of interrupted Pi tasks |
 | [pi-pretty-session](./packages/pi-pretty-session/README.md) | Automatic session naming, title/description summarization, dynamic config, session metrics, and project info |
 | [pi-quota-keeper](./packages/pi-quota-keeper/README.md) | Coordinated account quota visibility and capability-gated activation |
-| [pi-context-aco](./packages/pi-context-aco/README.md) | V1 passive pressure/task monitoring, protected references and explainable conditional recommendations |
+| [pi-context-aco](./packages/pi-context-aco/README.md) | Passive pressure/task monitoring, recommendations, scoped local evidence checkpoints and bounded historical recall; no strategy execution |
 
-The four plugins have controlled Pi 1.5.0 loading/usage smoke evidence. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is their ordinary versioned dependency, not an activated plugin. ACO delivers controlled V1 observation/recommendations only; no strategy executes. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
+The four plugins have controlled Pi 1.5.0 loading/usage smoke evidence. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is their ordinary versioned dependency, not an activated plugin. ACO delivers V1 observation/recommendations and T0003's explicit local recovery foundation; no strategy executes. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
 
 ## Installation model
 

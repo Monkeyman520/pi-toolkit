@@ -26,7 +26,7 @@
   - references Pi Plugin Package
 
 ### Adaptive Context Orchestrator
-- **Definition:** The task-aware Pi context-management capability under development in this collection. It treats model-visible context as a recoverable working set, selecting interventions using task needs, context dependencies/value, and projected pressure rather than occupancy watermarks alone. Its staged delivery and memory-isolation boundaries are recorded in [ADR 0006](./adr/0006-task-aware-context-working-set-and-isolation.md). The [pi-context-aco](../packages/pi-context-aco/README.md) package currently provides T0001/T0002's V1 passive monitoring, task/context references and conditional recommendations; the full semantic safety engine and later strategy execution remain pending.
+- **Definition:** The task-aware Pi context-management capability under development in this collection. It treats model-visible context as a recoverable working set, selecting interventions using task needs, context dependencies/value, and projected pressure rather than occupancy watermarks alone. Its staged delivery and memory-isolation boundaries are recorded in [ADR 0006](./adr/0006-task-aware-context-working-set-and-isolation.md). The [pi-context-aco](../packages/pi-context-aco/README.md) package currently provides V1 passive monitoring/task references/recommendations and T0003's explicit scoped local evidence/checkpoint/historical-recall foundation; exact pruning, the full semantic safety engine and later strategy execution remain pending.
 - **Synonyms:** ACO
 - **Relationships:**
   - depends on Pi Agent

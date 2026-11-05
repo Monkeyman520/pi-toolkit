@@ -100,3 +100,18 @@ describe("strict command and full-prefix completion", () => {
 		expect(complete("config strategy ", defaults)).toBeNull();
 	});
 });
+
+it("parses and completes recovery actions without interpreting JSON as config", () => {
+	for (const action of ["checkpoint", "recall"] as const) {
+		expect(parse(action + ' {"sourceEntryIds":["a"]}')).toEqual({
+			kind: action,
+			json: '{"sourceEntryIds":["a"]}',
+		});
+		expect(
+			complete(action.slice(0, 3), defaults)?.some((c) => c.value === action),
+		).toBe(true);
+	}
+	expect(parse("evidence")).toEqual({ kind: "evidence" });
+	expect(parse("evidence extra")).toEqual({ kind: "help" });
+	expect(parse("recall " + "x".repeat(65537))).toEqual({ kind: "help" });
+});

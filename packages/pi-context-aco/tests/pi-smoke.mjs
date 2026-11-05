@@ -130,7 +130,9 @@ try {
 				key === "timestamp" || key === "durationMs"
 					? undefined
 					: key === "toolsAdded"
-						? v.filter((tool) => tool.name !== "aco_task")
+						? v.filter(
+								(tool) => !["aco_task", "aco_recall"].includes(tool.name),
+							)
 						: v,
 			),
 		);

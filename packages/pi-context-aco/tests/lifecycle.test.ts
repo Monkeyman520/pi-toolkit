@@ -44,7 +44,7 @@ async function harness() {
 		status = vi.fn();
 	const pi = {
 		registerTool: (tool: ToolDefinition<typeof declarationSchema>) => {
-			taskTool = tool;
+			if (tool.name === "aco_task") taskTool = tool;
 		},
 		on: (name: string, handler: (e: never, c: ExtensionContext) => unknown) =>
 			hooks.set(name, handler),

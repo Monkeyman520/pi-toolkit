@@ -3,7 +3,7 @@ import { settingCandidates } from "pi-plugin-support/settings";
 import { options, type Settings, schema, settingKey } from "./config.ts";
 
 export const usage =
-	"Usage: /aco [status | trace | tasks | recommend | declare <JSON> | on | off | config [reload | <key> [value]] | help] — V1 observation/recommendation only";
+	"Usage: /aco [status | trace | tasks | recommend | declare <JSON> | checkpoint <JSON> | evidence | recall <JSON> | on | off | config [reload | <key> [value]] | help] — observation + explicit recovery; no pruning";
 export type Command =
 	| {
 			kind:
@@ -13,15 +13,24 @@ export type Command =
 				| "reload"
 				| "help"
 				| "tasks"
-				| "recommend";
+				| "recommend"
+				| "evidence";
 	  }
-	| { kind: "declare"; json: string }
+	| { kind: "declare" | "checkpoint" | "recall"; json: string }
 	| { kind: "get"; key: string }
 	| { kind: "set"; key: string; value: string };
 export function parse(args: string): Command {
-	if (/^declare\s/i.test(args.trim()))
-		return args.length <= 32768
-			? { kind: "declare", json: args.trim().replace(/^declare\s+/i, "") }
+	const jsonAction = /^(declare|checkpoint|recall)\s+/i.exec(args.trim());
+	if (jsonAction)
+		return args.length <=
+			(jsonAction[1].toLowerCase() === "declare" ? 32768 : 65536)
+			? {
+					kind: jsonAction[1].toLowerCase() as
+						| "declare"
+						| "checkpoint"
+						| "recall",
+					json: args.trim().slice(jsonAction[0].length),
+				}
 			: { kind: "help" };
 	if (args.length > 512) return { kind: "help" };
 	const p = args.trim().split(/\s+/).filter(Boolean);
@@ -30,6 +39,8 @@ export function parse(args: string): Command {
 		switch (p[0].toLowerCase()) {
 			case "status":
 				return { kind: "status" };
+			case "evidence":
+				return { kind: "evidence" };
 			case "tasks":
 				return { kind: "tasks" };
 			case "recommend":
@@ -75,6 +86,9 @@ export function complete(
 				"tasks",
 				"recommend",
 				"declare",
+				"checkpoint",
+				"evidence",
+				"recall",
 				"on",
 				"off",
 				"config",
@@ -82,7 +96,7 @@ export function complete(
 			].map((action) => ({
 				value: action,
 				label: action,
-				description: "V1 passive monitor control",
+				description: "ACO observation and explicit local recovery control",
 			})),
 		);
 	if (p[0]?.toLowerCase() !== "config") return null;

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	type ExtensionAPI,
 	type ExtensionContext,
@@ -7,6 +7,7 @@ import {
 import { DISCOVER_EVENT, isDiscoverPayload } from "pi-plugin-support/discovery";
 import { complete, parse, usage } from "./commands.ts";
 import { Config, settingKey } from "./config.ts";
+import { Continuity, recallSchema } from "./continuity.ts";
 import {
 	type Metric,
 	type Pressure,
@@ -100,6 +101,10 @@ export default function contextMonitor(
 	configPath = join(getAgentDir(), "pi-context-aco.json"),
 ) {
 	let active: State | undefined;
+	const continuity = new Continuity(
+		join(dirname(configPath), "pi-context-aco", "evidence"),
+		(type, data) => pi.appendEntry(type, data),
+	);
 
 	function assess(s: State, ctx: ExtensionContext, event: string) {
 		if (!s.pressure) return;
@@ -267,6 +272,7 @@ export default function contextMonitor(
 		if (ctx.hasUI) ctx.ui.setStatus("aco", `ACO · ${brief(s)}`);
 	}
 	function stop() {
+		continuity.invalidate();
 		const old = active;
 		active = undefined;
 		old?.unlisten?.();
@@ -291,13 +297,16 @@ export default function contextMonitor(
 	function report(s: State, ctx: ExtensionContext, includeTraces = false) {
 		observe(s, ctx, "status", false, false);
 		return {
-			stage: "V1/T0001+T0002",
+			stage: "V1 + V2 recovery foundation/T0003",
 			mode: "observe-only",
 			sampling: s.config.settings.enabled
 				? "enabled"
 				: "disabled; event snapshots may be stale",
 			authorizedStrategies: [],
-			strategyExecution: "unavailable; V2–V5 not delivered",
+			strategyExecution:
+				"unavailable; exact pruning/compaction/delegation not delivered",
+			evidence:
+				"explicit local checkpoint and bounded historical recall available; /aco evidence re-verifies active-task receipts",
 			tasks: s.tasks,
 			recommendation: s.recommendation,
 			analysis: {
@@ -348,6 +357,16 @@ export default function contextMonitor(
 		await s.config.reload();
 		if (active !== s) return;
 		observe(s, ctx, "session_start");
+		const recovery = await continuity.reconcile(ctx);
+		if (active !== s) return;
+		if (
+			recovery.checkpoints.some((c) => c.status !== "verified") ||
+			(recovery.issues.length && recovery.scope)
+		)
+			ctx.ui.notify(
+				"ACO recovery has incomplete/invalid evidence; inspect /aco evidence. No content unloaded.",
+				"warning",
+			);
 		s.unlisten = pi.events.on(DISCOVER_EVENT, (payload: unknown) => {
 			if (!isDiscoverPayload(payload)) return;
 			payload.register({
@@ -377,8 +396,22 @@ export default function contextMonitor(
 	pi.on("session_compact", (_event, ctx) => {
 		reset("session_compact", ctx);
 	});
-	pi.on("session_tree", (_event, ctx) => {
+	pi.on("session_tree", async (_event, ctx) => {
+		const s = active;
+		if (!s) return;
+		continuity.invalidate();
 		reset("session_tree", ctx);
+		const recovery = await continuity.reconcile(ctx);
+		if (
+			active !== s ||
+			ctx.sessionManager.getSessionId() !== s.ctx.sessionManager.getSessionId()
+		)
+			return;
+		if (recovery.checkpoints.some((c) => c.status !== "verified"))
+			ctx.ui.notify(
+				"ACO branch recovery has incomplete/invalid evidence; inspect /aco evidence.",
+				"warning",
+			);
 	});
 	pi.on("turn_start", (_event, ctx) => {
 		const s = active;
@@ -460,9 +493,37 @@ export default function contextMonitor(
 				};
 			},
 		});
+	if (typeof pi.registerTool === "function")
+		pi.registerTool({
+			name: "aco_recall",
+			label: "ACO Historical Recall",
+			description:
+				"Recall one verified historical evidence segment. Requires an active task/branch receipt, not just an ID. Entire JSON text is bounded by budgetBytes (512–32768 UTF-8 bytes, not exact tokens); paginate with nextOffset. Historical bytes do not prove current workspace facts. No automatic injection or context pruning.",
+			parameters: recallSchema,
+			annotations: {
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false,
+			},
+			async execute(_id, params, signal, _onUpdate, ctx) {
+				const s = active;
+				if (!s?.config.settings.enabled || signal?.aborted)
+					throw Error("ACO unavailable, disabled or cancelled");
+				const text = await continuity.recall(
+					ctx,
+					params,
+					() => active === s && s.config.settings.enabled && !signal?.aborted,
+				);
+				return {
+					content: [{ type: "text", text }],
+					details: { historical: true },
+				};
+			},
+		});
 	pi.registerCommand("aco", {
 		description:
-			"Passive ACO monitor: status, traces and interactive settings; no context strategies",
+			"ACO monitor and explicit local checkpoint/recall; no pruning or compaction",
 		getArgumentCompletions: (prefix) =>
 			active ? complete(prefix, active.config.settings) : null,
 		handler: async (args, ctx) => {
@@ -475,6 +536,37 @@ export default function contextMonitor(
 				return;
 			}
 			const cmd = parse(args);
+			if (
+				cmd.kind === "checkpoint" ||
+				cmd.kind === "recall" ||
+				cmd.kind === "evidence"
+			) {
+				try {
+					if (!s.config.settings.enabled)
+						throw Error("ACO disabled; evidence operation refused");
+					const current = () => active === s && s.config.settings.enabled;
+					const value =
+						cmd.kind === "checkpoint"
+							? JSON.stringify(
+									await continuity.checkpoint(
+										ctx,
+										JSON.parse(cmd.json),
+										current,
+									),
+								)
+							: cmd.kind === "recall"
+								? await continuity.recall(ctx, JSON.parse(cmd.json), current)
+								: JSON.stringify(await continuity.reconcile(ctx));
+					if (current()) ctx.ui.notify(value, "info");
+				} catch (error) {
+					if (active === s)
+						ctx.ui.notify(
+							`ACO: ${error instanceof Error ? error.message : String(error)}; no content unloaded`,
+							"error",
+						);
+				}
+				return;
+			}
 
 			if (cmd.kind === "declare") {
 				try {
