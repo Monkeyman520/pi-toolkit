@@ -1,5 +1,5 @@
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { settingCandidates } from "pi-plugin-support/settings";
 import {
 	configOptions,
 	configSchema,
@@ -312,19 +312,18 @@ export function getPrettySessionCompletions(
 				) as keyof PrettySessionConfig | undefined);
 			if (!resolvedKey) return null;
 
-			let values: string[] = [];
-			if (Type.IsBoolean(configSchema.properties[resolvedKey])) {
-				values = [...configOptions[resolvedKey].values, "on", "off"];
-			} else if (resolvedKey === "widgetPlacement") {
-				values = [...configOptions.widgetPlacement.values];
-			} else if (resolvedKey === "model") {
-				values = [
-					...configOptions.model.values,
-					...(context?.models ?? []).map((m) => `${m.provider}/${m.id}`),
-				];
-			} else {
-				values = [...configOptions[resolvedKey].values];
-			}
+			const values =
+				resolvedKey === "model"
+					? [
+							...configOptions.model.values,
+							...(context?.models ?? []).map(
+								(model) => `${model.provider}/${model.id}`,
+							),
+						]
+					: settingCandidates(
+							configSchema.properties[resolvedKey],
+							configOptions[resolvedKey].values,
+						);
 
 			const matches = values
 				.filter((v) => v.toLowerCase().startsWith(lowerPartial))

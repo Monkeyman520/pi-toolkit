@@ -176,3 +176,36 @@ describe("package-owned lifecycle", () => {
 		expect(b.pi.sendUserMessage).toHaveBeenCalledTimes(1);
 	});
 });
+
+it("does not resurrect an old session's resources after a delayed configuration load", async () => {
+	const { AutoResumeConfigManager } = await import("../extensions/config.ts");
+	const { defaults } = await import("../extensions/recovery.ts");
+	let release!: (value: {
+		changed: boolean;
+		settings: typeof defaults;
+		isNewError: boolean;
+	}) => void;
+	vi.spyOn(AutoResumeConfigManager.prototype, "reloadIfChanged")
+		.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					release = resolve;
+				}),
+		)
+		.mockResolvedValue({
+			changed: true,
+			settings: { ...defaults },
+			isNewError: false,
+		});
+	const app = instance();
+	const old = app.emit("session_start");
+	await app.emit("session_start");
+	release({ changed: true, settings: { ...defaults }, isNewError: false });
+	await old;
+	expect(vi.getTimerCount()).toBe(1);
+	const ids: string[] = [];
+	app.pi.events.emit(DISCOVER_EVENT, {
+		register: (panel: { id: string }) => ids.push(panel.id),
+	});
+	expect(ids).toEqual([SELF_PLUGIN_ID]);
+});

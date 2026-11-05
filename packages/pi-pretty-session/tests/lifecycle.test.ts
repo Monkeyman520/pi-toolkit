@@ -77,6 +77,7 @@ function instance(events = createEventBus()) {
 			getSessionName: () => undefined,
 		},
 		ui: {
+			input: vi.fn(),
 			setStatus: vi.fn(),
 			setWidget: vi.fn(),
 			notify: vi.fn(),
@@ -201,4 +202,23 @@ describe("package-owned lifecycle", () => {
 			summary.generate.mockReset();
 		},
 	);
+});
+
+it("discards a rename dialog result after session replacement reuses the context", async () => {
+	const app = instance();
+	await app.emit("session_start");
+	let finish!: (title: string) => void;
+	const input = vi.spyOn(app.ctx.ui, "input").mockImplementationOnce(
+		() =>
+			new Promise((resolve) => {
+				finish = resolve;
+			}),
+	);
+	const pending = app.commands.get("ps")?.handler("rename", app.ctx);
+	await vi.waitFor(() => expect(input).toHaveBeenCalled());
+	await app.emit("session_start");
+	finish("Obsolete dialog title");
+	await pending;
+	expect(app.pi.appendEntry).not.toHaveBeenCalled();
+	expect(app.pi.setSessionName).not.toHaveBeenCalled();
 });

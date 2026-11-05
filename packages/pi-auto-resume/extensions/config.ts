@@ -1,13 +1,5 @@
-import { randomUUID } from "node:crypto";
-import {
-	mkdir,
-	readFile,
-	rename,
-	stat,
-	unlink,
-	writeFile,
-} from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { JsonConfigStore } from "pi-plugin-support/config";
+import { parseBoolean as parseBooleanInput } from "pi-plugin-support/settings";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 import { defaults, type Settings } from "./recovery.ts";
@@ -73,131 +65,30 @@ export const configOptions: Readonly<
 	},
 };
 
-function parseBooleanInput(raw: string): boolean | undefined {
-	const normalized = raw.trim().toLowerCase();
-	if (normalized === "true" || normalized === "on" || normalized === "1")
-		return true;
-	if (normalized === "false" || normalized === "off" || normalized === "0")
-		return false;
-	return undefined;
-}
-
 export class AutoResumeConfigManager {
 	readonly configPath: string;
-	private rawPersisted: PartialSettings = {};
-	private current: Settings = { ...defaults };
-	private lastMtimeMs: number | "missing" | undefined;
-	private lastContent: string | undefined;
-	private lastError: string | undefined;
-	private notifiedErrorKey: string | undefined;
-
+	private readonly store: JsonConfigStore<Settings>;
 	constructor(configPath: string) {
 		this.configPath = configPath;
+		this.store = new JsonConfigStore({
+			path: configPath,
+			schema: settingsSchema,
+			defaults: () => ({ ...defaults }),
+			maxBytes: MAX_CONFIG_BYTES,
+			errorMessage:
+				"Auto Resume disabled: invalid/unreadable pi-auto-resume.json.",
+			onInvalid: () => ({ ...defaults, enabled: false }),
+		});
 	}
-
 	get settings(): Settings {
-		return { ...this.current };
+		return this.store.config;
 	}
-
-	get error(): string | undefined {
-		return this.lastError;
+	get error() {
+		return this.store.error;
 	}
-
-	async reloadIfChanged(force = false): Promise<{
-		changed: boolean;
-		settings: Settings;
-		error?: string;
-		isNewError: boolean;
-	}> {
-		let rawText: string | undefined;
-		try {
-			const fileStat = await stat(this.configPath);
-			if (fileStat.size > MAX_CONFIG_BYTES) {
-				throw new Error("Configuration file too large");
-			}
-			rawText = await readFile(this.configPath, "utf8");
-			if (Buffer.byteLength(rawText) > MAX_CONFIG_BYTES) {
-				throw new Error("Configuration file too large");
-			}
-			if (
-				!force &&
-				this.lastMtimeMs === fileStat.mtimeMs &&
-				this.lastContent === rawText
-			) {
-				return {
-					changed: false,
-					settings: this.settings,
-					error: this.lastError,
-					isNewError: false,
-				};
-			}
-			this.lastMtimeMs = fileStat.mtimeMs;
-			this.lastContent = rawText;
-
-			const parsed: unknown = JSON.parse(rawText);
-			if (!Check(settingsSchema, parsed)) {
-				throw new Error("Invalid configuration");
-			}
-			const nextSettings: Settings = { ...defaults, ...parsed };
-			const changed =
-				force ||
-				this.lastError !== undefined ||
-				JSON.stringify(this.current) !== JSON.stringify(nextSettings);
-			this.rawPersisted = { ...parsed };
-			this.current = nextSettings;
-			this.lastError = undefined;
-			this.notifiedErrorKey = undefined;
-			return {
-				changed,
-				settings: this.settings,
-				isNewError: false,
-			};
-		} catch (error) {
-			if (
-				error instanceof Error &&
-				"code" in error &&
-				error.code === "ENOENT"
-			) {
-				const wasMissing = this.lastMtimeMs === "missing";
-				const hadError = this.lastError !== undefined;
-				const changed =
-					force ||
-					!wasMissing ||
-					hadError ||
-					JSON.stringify(this.current) !== JSON.stringify(defaults);
-				this.lastMtimeMs = "missing";
-				this.lastContent = undefined;
-				this.rawPersisted = {};
-				this.current = { ...defaults };
-				this.lastError = undefined;
-				this.notifiedErrorKey = undefined;
-				return {
-					changed,
-					settings: this.settings,
-					isNewError: false,
-				};
-			}
-			// Fail closed on invalid/unreadable configuration
-			const errMsg =
-				"Auto Resume disabled: invalid/unreadable pi-auto-resume.json.";
-			const errorKey =
-				rawText ?? (error instanceof Error ? error.message : String(error));
-			const isNewError = this.notifiedErrorKey !== errorKey;
-			const disabledSettings: Settings = { ...defaults, enabled: false };
-			const changed =
-				force ||
-				this.lastError === undefined ||
-				JSON.stringify(this.current) !== JSON.stringify(disabledSettings);
-			this.current = disabledSettings;
-			this.lastError = errMsg;
-			this.notifiedErrorKey = errorKey;
-			return {
-				changed,
-				settings: this.settings,
-				error: errMsg,
-				isNewError,
-			};
-		}
+	async reloadIfChanged(force = false) {
+		const { config, ...result } = await this.store.reload(force);
+		return { ...result, settings: config };
 	}
 
 	async setOption(
@@ -248,7 +139,7 @@ export class AutoResumeConfigManager {
 		}
 
 		const candidateRaw: Record<string, unknown> = {
-			...this.rawPersisted,
+			...this.store.raw,
 			[resolvedKey]: parsedValue,
 		};
 		if (!Check(settingsSchema, candidateRaw)) {
@@ -258,14 +149,7 @@ export class AutoResumeConfigManager {
 			};
 		}
 
-		this.rawPersisted = candidateRaw;
-		this.current = { ...defaults, ...candidateRaw };
-		this.lastError = undefined;
-		this.notifiedErrorKey = undefined;
-
-		if (persist) {
-			await this.persistCurrent();
-		}
+		await this.store.replace(candidateRaw, persist);
 
 		return {
 			ok: true,
@@ -273,33 +157,5 @@ export class AutoResumeConfigManager {
 			value: parsedValue,
 			settings: this.settings,
 		};
-	}
-
-	private async persistCurrent(): Promise<void> {
-		const dir = dirname(this.configPath);
-		await mkdir(dir, { recursive: true, mode: 0o700 });
-		const serialized = `${JSON.stringify(this.rawPersisted, null, "\t")}\n`;
-		const tempPath = join(
-			dir,
-			`.${CONFIG_FILE_NAME}.${process.pid}-${randomUUID()}.tmp`,
-		);
-		try {
-			await writeFile(tempPath, serialized, {
-				encoding: "utf8",
-				mode: 0o600,
-				flag: "wx",
-			});
-			await rename(tempPath, this.configPath);
-		} catch (error) {
-			await unlink(tempPath).catch(() => {});
-			throw error;
-		}
-		try {
-			const fileStat = await stat(this.configPath);
-			this.lastMtimeMs = fileStat.mtimeMs;
-			this.lastContent = serialized;
-		} catch {
-			// Ignore stat race after write
-		}
 	}
 }

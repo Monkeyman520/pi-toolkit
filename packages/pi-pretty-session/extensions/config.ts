@@ -1,14 +1,7 @@
-import { randomUUID } from "node:crypto";
-import {
-	mkdir,
-	readFile,
-	rename,
-	stat,
-	unlink,
-	writeFile,
-} from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { JsonConfigStore } from "pi-plugin-support/config";
+import { parseBoolean as parseBooleanValue } from "pi-plugin-support/settings";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 
@@ -167,126 +160,34 @@ export const toggleAliases: Readonly<
 	summarizeoncompact: "summarizeOnCompact",
 };
 
-function parseBooleanValue(raw: string): boolean | undefined {
-	const normalized = raw.trim().toLowerCase();
-	if (normalized === "true" || normalized === "on" || normalized === "1")
-		return true;
-	if (normalized === "false" || normalized === "off" || normalized === "0")
-		return false;
-	return undefined;
-}
-
 export class ConfigManager {
 	readonly configPath: string;
-	private current: PrettySessionConfig;
-	private rawPersisted: PartialPrettySessionConfig = {};
-	private lastMtimeMs: number | "missing" | undefined;
-	private lastContent: string | undefined;
-	private lastError: string | undefined;
-	private notifiedErrorContent: string | undefined;
-
+	private readonly store: JsonConfigStore<PrettySessionConfig>;
 	constructor(
 		configPath = join(getAgentDir(), CONFIG_FILE_NAME),
 		initial?: PartialPrettySessionConfig,
 	) {
 		this.configPath = configPath;
-		this.current = { ...defaultConfig, ...initial };
-		if (initial) this.rawPersisted = { ...initial };
+		this.store = new JsonConfigStore({
+			path: configPath,
+			schema: configSchema,
+			defaults: () => ({ ...defaultConfig }),
+			maxBytes: MAX_CONFIG_BYTES,
+			initial,
+			errorMessage: `Invalid or unreadable ${CONFIG_FILE_NAME}; keeping previous safe configuration.`,
+			identifyError: (read, lastText) =>
+				lastText ??
+				(read.error instanceof Error ? read.error.message : String(read.error)),
+		});
 	}
-
 	get config(): PrettySessionConfig {
-		return { ...this.current };
+		return this.store.config;
 	}
-
-	get error(): string | undefined {
-		return this.lastError;
+	get error() {
+		return this.store.error;
 	}
-
 	async reloadIfChanged(force = false): Promise<ConfigReloadResult> {
-		try {
-			const fileStat = await stat(this.configPath);
-			if (fileStat.size > MAX_CONFIG_BYTES) {
-				throw new Error("Configuration file exceeds maximum size");
-			}
-			const rawText = await readFile(this.configPath, "utf8");
-			if (Buffer.byteLength(rawText) > MAX_CONFIG_BYTES) {
-				throw new Error("Configuration file exceeds maximum size");
-			}
-			if (
-				!force &&
-				this.lastMtimeMs === fileStat.mtimeMs &&
-				this.lastContent === rawText
-			) {
-				return {
-					changed: false,
-					config: this.config,
-					error: this.lastError,
-					isNewError: false,
-				};
-			}
-			this.lastMtimeMs = fileStat.mtimeMs;
-			this.lastContent = rawText;
-
-			const parsed: unknown = JSON.parse(rawText);
-			if (!Check(configSchema, parsed)) {
-				throw new Error("Configuration does not match schema");
-			}
-			const nextConfig: PrettySessionConfig = {
-				...defaultConfig,
-				...parsed,
-			};
-			const changed =
-				force ||
-				this.lastError !== undefined ||
-				JSON.stringify(this.current) !== JSON.stringify(nextConfig);
-			this.rawPersisted = { ...parsed };
-			this.current = nextConfig;
-			this.lastError = undefined;
-			this.notifiedErrorContent = undefined;
-			return {
-				changed,
-				config: this.config,
-				isNewError: false,
-			};
-		} catch (error) {
-			if (
-				error instanceof Error &&
-				"code" in error &&
-				error.code === "ENOENT"
-			) {
-				const wasMissing = this.lastMtimeMs === "missing";
-				const hadError = this.lastError !== undefined;
-				const changed =
-					force ||
-					!wasMissing ||
-					hadError ||
-					JSON.stringify(this.current) !== JSON.stringify(defaultConfig);
-				this.lastMtimeMs = "missing";
-				this.lastContent = undefined;
-				this.rawPersisted = {};
-				this.current = { ...defaultConfig };
-				this.lastError = undefined;
-				this.notifiedErrorContent = undefined;
-				return {
-					changed,
-					config: this.config,
-					isNewError: false,
-				};
-			}
-			const errMsg = `Invalid or unreadable ${CONFIG_FILE_NAME}; keeping previous safe configuration.`;
-			const errorKey =
-				this.lastContent ??
-				(error instanceof Error ? error.message : String(error));
-			const isNewError = this.notifiedErrorContent !== errorKey;
-			this.lastError = errMsg;
-			this.notifiedErrorContent = errorKey;
-			return {
-				changed: false,
-				config: this.config,
-				error: errMsg,
-				isNewError,
-			};
-		}
+		return this.store.reload(force);
 	}
 
 	async setOption(
@@ -360,7 +261,7 @@ export class ConfigManager {
 		}
 
 		const candidateRaw: Record<string, unknown> = {
-			...this.rawPersisted,
+			...this.store.raw,
 		};
 		if (parsedValue === undefined) {
 			delete candidateRaw[resolvedKey];
@@ -375,19 +276,12 @@ export class ConfigManager {
 			};
 		}
 
-		this.rawPersisted = candidateRaw;
-		this.current = { ...defaultConfig, ...candidateRaw };
-		this.lastError = undefined;
-		this.notifiedErrorContent = undefined;
-
-		if (persist) {
-			await this.persistCurrent();
-		}
+		await this.store.replace(candidateRaw, persist);
 
 		return {
 			ok: true,
 			key: resolvedKey,
-			value: this.current[resolvedKey],
+			value: this.config[resolvedKey],
 			config: this.config,
 		};
 	}
@@ -412,7 +306,7 @@ export class ConfigManager {
 				error: `Unknown toggle target "${target}". Supported targets: auto, llm, widget, status, lock, compact.`,
 			};
 		}
-		const currentVal = Boolean(this.current[key]);
+		const currentVal = Boolean(this.config[key]);
 		const res = await this.setOption(key, String(!currentVal), persist);
 		if (!res.ok) return res;
 		return {
@@ -421,33 +315,5 @@ export class ConfigManager {
 			value: Boolean(res.value),
 			config: res.config,
 		};
-	}
-
-	private async persistCurrent(): Promise<void> {
-		const dir = dirname(this.configPath);
-		await mkdir(dir, { recursive: true, mode: 0o700 });
-		const serialized = `${JSON.stringify(this.rawPersisted, null, "\t")}\n`;
-		const tempPath = join(
-			dir,
-			`.${CONFIG_FILE_NAME}.${process.pid}-${randomUUID()}.tmp`,
-		);
-		try {
-			await writeFile(tempPath, serialized, {
-				encoding: "utf8",
-				mode: 0o600,
-				flag: "wx",
-			});
-			await rename(tempPath, this.configPath);
-		} catch (error) {
-			await unlink(tempPath).catch(() => {});
-			throw error;
-		}
-		try {
-			const fileStat = await stat(this.configPath);
-			this.lastMtimeMs = fileStat.mtimeMs;
-			this.lastContent = serialized;
-		} catch {
-			// Ignore stat race after write
-		}
 	}
 }

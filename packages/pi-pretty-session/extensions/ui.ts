@@ -1,17 +1,16 @@
-import {
-	DynamicBorder,
-	type ExtensionAPI,
-	type ExtensionContext,
+import type {
+	ExtensionAPI,
+	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { type SettingItem, truncateToWidth } from "@earendil-works/pi-tui";
 import {
-	Container,
-	type SelectItem,
-	SelectList,
-	type SettingItem,
-	SettingsList,
-	type SettingsListTheme,
-	truncateToWidth,
-} from "@earendil-works/pi-tui";
+	discoverLoadedPanels,
+	type PluginUiDescriptor,
+} from "pi-plugin-support/discovery";
+import {
+	createSettingsPanel,
+	pluginSwitcherItem,
+} from "pi-plugin-support/panels";
 import {
 	type ConfigManager,
 	configOptions,
@@ -21,50 +20,14 @@ import {
 import { formatContextLength } from "./display.ts";
 import type { PrettySessionEntryData, SessionMetrics } from "./summarizer.ts";
 
-export const DISCOVER_EVENT = "pi-packages:ui:discover";
+export {
+	DISCOVER_EVENT,
+	discoverLoadedPanels,
+	isDiscoverPayload,
+	type PluginUiDescriptor,
+	type PluginUiDiscoverPayload,
+} from "pi-plugin-support/discovery";
 export const SELF_PLUGIN_ID = "pi-pretty-session";
-
-export interface PluginUiDescriptor {
-	id: string;
-	title: string;
-	command: string;
-	getSummary(): string;
-	open(ctx: ExtensionContext): Promise<void>;
-}
-
-export interface PluginUiDiscoverPayload {
-	register(descriptor: PluginUiDescriptor): void;
-}
-
-export function isDiscoverPayload(
-	value: unknown,
-): value is PluginUiDiscoverPayload {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		"register" in value &&
-		typeof (value as { register?: unknown }).register === "function"
-	);
-}
-
-export function discoverLoadedPanels(
-	events: ExtensionAPI["events"],
-): PluginUiDescriptor[] {
-	const byId = new Map<string, PluginUiDescriptor>();
-	events.emit(DISCOVER_EVENT, {
-		register(descriptor: PluginUiDescriptor) {
-			if (
-				descriptor &&
-				typeof descriptor.id === "string" &&
-				typeof descriptor.title === "string" &&
-				typeof descriptor.open === "function"
-			) {
-				byId.set(descriptor.id, descriptor);
-			}
-		},
-	} satisfies PluginUiDiscoverPayload);
-	return [...byId.values()];
-}
 
 export type PrettySessionPanelAction =
 	| { type: "switch_plugin"; descriptor: PluginUiDescriptor }
@@ -119,16 +82,6 @@ export async function openPrettySessionSettingsPanel(params: {
 	const action = await ctx.ui.custom<PrettySessionPanelAction>(
 		(tui, theme, _kb, done) => {
 			let feedbackMessage: string | undefined;
-
-			const listTheme: SettingsListTheme = {
-				label: (text, selected) =>
-					selected ? theme.fg("accent", text) : theme.fg("text", text),
-				value: (text, selected) =>
-					selected ? theme.fg("accent", text) : theme.fg("muted", text),
-				description: (text) => theme.fg("dim", text),
-				cursor: theme.fg("accent", "› "),
-				hint: (text) => theme.fg("dim", text),
-			};
 
 			const buildItems = (): SettingItem[] => {
 				const c = configManager.config;
@@ -272,52 +225,22 @@ export async function openPrettySessionSettingsPanel(params: {
 					},
 				];
 
-				if (otherPanels.length > 0) {
-					list.push({
-						id: "switch-plugin",
-						label: "Switch Installed Plugin",
-						description:
-							"Open another installed collection plugin's TUI settings panel",
-						currentValue: `${otherPanels.length} installed`,
-						submenu: (_cur, subDone) => {
-							const selectItems: SelectItem[] = otherPanels.map((p) => ({
-								value: p.id,
-								label: `${p.title} (${p.command})`,
-								description: p.getSummary(),
-							}));
-							const selectList = new SelectList(
-								selectItems,
-								Math.min(selectItems.length + 1, 8),
-								{
-									selectedPrefix: (t) => theme.fg("accent", t),
-									selectedText: (t) => theme.fg("accent", t),
-									description: (t) => theme.fg("muted", t),
-									scrollInfo: (t) => theme.fg("dim", t),
-									noMatch: (t) => theme.fg("warning", t),
-								},
-							);
-							selectList.onSelect = (item) => {
-								const target = otherPanels.find((p) => p.id === item.value);
-								subDone();
-								if (target) {
-									done({ type: "switch_plugin", descriptor: target });
-								}
-							};
-							selectList.onCancel = () => subDone();
-							return selectList;
-						},
-					});
-				}
+				if (otherPanels.length > 0)
+					list.push(
+						pluginSwitcherItem(otherPanels, theme, (target) =>
+							done({ type: "switch_plugin", descriptor: target }),
+						),
+					);
 
 				return list;
 			};
 
 			const items = buildItems();
-			const settingsList = new SettingsList(
+			const { settingsList, component } = createSettingsPanel({
+				tui,
+				theme,
 				items,
-				Math.min(items.length + 2, 14),
-				listTheme,
-				(id, newValue) => {
+				onChange: (id, newValue) => {
 					if (id === "action-summarize") {
 						done({ type: "summarize" });
 						return;
@@ -354,49 +277,8 @@ export async function openPrettySessionSettingsPanel(params: {
 						tui.requestRender();
 					});
 				},
-				() => done(undefined),
-				{ enableSearch: true },
-			);
-
-			const syncListValues = () => {
-				const c = configManager.config;
-				settingsList.updateValue("enabled", String(c.enabled));
-				settingsList.updateValue("useLlm", String(c.useLlm));
-				settingsList.updateValue("model", c.model ?? "default");
-				settingsList.updateValue(
-					"protectManualName",
-					String(c.protectManualName),
-				);
-				settingsList.updateValue("showWidget", String(c.showWidget));
-				settingsList.updateValue("widgetPlacement", c.widgetPlacement);
-				settingsList.updateValue("showStatus", String(c.showStatus));
-				settingsList.updateValue(
-					"summarizeOnCompact",
-					String(c.summarizeOnCompact),
-				);
-				settingsList.updateValue(
-					"updateEveryTurns",
-					String(c.updateEveryTurns),
-				);
-				settingsList.updateValue(
-					"contextDeltaTokens",
-					String(c.contextDeltaTokens),
-				);
-				settingsList.updateValue("maxTitleLength", String(c.maxTitleLength));
-				settingsList.updateValue(
-					"maxDescriptionLength",
-					String(c.maxDescriptionLength),
-				);
-				settingsList.updateValue(
-					"summaryTimeoutMs",
-					String(c.summaryTimeoutMs),
-				);
-			};
-
-			const container = new Container();
-			container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
-			container.addChild({
-				render(width: number): string[] {
+				onCancel: () => done(undefined),
+				renderHeader: (width: number) => {
 					const w = Math.max(20, width);
 					const meta = getMeta();
 					const metrics = getMetrics();
@@ -437,24 +319,44 @@ export async function openPrettySessionSettingsPanel(params: {
 					headerLines.push("");
 					return headerLines;
 				},
-				invalidate() {},
 			});
-			container.addChild(settingsList);
-			container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
 
-			return {
-				capturesViewportInput: settingsList.capturesViewportInput,
-				render(width: number) {
-					return container.render(width);
-				},
-				invalidate() {
-					container.invalidate();
-				},
-				handleInput(data: string) {
-					settingsList.handleInput(data);
-					tui.requestRender();
-				},
+			const syncListValues = () => {
+				const c = configManager.config;
+				settingsList.updateValue("enabled", String(c.enabled));
+				settingsList.updateValue("useLlm", String(c.useLlm));
+				settingsList.updateValue("model", c.model ?? "default");
+				settingsList.updateValue(
+					"protectManualName",
+					String(c.protectManualName),
+				);
+				settingsList.updateValue("showWidget", String(c.showWidget));
+				settingsList.updateValue("widgetPlacement", c.widgetPlacement);
+				settingsList.updateValue("showStatus", String(c.showStatus));
+				settingsList.updateValue(
+					"summarizeOnCompact",
+					String(c.summarizeOnCompact),
+				);
+				settingsList.updateValue(
+					"updateEveryTurns",
+					String(c.updateEveryTurns),
+				);
+				settingsList.updateValue(
+					"contextDeltaTokens",
+					String(c.contextDeltaTokens),
+				);
+				settingsList.updateValue("maxTitleLength", String(c.maxTitleLength));
+				settingsList.updateValue(
+					"maxDescriptionLength",
+					String(c.maxDescriptionLength),
+				);
+				settingsList.updateValue(
+					"summaryTimeoutMs",
+					String(c.summaryTimeoutMs),
+				);
 			};
+
+			return component;
 		},
 	);
 

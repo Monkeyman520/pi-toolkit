@@ -20,6 +20,7 @@ import {
 	type Socket,
 } from "node:net";
 import { join } from "node:path";
+import { readJsonConfig, writeJsonConfig } from "pi-plugin-support/config";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { MAX_JSON_BYTES, type Snapshot } from "./providers.ts";
@@ -180,56 +181,42 @@ export const configOptions: Readonly<
 };
 
 export async function readQuotaConfig(dir: string): Promise<QuotaKeeperConfig> {
-	try {
-		const rawText = await readFile(join(dir, "pi-quota-keeper.json"), "utf8");
-		if (Buffer.byteLength(rawText) > MAX_JSON_BYTES) {
-			throw new Error("Configuration too large");
-		}
-		const raw: unknown = JSON.parse(rawText);
-		if (!Check(configSchema, raw)) throw new Error("Invalid configuration");
+	const result = await readJsonConfig(
+		join(dir, "pi-quota-keeper.json"),
+		configSchema,
+		MAX_JSON_BYTES,
+	);
+	if (result.kind === "missing")
 		return {
-			pollIntervalMs: raw.pollIntervalMs ?? defaultQuotaConfig.pollIntervalMs,
-			mode: raw.mode ?? defaultQuotaConfig.mode,
-			delayMs: raw.delayMs ?? defaultQuotaConfig.delayMs,
-			enabledAccounts: [...(raw.enabledAccounts ?? [])],
-			models: { ...(raw.models ?? {}) },
-			resetWindows: { ...(raw.resetWindows ?? {}) },
+			...defaultQuotaConfig,
+			enabledAccounts: [],
+			models: {},
+			resetWindows: {},
 		};
-	} catch (error) {
-		if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-			return {
-				...defaultQuotaConfig,
-				enabledAccounts: [],
-				models: {},
-				resetWindows: {},
-			};
-		}
+	if (result.kind !== "valid" || !Check(configSchema, result.data))
 		throw new Error(
 			"Invalid/unreadable pi-quota-keeper.json; maintenance paused.",
 		);
-	}
+	const raw = result.data;
+	return {
+		pollIntervalMs: raw.pollIntervalMs ?? defaultQuotaConfig.pollIntervalMs,
+		mode: raw.mode ?? defaultQuotaConfig.mode,
+		delayMs: raw.delayMs ?? defaultQuotaConfig.delayMs,
+		enabledAccounts: [...(raw.enabledAccounts ?? [])],
+		models: { ...(raw.models ?? {}) },
+		resetWindows: { ...(raw.resetWindows ?? {}) },
+	};
 }
 
 export async function writeQuotaConfig(
 	dir: string,
 	config: QuotaKeeperConfig,
 ): Promise<void> {
-	if (!Check(configSchema, config)) {
-		throw new Error("Configuration does not match schema.");
-	}
-	await mkdir(dir, { recursive: true, mode: 0o700 });
-	const temp = join(dir, `.quota-cfg-${process.pid}-${randomUUID()}.tmp`);
-	try {
-		await writeFile(temp, `${JSON.stringify(config, null, "\t")}\n`, {
-			encoding: "utf8",
-			mode: 0o600,
-			flag: "wx",
-		});
-		await rename(temp, join(dir, "pi-quota-keeper.json"));
-	} catch (error) {
-		await unlink(temp).catch(() => {});
-		throw error;
-	}
+	await writeJsonConfig(
+		join(dir, "pi-quota-keeper.json"),
+		config,
+		configSchema,
+	);
 }
 
 export async function executeQuotaConfigCommand(

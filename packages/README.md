@@ -1,6 +1,6 @@
 # Package Development Reference
 
-This directory holds independently installable plugins for the [pi-packages collection](../README.md). Current packages are [pi-auto-resume](./pi-auto-resume/README.md), [pi-pretty-session](./pi-pretty-session/README.md), and [pi-quota-keeper](./pi-quota-keeper/README.md). The reference fragments below describe the baseline; each package README documents its actual setup and verified commands.
+This directory holds independently installable plugins for the [pi-packages collection](../README.md). Current packages are [pi-auto-resume](./pi-auto-resume/README.md), [pi-pretty-session](./pi-pretty-session/README.md), and [pi-quota-keeper](./pi-quota-keeper/README.md). The ordinary [pi-plugin-support](./pi-plugin-support/README.md) library supplies shared configuration/discovery/TUI mechanisms; it is not a fourth Pi plugin. The reference fragments below describe the plugin baseline; each package README documents its actual setup and verified commands.
 
 Follow [AGENTS.md](../AGENTS.md), [ADR 0001](../.grimoire/adr/0001-independently-installable-pi-packages.md), and [ADR 0002](../.grimoire/adr/0002-typescript-esm-plugin-development-stack.md) when adding or changing packages. Use English for package documentation and written project guidance.
 
@@ -17,7 +17,7 @@ packages/<plugin-name>/
 └── prompts/           # Optional /name Markdown prompt templates
 ```
 
-Each package owns its manifest, TypeScript configuration, extension resources, runtime requirements, and README. Keep optional resource directories absent until used. Pi also supports themes, but theme resources are not required by this package baseline.
+Each plugin owns its manifest, TypeScript configuration, extension resources, runtime requirements, README and lifecycle. The ordinary support library has source exports under `src/` and no Pi resource directories. [ADR 0005](../.grimoire/adr/0005-versioned-plugin-support-library.md) permits explicit shared-library dependencies without direct sibling-plugin source imports or shared runtime ownership. Keep optional resource directories absent until used. Pi also supports themes, but theme resources are not required by this package baseline.
 
 A package must work without undeclared sibling source code or an incidental shared dependency instance from the development checkout. Declare and distribute any actual runtime dependencies rather than assuming that repository membership makes them available.
 

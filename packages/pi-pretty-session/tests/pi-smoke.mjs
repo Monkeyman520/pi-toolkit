@@ -16,6 +16,27 @@ try {
 		recursive: true,
 		filter: (p) => !p.includes("node_modules") && !p.includes("tests"),
 	});
+	const npmCli =
+		process.env.npm_execpath ??
+		join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+	const installed = spawnSync(
+		process.execPath,
+		[
+			npmCli,
+			"ci",
+			"--omit=dev",
+			"--ignore-scripts",
+			"--legacy-peer-deps",
+			"--offline",
+			"--no-audit",
+		],
+		{ cwd: isolated, encoding: "utf8", windowsHide: true, timeout: 30000 },
+	);
+	assert.equal(
+		installed.status,
+		0,
+		`isolated production dependencies: ${installed.stderr}`,
+	);
 
 	const projectDir = join(root, "workspace");
 	await cp(isolated, projectDir, {

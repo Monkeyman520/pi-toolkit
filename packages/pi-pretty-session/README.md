@@ -83,6 +83,10 @@ This extension runs with Pi's full operating-system process privileges:
 
 ## Development and verification
 
+This plugin declares `pi-plugin-support@0.1.0` as an ordinary dependency. Its versioned archive is shipped in `vendor/` for package-local lockfile setup; npm distribution bundles only that ordinary library, never host SDKs or another plugin. Follow the [support-library reference](../pi-plugin-support/README.md) when updating shared sources. No registry publication or emitted build is required. Prepare dependencies before `pi -e` or local installation; Pi does not install local-package dependencies.
+
+The shared library owns configuration-file and TUI/discovery mechanisms; this plugin retains its own schema, failure policy, actions, instances and resource cleanup.
+
 Package-local configuration metadata supplies both command completions and panel presets; the TypeBox schema remains the validation authority, including valid non-preset values. Lifecycle regression tests verify factory inactivity, repeated-start cleanup, independent instances, and that late summaries cannot write metadata or rename sessions after tree navigation or shutdown.
 
 The optional [collection isolation matrix](../../README.md#cross-plugin-isolation-verification) additionally exercises all seven plugin combinations in real Pi; it is development-only, not an installation or runtime dependency.
@@ -107,4 +111,4 @@ $env:PI_BINARY = 'C:\path\to\pi.exe'
 npm run smoke
 ```
 
-The smoke test copies only this package into a temporary directory without sibling plugins or `node_modules`, initializes a temporary Git repository and `package.json`, configures an isolated Pi agent directory and a synthetic provider, and launches real Pi RPC. It verifies `/pretty-session` and `/ps` command registration, automatic LLM session naming and description generation after the first turn, start/update timestamps and context length reporting, project Git and manifest inspection, manual rename locking, dynamic `pi-pretty-session.json` hot-reloading (`widgetPlacement: "belowEditor"`, `updateEveryTurns: 1`), explicit `/ps summarize` override, and clean shutdown. Expected output ends in `PASS`.
+The smoke test copies only this package into a temporary directory without sibling plugins or inherited development `node_modules`, installs its declared production dependencies from the shipped archive/lockfile, initializes a temporary Git repository and `package.json`, configures an isolated Pi agent directory and a synthetic provider, and launches real Pi RPC. It verifies `/pretty-session` and `/ps` command registration, automatic LLM session naming and description generation after the first turn, start/update timestamps and context length reporting, project Git and manifest inspection, manual rename locking, dynamic `pi-pretty-session.json` hot-reloading (`widgetPlacement: "belowEditor"`, `updateEveryTurns: 1`), explicit `/ps summarize` override, and clean shutdown. Expected output ends in `PASS`.

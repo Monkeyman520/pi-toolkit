@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
 	type ExtensionAPI,
 	type ExtensionCommandContext,
@@ -20,19 +20,8 @@ import {
 	formatStatusLine,
 	formatWidgetLines,
 } from "./display.ts";
-import { inspectProject, type ProjectInfo } from "./project.ts";
-import {
-	buildHeuristicSummary,
-	CUSTOM_ENTRY_TYPE,
-	computeSessionMetrics,
-	evaluateSummaryTrigger,
-	generateSessionSummary,
-	type PrettySessionEntryData,
-	reconstructMetadata,
-	type SessionMetrics,
-	type SummarySource,
-	sanitizeSingleLine,
-} from "./summarizer.ts";
+import { SessionState } from "./session-state.ts";
+import type { PrettySessionEntryData, SessionMetrics } from "./summarizer.ts";
 import {
 	DISCOVER_EVENT,
 	isDiscoverPayload,
@@ -42,92 +31,35 @@ import {
 
 const WIDGET_KEY = "pretty-session";
 const STATUS_KEY = "pretty-session";
-const PROJECT_CACHE_TTL_MS = 10_000;
 
 export default function (pi: ExtensionAPI) {
 	const configPath = join(getAgentDir(), CONFIG_FILE_NAME);
 	const configManager = new ConfigManager(configPath);
+	const session = new SessionState(pi, configManager, (ctx, state) =>
+		renderUI(ctx, state),
+	);
 
-	let currentCtx: ExtensionContext | undefined;
-	let currentProject: ProjectInfo | undefined;
-	let currentMetadata: PrettySessionEntryData | undefined;
-	let isApplyingPluginName = false;
-	let lastPluginSetTitle: string | undefined;
-	let summaryAbort: AbortController | undefined;
 	let watchTimer: ReturnType<typeof setInterval> | undefined;
 	let unlistenDiscover: (() => void) | undefined;
 	let lastStatusLine: string | undefined;
 	let lastWidgetKey: string | undefined;
 
-	function setNativeSessionName(title: string) {
-		const sanitized = title
-			.replace(/\p{Cc}/gu, " ")
-			.replace(/\s+/g, " ")
-			.trim();
-		if (!sanitized) return;
-		isApplyingPluginName = true;
-		lastPluginSetTitle = sanitized;
-		try {
-			pi.setSessionName(sanitized);
-		} finally {
-			isApplyingPluginName = false;
-		}
-	}
-
-	function getActiveEntries(ctx: ExtensionContext) {
-		const branch = ctx.sessionManager.getBranch();
-		return branch.length > 0 ? branch : ctx.sessionManager.getEntries();
-	}
-
-	function recomputeSessionState(ctx: ExtensionContext): {
-		metrics: SessionMetrics;
-		metadata: PrettySessionEntryData | undefined;
-	} {
-		const entries = getActiveEntries(ctx);
-		const allEntries = ctx.sessionManager.getEntries();
-		const header = ctx.sessionManager.getHeader();
-		const metrics = computeSessionMetrics({
-			entries,
-			header,
-			contextUsage: ctx.getContextUsage(),
-			modelContextWindow: ctx.model?.contextWindow,
-			sessionId: ctx.sessionManager.getSessionId(),
-			sessionFile: ctx.sessionManager.getSessionFile(),
-		});
-
-		const metadataSourceEntries = entries.some(
-			(e) => e.type === "custom" && e.customType === CUSTOM_ENTRY_TYPE,
-		)
-			? entries
-			: allEntries;
-
-		const metadata = reconstructMetadata(
-			metadataSourceEntries,
-			ctx.sessionManager.getSessionName(),
-			metrics,
-			currentProject,
-		);
-
-		currentMetadata = metadata;
-		return { metrics, metadata };
-	}
-
 	function renderUI(
-		ctx = currentCtx,
+		ctx = session.context,
 		precomputed?: {
 			metrics: SessionMetrics;
 			metadata: PrettySessionEntryData | undefined;
 		},
 	) {
-		if (!ctx?.hasUI) return;
-		const { metrics, metadata } = precomputed ?? recomputeSessionState(ctx);
+		if (!ctx?.hasUI || !session.isCurrent(ctx)) return;
+		const { metrics, metadata } = precomputed ?? session.recompute(ctx);
 		const config = configManager.config;
 
 		const nextStatus = config.showStatus
 			? formatStatusLine({
 					meta: metadata,
 					metrics,
-					project: currentProject,
+					project: session.project,
 					config,
 				})
 			: undefined;
@@ -140,7 +72,7 @@ export default function (pi: ExtensionAPI) {
 			const widgetLines = formatWidgetLines({
 				meta: metadata,
 				metrics,
-				project: currentProject,
+				project: session.project,
 				config,
 			});
 			const nextWidgetKey = `${config.widgetPlacement}:${widgetLines.join("\n")}`;
@@ -156,7 +88,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	async function syncConfig(ctx = currentCtx, force = false) {
+	async function syncConfig(ctx = session.context, force = false) {
 		const result = await configManager.reloadIfChanged(force);
 		if (result.isNewError && result.error && ctx?.hasUI) {
 			ctx.ui.notify(result.error, "error");
@@ -167,169 +99,18 @@ export default function (pi: ExtensionAPI) {
 		return result.config;
 	}
 
-	async function ensureProjectInfo(
-		ctx: ExtensionContext,
-		force = false,
-	): Promise<ProjectInfo> {
-		const resolvedCwd = resolve(ctx.cwd);
-		if (
-			!force &&
-			currentProject &&
-			currentProject.cwd === resolvedCwd &&
-			Date.now() - currentProject.inspectedAt < PROJECT_CACHE_TTL_MS
-		) {
-			return currentProject;
-		}
-		const info = await inspectProject(ctx.cwd, {
-			exec: (cmd, args, opts) => pi.exec(cmd, args, opts),
-			sessionDir: ctx.sessionManager.getSessionDir(),
-		});
-		currentProject = info;
-		return info;
-	}
-
-	function persistMetadata(
-		ctx: ExtensionContext,
-		params: {
-			title: string;
-			description: string;
-			source: SummarySource;
-			manualLocked: boolean;
-			updateNativeName: boolean;
-		},
-	): PrettySessionEntryData {
-		const { metrics } = recomputeSessionState(ctx);
-		const cfg = configManager.config;
-		const finalTitle = sanitizeSingleLine(params.title, cfg.maxTitleLength);
-		const finalDesc = sanitizeSingleLine(
-			params.description,
-			cfg.maxDescriptionLength,
-		);
-
-		if (
-			params.updateNativeName &&
-			finalTitle &&
-			ctx.sessionManager.getSessionName() !== finalTitle
-		) {
-			setNativeSessionName(finalTitle);
-		}
-
-		const data: PrettySessionEntryData = {
-			version: 1,
-			title: finalTitle,
-			description: finalDesc,
-			source: params.source,
-			manualLocked: params.manualLocked,
-			createdAt: metrics.createdAt,
-			updatedAt: metrics.updatedAt,
-			turnCount: metrics.turnCount,
-			messageCount: metrics.messageCount,
-			contextTokens: metrics.contextTokens,
-			contextWindow: metrics.contextWindow,
-			contextPercent: metrics.contextPercent,
-			summarizedAtTurn: metrics.turnCount,
-			summarizedAtTokens: metrics.contextTokens ?? 0,
-			projectName: currentProject?.name,
-			gitBranch: currentProject?.git.branch,
-		};
-
-		pi.appendEntry(CUSTOM_ENTRY_TYPE, data);
-		currentMetadata = data;
-		renderUI(ctx, { metrics, metadata: data });
-		return data;
-	}
-
-	async function performSummarization(
-		ctx: ExtensionContext,
-		options: {
-			updateTitle: boolean;
-			manualOverride?: boolean;
-		},
-	): Promise<PrettySessionEntryData | undefined> {
-		summaryAbort?.abort();
-		const controller = new AbortController();
-		summaryAbort = controller;
-
-		try {
-			const project = await ensureProjectInfo(ctx);
-			const entries = getActiveEntries(ctx);
-			const summary = await generateSessionSummary({
-				entries,
-				project,
-				config: configManager.config,
-				model: ctx.model,
-				modelRegistry: ctx.modelRegistry,
-				signal: controller.signal,
-			});
-
-			if (controller.signal.aborted || currentCtx !== ctx) {
-				return undefined;
-			}
-
-			const preserveManualLock =
-				!options.manualOverride &&
-				Boolean(
-					currentMetadata?.manualLocked &&
-						configManager.config.protectManualName,
-				);
-
-			const titleToPersist = preserveManualLock
-				? (currentMetadata?.title ??
-					ctx.sessionManager.getSessionName() ??
-					summary.title)
-				: summary.title;
-
-			const sourceToPersist: SummarySource = preserveManualLock
-				? "manual"
-				: summary.source;
-
-			return persistMetadata(ctx, {
-				title: titleToPersist,
-				description: summary.description,
-				source: sourceToPersist,
-				manualLocked: preserveManualLock,
-				updateNativeName: options.updateTitle && !preserveManualLock,
-			});
-		} finally {
-			if (summaryAbort === controller) {
-				summaryAbort = undefined;
-			}
-		}
-	}
-
-	async function maybeAutoSummarize(
-		ctx: ExtensionContext,
-		reason: "turn" | "compact",
-	) {
-		await syncConfig(ctx);
-		await ensureProjectInfo(ctx);
-		const { metrics, metadata } = recomputeSessionState(ctx);
-		const decision = evaluateSummaryTrigger({
-			config: configManager.config,
-			metrics,
-			current: metadata,
-			reason,
-		});
-
-		if (decision.shouldSummarize) {
-			await performSummarization(ctx, {
-				updateTitle: decision.updateTitle,
-			});
-		} else {
-			renderUI(ctx, { metrics, metadata });
-		}
-	}
-
 	async function openSettingsPanel(targetCtx: ExtensionContext) {
+		const revision = session.revision;
 		await syncConfig(targetCtx);
-		await ensureProjectInfo(targetCtx);
-		recomputeSessionState(targetCtx);
+		await session.inspect(targetCtx);
+		if (!session.isCurrent(targetCtx, revision)) return;
+		session.recompute(targetCtx);
 		await openPrettySessionSettingsPanel({
 			ctx: targetCtx,
 			events: pi.events,
 			configManager,
-			getMeta: () => currentMetadata,
-			getMetrics: () => recomputeSessionState(targetCtx).metrics,
+			getMeta: () => session.metadata,
+			getMetrics: () => session.recompute(targetCtx).metrics,
 			onConfigChanged: () => renderUI(targetCtx),
 			onReloadConfig: () => syncConfig(targetCtx, true),
 			onOpenBrowser: async () => {
@@ -351,19 +132,19 @@ export default function (pi: ExtensionAPI) {
 		}
 		unlistenDiscover?.();
 		unlistenDiscover = undefined;
-		summaryAbort?.abort();
-		summaryAbort = undefined;
 		lastStatusLine = undefined;
 		lastWidgetKey = undefined;
-		currentCtx = undefined;
+		session.stop();
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
 		stop();
-		currentCtx = ctx;
+		session.attach(ctx);
+		const revision = session.revision;
 		await syncConfig(ctx, true);
-		await ensureProjectInfo(ctx, true);
-		const state = recomputeSessionState(ctx);
+		await session.inspect(ctx, true);
+		if (!session.isCurrent(ctx, revision)) return;
+		const state = session.recompute(ctx);
 		renderUI(ctx, state);
 
 		unlistenDiscover = pi.events.on(DISCOVER_EVENT, (payload: unknown) => {
@@ -373,7 +154,7 @@ export default function (pi: ExtensionAPI) {
 				title: "Pi Pretty Session",
 				command: "/pretty-session (/ps)",
 				getSummary: () => {
-					const title = currentMetadata?.title ?? "(unnamed session)";
+					const title = session.metadata?.title ?? "(unnamed session)";
 					return `${title} · auto=${configManager.config.enabled} · widget=${configManager.config.showWidget}`;
 				},
 				open: openSettingsPanel,
@@ -381,8 +162,8 @@ export default function (pi: ExtensionAPI) {
 		});
 
 		watchTimer = setInterval(() => {
-			if (currentCtx) {
-				void syncConfig(currentCtx);
+			if (session.context) {
+				void syncConfig(session.context);
 			}
 		}, 1500);
 		watchTimer.unref?.();
@@ -391,80 +172,50 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", stop);
 
 	pi.on("session_tree", async (_event, ctx) => {
-		summaryAbort?.abort();
-		summaryAbort = undefined;
-		currentCtx = ctx;
+		session.navigate(ctx);
 		await syncConfig(ctx);
-		const state = recomputeSessionState(ctx);
+		const state = session.recompute(ctx);
 		renderUI(ctx, state);
 	});
 
 	pi.on("model_select", async (_event, ctx) => {
-		currentCtx = ctx;
+		session.attach(ctx);
 		await syncConfig(ctx);
-		const state = recomputeSessionState(ctx);
+		const state = session.recompute(ctx);
 		renderUI(ctx, state);
 	});
 
-	pi.on("session_info_changed", (event, ctx) => {
-		currentCtx = ctx;
-		if (isApplyingPluginName) return;
-		const nextName = event.name?.trim();
-		if (nextName && nextName === lastPluginSetTitle) return;
-		lastPluginSetTitle = undefined;
-
-		const { metadata } = recomputeSessionState(ctx);
-		if (!nextName) {
-			if (metadata) {
-				currentMetadata = {
-					...metadata,
-					manualLocked: false,
-				};
-				pi.appendEntry(CUSTOM_ENTRY_TYPE, currentMetadata);
-			}
-			renderUI(ctx);
-			return;
-		}
-
-		summaryAbort?.abort();
-		summaryAbort = undefined;
-		const fallbackDesc =
-			metadata?.description ??
-			buildHeuristicSummary(
-				getActiveEntries(ctx),
-				currentProject,
-				configManager.config.maxTitleLength,
-				configManager.config.maxDescriptionLength,
-			).description;
-
-		persistMetadata(ctx, {
-			title: nextName,
-			description: fallbackDesc,
-			source: "manual",
-			manualLocked: true,
-			updateNativeName: false,
-		});
-	});
+	pi.on("session_info_changed", (event, ctx) =>
+		session.nameChanged(event.name, ctx),
+	);
 
 	pi.on("agent_settled", async (event, ctx) => {
-		currentCtx = ctx;
+		session.attach(ctx);
 		if (event.aborted) {
 			renderUI(ctx);
 			return;
 		}
-		await maybeAutoSummarize(ctx, "turn");
+		const revision = session.revision;
+		await syncConfig(ctx);
+		if (!session.isCurrent(ctx, revision)) return;
+		await session.autoSummarize(ctx, "turn");
 	});
 
 	pi.on("session_compact", async (_event, ctx) => {
-		currentCtx = ctx;
-		await maybeAutoSummarize(ctx, "compact");
+		session.attach(ctx);
+		const revision = session.revision;
+		await syncConfig(ctx);
+		if (!session.isCurrent(ctx, revision)) return;
+		await session.autoSummarize(ctx, "compact");
 	});
 
 	async function handleCommand(rawArgs: string, ctx: ExtensionCommandContext) {
-		currentCtx = ctx;
+		session.attach(ctx);
+		const revision = session.revision;
 		await syncConfig(ctx);
-		const project = await ensureProjectInfo(ctx, true);
-		const { metrics, metadata } = recomputeSessionState(ctx);
+		const project = await session.inspect(ctx, true);
+		if (!session.isCurrent(ctx, revision)) return;
+		const { metrics, metadata } = session.recompute(ctx);
 		const cmd = parsePrettySessionArgs(rawArgs);
 
 		switch (cmd.kind) {
@@ -492,7 +243,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			case "summarize": {
-				const updated = await performSummarization(ctx, {
+				const updated = await session.summarize(ctx, {
 					updateTitle: true,
 					manualOverride: true,
 				});
@@ -525,25 +276,8 @@ export default function (pi: ExtensionAPI) {
 					);
 					return;
 				}
-				const desc =
-					cmd.description ??
-					metadata?.description ??
-					buildHeuristicSummary(
-						getActiveEntries(ctx),
-						project,
-						configManager.config.maxTitleLength,
-						configManager.config.maxDescriptionLength,
-					).description;
-
-				summaryAbort?.abort();
-				summaryAbort = undefined;
-				const saved = persistMetadata(ctx, {
-					title,
-					description: desc,
-					source: "manual",
-					manualLocked: true,
-					updateNativeName: true,
-				});
+				const saved = session.rename(ctx, title, cmd.description, revision);
+				if (!saved) return;
 				ctx.ui.notify(
 					`Session renamed (manual lock active): ${saved.title}\n${saved.description}`,
 					"info",
@@ -555,13 +289,8 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("No manual session lock is active.", "info");
 					return;
 				}
-				const unlocked = persistMetadata(ctx, {
-					title: metadata.title,
-					description: metadata.description,
-					source: metadata.source === "manual" ? "heuristic" : metadata.source,
-					manualLocked: false,
-					updateNativeName: false,
-				});
+				const unlocked = session.unlock(ctx);
+				if (!unlocked) return;
 				ctx.ui.notify(
 					`Manual title lock cleared for "${unlocked.title}". Dynamic updates enabled.`,
 					"info",
@@ -706,7 +435,7 @@ export default function (pi: ExtensionAPI) {
 	const getCompletions = (prefix: string) => {
 		const models = (() => {
 			try {
-				const reg = currentCtx?.modelRegistry as unknown as {
+				const reg = session.context?.modelRegistry as unknown as {
 					getAvailable?: () => ReadonlyArray<{ id: string; provider: string }>;
 				};
 				return reg?.getAvailable?.() ?? [];

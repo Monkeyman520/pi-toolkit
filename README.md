@@ -12,7 +12,7 @@ This repository organizes Pi plugin packages; it is not the Pi host's source tre
 | [pi-pretty-session](./packages/pi-pretty-session/README.md) | Automatic session naming, title/description summarization, dynamic config, session metrics, and project info |
 | [pi-quota-keeper](./packages/pi-quota-keeper/README.md) | Coordinated account quota visibility and capability-gated activation |
 
-All packages have controlled Pi 1.5.0 loading/usage smoke evidence. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
+The three plugins have controlled Pi 1.5.0 loading/usage smoke evidence. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is their ordinary versioned dependency, not a fourth activated plugin. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README.
 
 ## Installation model
 
@@ -49,7 +49,8 @@ pi-packages/
     ├── README.md             # Package layout and development reference
     ├── pi-auto-resume/        # Interrupted-task recovery
     ├── pi-pretty-session/     # Session summarization, metrics, and project info
-    └── pi-quota-keeper/       # Quota visibility and coordinated activation
+    ├── pi-quota-keeper/       # Quota visibility and coordinated activation
+    └── pi-plugin-support/    # Ordinary config/discovery/TUI support library
 ```
 
 Existing development-tool configuration is omitted from this overview. Its presence does not change the repository's project category.
@@ -71,6 +72,10 @@ Host-provided SDK packages and `typebox`, when used, are peers rather than bundl
 
 There is no root package manifest or workspace test/build runner. Each real package owns its npm lockfile, pinned development tooling, checks, and Pi smoke test; see its README. This does not establish a collection-wide workspace tool or publication scope.
 
+## Shared support dependency
+
+Each plugin declares `pi-plugin-support@0.1.0` and carries that ordinary package via npm `bundledDependencies`, without bundling host SDKs or activating any other plugin. Its local lockfile also resolves a shipped versioned archive for independent `npm ci` setup. No registry publication or required emitted build is assumed. See the [support-library development reference](./packages/pi-plugin-support/README.md) for APIs, ownership and archive refresh/check commands.
+
 ## Cross-plugin isolation verification
 
 After preparing each package's documented development dependencies, run from the repository root:
@@ -81,9 +86,9 @@ node tests/plugin-isolation.mjs
 
 Set `PI_BINARY` to the actual Pi executable if needed (for example `$env:PI_BINARY = 'C:\path\to\pi.exe'` in PowerShell). The matrix requires Node.js >= 22.19.0, npm, installed Pi, and the npm cache populated by package setup for the quota plugin's offline production-dependency installation.
 
-This development-only script copies just the selected packages outside the checkout without sibling sources or development `node_modules`. It checks all seven nonempty combinations, exact plugin command visibility, interoperability of each package's local discovery implementation, and three session lifecycles per combination including discovery-listener cleanup. It uses an empty isolated auth store and disables LLM summaries; it does not contact live providers or change personal Pi settings. Expected final output is `Pi plugin isolation matrix: all 7 combinations PASS`.
+This development-only script packs only the selected plugins and installs their tarballs in separate temporary consumer roots outside the checkout. It verifies that only the declared ordinary support library (not host SDKs or sibling plugins) is bundled, checks all seven combinations and three session lifecycles per combination, and tests separate physical library roots plus a frozen baseline discovery reader. It uses an empty isolated auth store and disables LLM summaries; no live provider or personal Pi settings are used. Expected final output is `Pi plugin isolation matrix: all 7 combinations PASS`.
 
-The matrix has been verified on Windows with Pi 1.5.0. It complements, rather than replaces, each package's type checks, Biome checks, Vitest tests, and provider-fixture smoke test. It is not a manual interactive-TUI or physical sleep/wake test.
+The matrix has been verified on Windows with Pi 1.5.0. It complements, rather than replaces, each package's type checks, Biome checks, Vitest tests, and provider-fixture smoke test. The matrix is not a real terminal test. Separate agent-driven Windows Terminal keyboard checks exercised the shared panels, config persistence/reload, actions, cancel/search/navigation, loaded-plugin switching, Tab completion and orderly exit. Physical sleep/wake remains unverified.
 
 ## Contributing
 

@@ -65,6 +65,10 @@ This extension runs with Pi's full process privileges. Automatic continuation ca
 
 ## Development and verification
 
+This plugin declares `pi-plugin-support@0.1.0` as an ordinary dependency. Its versioned archive is shipped in `vendor/` for package-local lockfile setup; npm distribution bundles only that ordinary library, never host SDKs or another plugin. Follow the [support-library reference](../pi-plugin-support/README.md) when updating shared sources. No registry publication or emitted build is required. Prepare dependencies before `pi -e` or local installation; Pi does not install local-package dependencies.
+
+The shared library owns configuration-file and TUI/discovery mechanisms; this plugin retains its own schema, failure policy, actions, instances and resource cleanup.
+
 Package-local configuration metadata supplies both command completions and panel presets; the TypeBox schema remains the validation authority, including valid non-preset values. Lifecycle regression tests verify factory inactivity, repeated-start cleanup, independent instances, and cancellation of only the stopped instance's pending recovery.
 
 The optional [collection isolation matrix](../../README.md#cross-plugin-isolation-verification) additionally exercises all seven plugin combinations in real Pi; it is development-only, not an installation or runtime dependency.
@@ -89,6 +93,6 @@ $env:PI_BINARY = 'C:\path\to\pi.exe'
 npm run smoke
 ```
 
-The smoke test copies only this package into a temporary directory without siblings or `node_modules`, uses an isolated Pi agent directory and a synthetic provider, and launches real Pi RPC. It verifies one network recovery, no continuation after success, cancellation of an idle wait, bounded retries, dynamic configuration persistence, and clean shutdown. It does not use your credentials or send a live model request. Expected final output ends in `PASS`.
+The smoke test copies only this package into a temporary directory without siblings or inherited development `node_modules`, installs its declared production dependencies from the shipped archive/lockfile, uses an isolated Pi agent directory and a synthetic provider, and launches real Pi RPC. It verifies one network recovery, no continuation after success, cancellation of an idle wait, bounded retries, dynamic configuration persistence, and clean shutdown. It does not use your credentials or send a live model request. Expected final output ends in `PASS`.
 
 Physical sleep/wake and every provider-specific failure wording have not been live-tested. Deterministic timing/error tests cover the supported decision rules; the real Pi smoke covers the host loading and continuation boundary.

@@ -1,5 +1,5 @@
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { settingCandidates } from "pi-plugin-support/settings";
 import { configOptions, settingsSchema } from "./config.ts";
 import { defaults, type Settings } from "./recovery.ts";
 
@@ -141,9 +141,10 @@ export function getAutoResumeCompletions(
 		);
 		if (!matchedKey) return null;
 
-		const rawValues = Type.IsBoolean(settingsSchema.properties[matchedKey])
-			? [...configOptions[matchedKey].values, "on", "off"]
-			: configOptions[matchedKey].values;
+		const rawValues = settingCandidates(
+			settingsSchema.properties[matchedKey],
+			configOptions[matchedKey].values,
+		);
 
 		const matches = rawValues
 			.filter((v) => v.toLowerCase().startsWith(lowerPartial))

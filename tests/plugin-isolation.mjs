@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import {
+	cp,
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { setTimeout as pause } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { startPi } from "./pi-client.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packages = [
@@ -12,57 +20,82 @@ const packages = [
 	{ id: "pi-pretty-session", commands: ["pretty-session", "ps"] },
 	{ id: "pi-quota-keeper", commands: ["quota"] },
 ];
-const npmCli =
+const npm =
 	process.env.npm_execpath ??
 	join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-
+const allCommands = packages.flatMap((plugin) => plugin.commands);
 async function checkCombination(selected) {
 	const root = await mkdtemp(join(tmpdir(), "pi-plugin-isolation-"));
-	let child;
-	let exited;
+	let client;
 	try {
 		const paths = [];
 		for (const plugin of selected) {
-			const target = join(root, plugin.id);
-			await cp(join(repository, "packages", plugin.id), target, {
-				recursive: true,
-				filter: (path) =>
-					!["node_modules", "tests"].includes(path.split(/[\\/]/).at(-1)),
-			});
-			paths.push(target);
-			if (plugin.id === "pi-quota-keeper") {
-				const installed = spawnSync(
-					process.execPath,
-					[
-						npmCli,
-						"ci",
-						"--omit=dev",
-						"--ignore-scripts",
-						"--legacy-peer-deps",
-						"--offline",
-						"--no-audit",
-					],
-					{
-						cwd: target,
-						encoding: "utf8",
-						windowsHide: true,
-						timeout: 30000,
-					},
-				);
-				assert.equal(
-					installed.status,
-					0,
-					`isolated runtime dependency install: ${installed.stderr}`,
-				);
-			}
+			const wrapper = join(root, plugin.id);
+			await mkdir(wrapper);
+			const packed = spawnSync(
+				process.execPath,
+				[npm, "pack", "--ignore-scripts", "--json", "--pack-destination", root],
+				{
+					cwd: join(repository, "packages", plugin.id),
+					encoding: "utf8",
+					timeout: 30000,
+				},
+			);
+			assert.equal(packed.status, 0, packed.stderr);
+			const info = JSON.parse(packed.stdout)[0];
+			assert.deepEqual(
+				info.bundled,
+				["pi-plugin-support"],
+				"only the ordinary library is bundled, never host SDKs",
+			);
+			assert.ok(
+				info.files.some(
+					(file) => file.path === "vendor/pi-plugin-support-0.1.0.tgz",
+				),
+			);
+			await writeFile(
+				join(wrapper, "package.json"),
+				JSON.stringify({
+					private: true,
+					dependencies: { [plugin.id]: `file:../${info.filename}` },
+				}),
+			);
+			const installed = spawnSync(
+				process.execPath,
+				[
+					npm,
+					"install",
+					"--omit=dev",
+					"--ignore-scripts",
+					"--legacy-peer-deps",
+					"--offline",
+					"--no-audit",
+				],
+				{ cwd: wrapper, encoding: "utf8", windowsHide: true, timeout: 30000 },
+			);
+			assert.equal(installed.status, 0, installed.stderr);
+			paths.push(join(wrapper, "node_modules", plugin.id));
 		}
+		const roots = await Promise.all(
+			paths.map((path) =>
+				realpath(join(path, "node_modules", "pi-plugin-support")),
+			),
+		);
+		assert.equal(
+			new Set(roots).size,
+			selected.length,
+			"independent physical library roots",
+		);
+		await cp(
+			join(repository, "tests", "fixtures", "baseline-discovery.ts"),
+			join(root, "baseline-discovery.ts"),
+		);
 		await writeFile(join(root, "auth.json"), "{}");
-		if (selected.some((plugin) => plugin.id === "pi-pretty-session")) {
+		if (selected.some((plugin) => plugin.id === "pi-pretty-session"))
 			await writeFile(
 				join(root, "pi-pretty-session.json"),
 				JSON.stringify({ useLlm: false }),
 			);
-		}
 		const imports = paths
 			.map(
 				(path, index) =>
@@ -73,161 +106,83 @@ async function checkCombination(selected) {
 			join(root, "probe.ts"),
 			`
 import {appendFileSync} from "node:fs";
+import {discoverLoadedPanels as baselineDiscover} from "./baseline-discovery.ts";
 ${imports}
-export default function(pi) {
- const collect=()=> {
-  const descriptors=[];
-  pi.events.emit("pi-packages:ui:discover",{register:descriptor=>descriptors.push(descriptor)});
-  return descriptors;
- };
- pi.registerCommand("isolation-probe",{description:"Test-only discovery probe",handler:async(_args,ctx)=>{
+export default function(pi){
+ const collect=()=>{const panels=[];pi.events.emit("pi-packages:ui:discover",{register:panel=>panels.push(panel)});return panels;};
+ const readers=[${paths.map((_, index) => `discover${index}`).join(",")}];
+ pi.registerCommand("isolation-probe",{description:"fixture",handler:async(_args,ctx)=>{
   const raw=collect().map(panel=>({id:panel.id,command:panel.command,summary:panel.getSummary(),canOpen:typeof panel.open==="function"}));
-  const readers=[${paths.map((_, index) => `discover${index}`).join(",")}].map(discover=>discover(pi.events).map(panel=>panel.id).sort());
-  ctx.ui.notify("ISOLATION:"+JSON.stringify({raw,readers}),"info");
+  const current=readers.map(read=>read(pi.events).map(panel=>panel.id).sort());
+  const off=pi.events.on("pi-packages:ui:discover",payload=>payload.register({id:"baseline-peer",title:"Baseline",command:"/baseline",getSummary:()=>"baseline",open:async()=>{}}));
+  const mixed=[baselineDiscover,...readers].map(read=>read(pi.events).map(panel=>panel.id).sort());off();
+  ctx.ui.notify("ISOLATION:"+JSON.stringify({raw,current,mixed}),"info");
  }});
  pi.on("session_shutdown",()=>appendFileSync(process.env.ISOLATION_SHUTDOWN_LOG,JSON.stringify(collect().map(panel=>panel.id))+"\\n"));
 }
 `,
 		);
-		const events = [];
-		let output = "",
-			errors = "";
-		let spawnError;
-		child = spawn(
-			process.env.PI_BINARY ?? "pi",
-			[
-				"--mode",
-				"rpc",
-				"--no-session",
-				"--no-extensions",
-				"--no-mcp",
-				"--no-skills",
-				"--no-prompt-templates",
-				"--no-themes",
-				"--no-context-files",
-				"--offline",
-				...paths.flatMap((path) => ["-e", path]),
-				"-e",
-				join(root, "probe.ts"),
-			],
-			{
-				cwd: root,
-				env: {
-					...process.env,
-					PI_CODING_AGENT_DIR: root,
-					PI_OFFLINE: "1",
-					ISOLATION_SHUTDOWN_LOG: join(root, "shutdown.jsonl"),
-				},
-				stdio: ["pipe", "pipe", "pipe"],
+		client = startPi({
+			cwd: root,
+			env: {
+				PI_CODING_AGENT_DIR: root,
+				ISOLATION_SHUTDOWN_LOG: join(root, "shutdown.jsonl"),
 			},
-		);
-		exited = new Promise((resolve) =>
-			child.once("close", (code, signal) => resolve({ code, signal })),
-		);
-		child.on("error", (error) => {
-			spawnError = error;
+			extensions: [...paths, join(root, "probe.ts")],
 		});
-		child.stderr.on("data", (chunk) => {
-			errors += chunk;
-		});
-		child.stdout.on("data", (chunk) => {
-			output += chunk;
-			for (;;) {
-				const end = output.indexOf("\n");
-				if (end < 0) break;
-				const line = output.slice(0, end);
-				output = output.slice(end + 1);
-				try {
-					events.push(JSON.parse(line));
-				} catch {}
-			}
-		});
-		async function until(predicate, label) {
-			const deadline = Date.now() + 20000;
-			while (!predicate()) {
-				if (spawnError) throw spawnError;
-				if (child.exitCode !== null)
-					throw Error(`Pi exited waiting for ${label}: ${errors}`);
-				if (Date.now() > deadline)
-					throw Error(`Timed out waiting for ${label}: ${errors.slice(-3000)}`);
-				await pause(25);
-			}
-		}
-		let id = 0;
-		async function command(type, data = {}) {
-			const key = String(++id);
-			child.stdin.write(`${JSON.stringify({ id: key, type, ...data })}\n`);
-			await until(
-				() =>
-					events.some((event) => event.type === "response" && event.id === key),
-				type,
-			);
-			const response = events.find(
-				(event) => event.type === "response" && event.id === key,
-			);
-			assert.equal(response.success, true, JSON.stringify(response));
-			return response.data;
-		}
 		const expectedIds = selected.map((plugin) => plugin.id).sort();
-		const allCommands = packages.flatMap((plugin) => plugin.commands);
 		for (let session = 0; session < 3; session++) {
 			if (session > 0)
-				assert.equal((await command("new_session")).cancelled, false);
-			const commands = await command("get_commands");
+				assert.equal((await client.command("new_session")).cancelled, false);
+			const commands = await client.command("get_commands");
 			assert.deepEqual(
 				commands.commands
-					.map((item) => item.name)
+					.map((command) => command.name)
 					.filter((name) => allCommands.includes(name))
 					.sort(),
 				selected.flatMap((plugin) => plugin.commands).sort(),
 			);
-			const from = events.length;
-			await command("prompt", { message: "/isolation-probe" });
-			await until(
+			const from = client.events.length;
+			await client.command("prompt", { message: "/isolation-probe" });
+			await client.until(
 				() =>
-					events
+					client.events
 						.slice(from)
 						.some((event) => String(event.message).startsWith("ISOLATION:")),
 				"discovery probe",
 			);
-			const probe = events
+			const event = client.events
 				.slice(from)
 				.find((event) => String(event.message).startsWith("ISOLATION:"));
-			const result = JSON.parse(probe.message.slice("ISOLATION:".length));
+			const result = JSON.parse(event.message.slice("ISOLATION:".length));
 			assert.deepEqual(
 				result.raw.map((panel) => panel.id).sort(),
 				expectedIds,
-				"no missing, duplicate or uninstalled registrations",
+				"exact loaded registrations, no duplicates",
 			);
 			for (const panel of result.raw) {
 				assert.equal(panel.canOpen, true);
 				assert.equal(typeof panel.summary, "string");
-				const plugin = selected.find((plugin) => plugin.id === panel.id);
 				assert.ok(
-					panel.command.includes(`/${plugin.commands[0]}`),
-					"descriptor command matches its plugin",
+					panel.command.includes(
+						`/${selected.find((plugin) => plugin.id === panel.id).commands[0]}`,
+					),
 				);
 			}
-			for (const ids of result.readers)
+			for (const ids of result.current)
 				assert.deepEqual(
 					ids,
 					expectedIds,
-					"every plugin's local discovery implementation interoperates",
+					"every migrated reader interoperates",
+				);
+			for (const ids of result.mixed)
+				assert.deepEqual(
+					ids,
+					[...expectedIds, "baseline-peer"].sort(),
+					"baseline protocol interoperability",
 				);
 		}
-		child.stdin.end();
-		let timeout;
-		const outcome = await Promise.race([
-			exited,
-			new Promise((_, reject) => {
-				timeout = setTimeout(
-					() => reject(Error("Pi shutdown timed out")),
-					5000,
-				);
-			}),
-		]).finally(() => clearTimeout(timeout));
-		assert.equal(outcome.code, 0, errors);
-		assert.ok(!errors.includes("Failed to load extension"), errors);
+		await client.close();
 		const shutdowns = (await readFile(join(root, "shutdown.jsonl"), "utf8"))
 			.trim()
 			.split("\n")
@@ -235,21 +190,16 @@ export default function(pi) {
 		assert.deepEqual(
 			shutdowns,
 			[[], [], []],
-			"each replaced/exited session removes all plugin-owned discovery listeners",
+			"session cleanup removes only its registered resources",
 		);
 		console.log(
-			`PASS ${expectedIds.join(" + ")}: isolated dependencies, exact commands, interoperable discovery, 3 session lifecycles`,
+			`PASS ${expectedIds.join(" + ")}: packed install, separate library roots, baseline protocol, 3 lifecycles`,
 		);
 	} finally {
-		if (child?.pid && child.exitCode === null && child.signalCode === null) {
-			child.kill("SIGKILL");
-			await exited;
-		}
+		await client?.dispose();
 		await rm(root, { recursive: true, force: true });
 	}
 }
-
-for (let mask = 1; mask < 1 << packages.length; mask++) {
+for (let mask = 1; mask < 1 << packages.length; mask++)
 	await checkCombination(packages.filter((_, index) => mask & (1 << index)));
-}
 console.log("Pi plugin isolation matrix: all 7 combinations PASS");

@@ -34,6 +34,7 @@ export default function (pi: ExtensionAPI) {
 	let lastTick = Date.now();
 	let lastConfigCheck = 0;
 	let syncingConfig: Promise<void> | undefined;
+	let generation = 0;
 
 	const syncStatus = (force = false) => {
 		if (!ctx?.hasUI) return;
@@ -43,7 +44,9 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const syncConfig = async (targetCtx = ctx, force = false) => {
+		const revision = generation;
 		const result = await configManager.reloadIfChanged(force);
+		if (revision !== generation) return result;
 		if (result.changed) {
 			recovery.updateSettings(result.settings);
 			syncStatus();
@@ -98,6 +101,7 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const stop = () => {
+		generation++;
 		if (timer) clearInterval(timer);
 		timer = undefined;
 		unlisten?.();
@@ -112,7 +116,9 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, current) => {
 		stop();
 		ctx = current;
+		const revision = generation;
 		const loaded = await configManager.reloadIfChanged(true);
+		if (revision !== generation) return;
 		if (loaded.error && current.hasUI) {
 			current.ui.notify(loaded.error, "error");
 		}
@@ -177,7 +183,9 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.on("agent_settled", async (event, current) => {
 		ctx = current;
+		const revision = generation;
 		await syncConfig(current);
+		if (revision !== generation) return;
 		recovery.settleTurn(Boolean(event.aborted), Date.now());
 		syncStatus();
 	});

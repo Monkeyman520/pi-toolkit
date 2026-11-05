@@ -132,6 +132,10 @@ The extension has Pi's process privileges. It reads Pi auth and optional Pi Anti
 
 ## Development and verification
 
+This plugin declares `pi-plugin-support@0.1.0` as an ordinary dependency. Its versioned archive is shipped in `vendor/` for package-local lockfile setup; npm distribution bundles only that ordinary library, never host SDKs or another plugin. Follow the [support-library reference](../pi-plugin-support/README.md) when updating shared sources. No registry publication or emitted build is required. Prepare dependencies before `pi -e` or local installation; Pi does not install local-package dependencies.
+
+The shared library owns configuration-file and TUI/discovery mechanisms; this plugin retains its own schema, failure policy, actions, instances and resource cleanup.
+
 Package-local configuration metadata supplies both command completions and scalar panel presets; account configuration and schema validation remain domain-owned. Lifecycle regression tests use empty account fixtures with real OS ownership to verify factory inactivity, repeated-start cleanup, and independent instances without accessing credentials.
 
 The optional [collection isolation matrix](../../README.md#cross-plugin-isolation-verification) additionally exercises all seven plugin combinations in real Pi; it is development-only, not an installation or runtime dependency.
