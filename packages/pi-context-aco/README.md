@@ -1,6 +1,6 @@
 # Pi Context ACO
 
-**V1 observation/recommendations plus the T0003 V2 recovery foundation** for the Adaptive Context Orchestrator: pressure/task monitoring, protected references, conditional proposals, explicit local evidence checkpoints and bounded historical recall. No pruning, semantic replacement, compaction or delegation strategy executes.
+**V1 observation/recommendations, T0003 recovery foundation and T0004 recovery-gated exact pruning** for the Adaptive Context Orchestrator: pressure/task monitoring, full R04 semantic context graph, protected references, explicit local evidence checkpoints, bounded historical recall, request-local context projection, durable context_edit boundary drafts and verified restoration. Semantic replacement, compaction or delegation strategies remain pending (T0005/T0006).
 
 ## Compatibility and resources
 
@@ -31,6 +31,8 @@ From the collection root after setup: `pi -e ./packages/pi-context-aco`. Persist
 | `/aco trace`                             | Current report plus the latest 50 in-memory numeric/assessment snapshots.                                                    |
 | `/aco tasks`                             | Active-branch tasks, protected source references, signal families, dependency conflicts and coverage limits.                 |
 | `/aco recommend`                         | Conditional actions/no-op, reasons, risks, recovery/authority prerequisites, estimated/unknown gains and costs.              |
+| `/aco prune`                             | Inspect prune candidates, active exclusions, and before/after measurements.                                                  |
+| `/aco restore <id\|all>`                 | Restore omitted entries from verified evidence store originals via boundary edits.                                           |
 | `/aco declare <JSON>`                    | Validate and append an explicit partial task update as `aco-task` metadata. No strategy authorization.                       |
 | `/aco on`, `/aco off`                    | Persistently enable/disable sampling, declarations and explicit checkpoint/recall operations. Status inspection still works. |
 | `/aco config reload`                     | Reload settings and reset the growth baseline.                                                                               |
@@ -107,13 +109,15 @@ Assessments are reused for unchanged active-branch/pressure inputs; substantive 
 
 Configuration is `<getAgentDir()>/pi-context-aco.json` (normally `~/.pi/agent/pi-context-aco.json`). Read on startup/reload and explicit `config reload`; no polling timer/watcher. Panel/command saves apply immediately after successful serialized atomic replacement. Invalid/unreadable/oversized settings disable sampling without silent rewrite. Cross-process locking/merging/fsync durability is not promised.
 
-| Setting         | Default | Allowed values / meaning                                                                  |
-| --------------- | ------- | ----------------------------------------------------------------------------------------- |
-| `enabled`       | true    | Boolean; sampling/declaration control, never authority.                                   |
-| `historySize`   | 6       | Integer 2–50; recent comparable completed-turn deltas.                                    |
-| `horizonTurns`  | 3       | Integer 1–20; prediction horizon.                                                         |
-| `reserveTokens` | 4096    | Integer 0–1000000; forecast reserve, not an execution budget.                             |
-| `persistTraces` | false   | Boolean; append numeric/assessment counters as `aco-monitor` metadata on completed turns. |
+| Setting          | Default | Allowed values / meaning                                                                  |
+| ---------------- | ------- | ----------------------------------------------------------------------------------------- |
+| `enabled`        | true    | Boolean; sampling/declaration control, never authority.                                   |
+| `historySize`    | 6       | Integer 2–50; recent comparable completed-turn deltas.                                    |
+| `horizonTurns`   | 3       | Integer 1–20; prediction horizon.                                                         |
+| `reserveTokens`  | 4096    | Integer 0–1000000; forecast reserve, not an execution budget.                             |
+| `persistTraces`  | false   | Boolean; append numeric/assessment counters as `aco-monitor` metadata on completed turns. |
+| `mode`           | observe | `observe` (V1 observation-only) or `exact-prune` (V2 recovery-gated exact pruning).       |
+| `maxPruneTokens` | 64000   | Integer 0–1000000; maximum tokens pruned per turn/request.                                |
 
 Defaults are **uncalibrated tunables**. Pi current context tokens are estimated (last usage plus trailing-message estimates), not exact post-filter/request counts. Capacity is observed model configuration. Growth uses recent comparable completed-turn means; model/window/projection/compaction/tree changes, unknown usage and shrinking readings invalidate baselines.
 
@@ -129,7 +133,7 @@ Extensions have Pi's OS privileges; this is not a sandbox. ACO reads host sessio
 
 No extra network/credential access, remote upload, workspace writes, context/result/argument rewriting, evidence deletion/offloading, native compaction initiation, continuation or subagent dispatch occurs. Native user/host/other-extension behavior is not governed by ACO. Only ACO-owned listeners/status/state are closed.
 
-Only the T0003 V2 storage/recovery foundation is delivered; exact pruning, the full semantic dependency/equivalence engine, V3 compaction, V4 dispatch and V5 strategy execution/evaluation remain pending.
+T0004 V2 recovery-gated exact pruning and restoration is delivered. V3 semantic replacement and native compaction, V4 child delegation and V5 adaptive combinations remain pending.
 
 ## Verification
 
@@ -142,6 +146,7 @@ npm test
 npm run smoke
 npm run smoke:tasks
 npm run smoke:evidence
+npm run smoke:prune
 ```
 
 Smoke tests require installed Pi/npm and the prepared npm cache. All install actual plugin tarballs outside the checkout, use an isolated agent directory and deterministic in-process provider, and make no live provider requests.
@@ -149,6 +154,7 @@ Smoke tests require installed Pi/npm and the prepared npm cache. All install act
 - `smoke`: T0001 controls/passivity, model-bound conversation/tool-body equality against no ACO (normalizing only timestamps/durations and the intentionally added `aco_task`/`aco_recall` schemas), no extra model calls, parallel/blocked/unknown outcomes, metadata non-visibility and model/external-edit/native-compaction resets.
 - `smoke:tasks`: actual E02/E03 workload/no-op decisions, protected exact evidence, command/tool declaration provenance, atomic invalid-update rejection, tree isolation, persisted resume and no strategy/extra model calls.
 - `smoke:evidence`: actual Pi command/tool recall and provider-bound visibility, historical replay after workspace changes, real persistence failure, corrupt restart fallback, incomplete records, task/project/tree/fork isolation and disabled control. Child-subset grants, verification fault injection, append cancellation and selective/Unicode pagination are real-filesystem Vitest evidence, not live worker dispatch.
+- `smoke:prune`: installed Pi exact pruning in real RPC session, covering V1 observe passivity, request-local projection, durable context_edit omission, verified restoration from evidence store, and branch-relative isolation.
 - Optional actual Windows ConPTY keyboard test: `python tests/tui-smoke.py`, using Python 3.12 with test-only `pywinpty==3.1.2` in an isolated Python environment. It covers settings/persistence, full-prefix Tab completion, task/recommendation inspection, loaded-only panel switching, real reload and orderly exit. Its `--approve` flag applies only to its disposable directory.
 
-Evidence is recorded in [T0001](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0001-v1-context-monitor-and-plugin-control.md), [T0002](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0002-v1-task-context-graph-and-recommendations.md) and [T0003](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0003-v2-scoped-evidence-store-checkpoints-and-recall.md). Controlled fixtures, unit assertions and actual host/terminal interaction are separate evidence classes. Manual visual GUI testing, other host/Node/platform versions, real-project inference accuracy and adaptive-policy superiority are not claimed.
+Evidence is recorded in [T0001](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0001-v1-context-monitor-and-plugin-control.md), [T0002](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0002-v1-task-context-graph-and-recommendations.md), [T0003](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0003-v2-scoped-evidence-store-checkpoints-and-recall.md) and [T0004](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0004-v2-recovery-gated-exact-pruning.md). Controlled fixtures, unit assertions and actual host/terminal interaction are separate evidence classes. Manual visual GUI testing, other host/Node/platform versions, real-project inference accuracy and adaptive-policy superiority are not claimed.

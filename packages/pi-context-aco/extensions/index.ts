@@ -8,6 +8,7 @@ import { DISCOVER_EVENT, isDiscoverPayload } from "pi-plugin-support/discovery";
 import { complete, parse, usage } from "./commands.ts";
 import { Config, settingKey } from "./config.ts";
 import { Continuity, recallSchema } from "./continuity.ts";
+import type { Access, Receipt } from "./evidence.ts";
 import {
 	type Metric,
 	type Pressure,
@@ -15,10 +16,21 @@ import {
 	textTokens,
 	unknown,
 } from "./pressure.ts";
+import {
+	type AgentMessage,
+	type ContextProjectionResult,
+	createPruneBoundaryDrafts,
+	createRestoreBoundaryDrafts,
+	evaluatePruneCandidates,
+	type PruneExecutionOutcome,
+	projectRequestContext,
+	reconcileBranchPrunes,
+} from "./prune.ts";
 import { type Recommendation, recommend } from "./recommend.ts";
 import {
 	buildTasks,
 	declarationSchema,
+	linkCheckpoints,
 	type TaskSnapshot,
 	validateDeclaration,
 } from "./tasks.ts";
@@ -94,6 +106,11 @@ interface State {
 	samplingMs: number;
 	unlisten?: () => void;
 	traceError?: string;
+	lastProjection?: ContextProjectionResult;
+	pruneOutcome?: PruneExecutionOutcome;
+	pendingRestores: string[];
+	omittedEntries: string[];
+	contextUnlisten?: () => void;
 }
 
 export default function contextMonitor(
@@ -218,7 +235,11 @@ export default function contextMonitor(
 			p?.projectedUsage.value == null
 				? "unknown"
 				: `${(p.projectedUsage.value * 100).toFixed(1)}%`;
-		return `V1 monitor ${s.config.settings.enabled ? "on" : "off"} · context ${value} est · projected ${future} est · ${s.recommendation?.kind ?? "no-op"} · strategies unavailable`;
+		const strat =
+			s.config.settings.mode === "exact-prune"
+				? "exact-pruning active"
+				: "strategies unavailable";
+		return `V2 ${s.config.settings.mode} ${s.config.settings.enabled ? "on" : "off"} · context ${value} est · projected ${future} est · ${s.recommendation?.kind ?? "no-op"} · ${strat}`;
 	};
 	function observe(
 		s: State,
@@ -271,16 +292,79 @@ export default function contextMonitor(
 		}
 		if (ctx.hasUI) ctx.ui.setStatus("aco", `ACO · ${brief(s)}`);
 	}
+	function syncHooks(s: State) {
+		if (s.config.settings.enabled && s.config.settings.mode === "exact-prune") {
+			if (!s.contextUnlisten) {
+				s.contextUnlisten = pi.on("context", async (event, ctx) => {
+					if (
+						!active ||
+						active !== s ||
+						!s.config.settings.enabled ||
+						s.config.settings.mode !== "exact-prune"
+					)
+						return;
+					const branch =
+						typeof ctx.sessionManager?.getBranch === "function"
+							? ctx.sessionManager.getBranch()
+							: [];
+					let access: Access;
+					try {
+						access = await continuity.access(ctx);
+					} catch {
+						return;
+					}
+					if (active !== s) return;
+					const checkpoints = await continuity.getActiveCheckpoints(ctx);
+					linkCheckpoints(s.tasks, checkpoints);
+					const evalResult = evaluatePruneCandidates(
+						s.tasks,
+						branch,
+						access.receipts,
+						{
+							mode: "exact-prune",
+							maxPruneTokens: s.config.settings.maxPruneTokens,
+						},
+					);
+					const candidates = evalResult.eligible.filter(
+						(c) =>
+							!s.pendingRestores.includes(c.sourceEntryId) &&
+							(!c.pairedEntryId ||
+								!s.pendingRestores.includes(c.pairedEntryId)),
+					);
+					if (!candidates.length) return;
+					const projection = projectRequestContext(
+						event.messages as unknown as AgentMessage[],
+						candidates,
+						branch,
+					);
+					if (projection.reclaimedTokens > 0) {
+						s.lastProjection = projection;
+						return {
+							messages: projection.messages as unknown as typeof event.messages,
+						};
+					}
+				});
+			}
+		} else {
+			if (s.contextUnlisten) {
+				s.contextUnlisten();
+				s.contextUnlisten = undefined;
+			}
+		}
+	}
+
 	function stop() {
 		continuity.invalidate();
 		const old = active;
 		active = undefined;
 		old?.unlisten?.();
+		old?.contextUnlisten?.();
 		if (old?.ctx.hasUI) old.ctx.ui.setStatus("aco", undefined);
 	}
 	const update = (s: State, ctx: ExtensionContext) => {
 		if (active !== s) return;
 		s.monitor.reset("configuration changed");
+		syncHooks(s);
 		observe(s, ctx, "configuration");
 	};
 	const panel = (s: State, ctx: ExtensionContext) =>
@@ -296,19 +380,28 @@ export default function contextMonitor(
 		});
 	function report(s: State, ctx: ExtensionContext, includeTraces = false) {
 		observe(s, ctx, "status", false, false);
+		const isExactPrune = s.config.settings.mode === "exact-prune";
 		return {
-			stage: "V1 + V2 recovery foundation/T0003",
-			mode: "observe-only",
+			stage: "V1 + V2 recovery foundation/T0003 + V2 exact-pruning/T0004",
+			mode: isExactPrune ? "exact-prune" : "observe-only",
 			sampling: s.config.settings.enabled
 				? "enabled"
 				: "disabled; event snapshots may be stale",
-			authorizedStrategies: [],
-			strategyExecution:
-				"unavailable; exact pruning/compaction/delegation not delivered",
+			authorizedStrategies: isExactPrune ? ["exact-prune"] : [],
+			strategyExecution: isExactPrune
+				? "active; recovery-gated exact pruning available; compaction/delegation not delivered"
+				: "unavailable; exact pruning/compaction/delegation not delivered in observe mode",
 			evidence:
 				"explicit local checkpoint and bounded historical recall available; /aco evidence re-verifies active-task receipts",
 			tasks: s.tasks,
 			recommendation: s.recommendation,
+			pruning: {
+				mode: s.config.settings.mode,
+				maxPruneTokens: s.config.settings.maxPruneTokens,
+				lastProjection: s.lastProjection ?? null,
+				lastExecution: s.pruneOutcome ?? null,
+				omittedEntries: s.omittedEntries,
+			},
 			analysis: {
 				...s.analysis,
 				declarationCalls: s.declarationCalls,
@@ -352,13 +445,34 @@ export default function contextMonitor(
 			capabilities: [],
 			running: false,
 			samplingMs: 0,
+			pendingRestores: [],
+			omittedEntries: [],
 		};
 		active = s;
 		await s.config.reload();
 		if (active !== s) return;
+		syncHooks(s);
 		observe(s, ctx, "session_start");
 		const recovery = await continuity.reconcile(ctx);
 		if (active !== s) return;
+
+		const branch =
+			typeof ctx.sessionManager?.getBranch === "function"
+				? ctx.sessionManager.getBranch()
+				: [];
+		let accessReceipts: Receipt[] = [];
+		try {
+			accessReceipts = (await continuity.access(ctx)).receipts;
+		} catch {}
+		const prunes = reconcileBranchPrunes(branch, accessReceipts);
+		s.omittedEntries = prunes.omittedTargetIds;
+		if (prunes.unverifiedTargetIds.length > 0) {
+			ctx.ui.notify(
+				`ACO: Unverified context_edit entries found on branch (${prunes.unverifiedTargetIds.join(", ")}); no recovery receipt.`,
+				"warning",
+			);
+		}
+
 		if (
 			recovery.checkpoints.some((c) => c.status !== "verified") ||
 			(recovery.issues.length && recovery.scope)
@@ -407,6 +521,20 @@ export default function contextMonitor(
 			ctx.sessionManager.getSessionId() !== s.ctx.sessionManager.getSessionId()
 		)
 			return;
+
+		const branch =
+			typeof ctx.sessionManager?.getBranch === "function"
+				? ctx.sessionManager.getBranch()
+				: [];
+		let accessReceipts: Receipt[] = [];
+		try {
+			accessReceipts = (await continuity.access(ctx)).receipts;
+		} catch {}
+		const prunes = reconcileBranchPrunes(branch, accessReceipts);
+		s.omittedEntries = prunes.omittedTargetIds;
+		s.lastProjection = undefined;
+		s.pendingRestores = [];
+
 		if (recovery.checkpoints.some((c) => c.status !== "verified"))
 			ctx.ui.notify(
 				"ACO branch recovery has incomplete/invalid evidence; inspect /aco evidence.",
@@ -440,12 +568,96 @@ export default function contextMonitor(
 		);
 		observe(s, ctx, "tool_execution_end");
 	});
-	pi.on("turn_end", (event, ctx) => {
+
+	pi.on("turn_end", async (event, ctx) => {
 		const s = active;
 		if (!s?.config.settings.enabled) return;
 		s.providerUsage = providerUsage(event.message);
 		observe(s, ctx, "turn_end", true);
+
+		if (s.config.settings.mode !== "exact-prune") {
+			return;
+		}
+
+		const branch =
+			typeof ctx.sessionManager?.getBranch === "function"
+				? ctx.sessionManager.getBranch()
+				: [];
+
+		let access: Access;
+		try {
+			access = await continuity.access(ctx);
+		} catch {
+			return;
+		}
+		if (active !== s) return;
+
+		// Handle pending restores
+		if (s.pendingRestores.length > 0) {
+			const restoreTargets = [...s.pendingRestores];
+			s.pendingRestores = [];
+			let combinedDrafts = [...event.entries];
+			for (const tid of restoreTargets) {
+				const restore = await createRestoreBoundaryDrafts(
+					tid,
+					branch,
+					continuity.store,
+					access.receipts,
+					combinedDrafts,
+				);
+				combinedDrafts = restore.drafts;
+				for (const restoredId of restore.restoredTargetIds) {
+					s.omittedEntries = s.omittedEntries.filter((id) => id !== restoredId);
+				}
+			}
+			return { entries: combinedDrafts, continue: event.continue };
+		}
+
+		// Durable exact pruning
+		const checkpoints = await continuity.getActiveCheckpoints(ctx);
+		linkCheckpoints(s.tasks, checkpoints);
+		const evalResult = evaluatePruneCandidates(
+			s.tasks,
+			branch,
+			access.receipts,
+			{
+				mode: "exact-prune",
+				maxPruneTokens: s.config.settings.maxPruneTokens,
+			},
+		);
+
+		if (!evalResult.eligible.length) {
+			return;
+		}
+
+		const pruneResult = createPruneBoundaryDrafts(
+			evalResult.eligible,
+			branch,
+			event.entries,
+		);
+
+		if (pruneResult.prunedTargetIds.length > 0) {
+			s.pruneOutcome = {
+				success: true,
+				mode: "durable-edit",
+				targetIds: pruneResult.prunedTargetIds,
+				beforeTokens: pruneResult.beforeTokens,
+				afterTokens: pruneResult.afterTokens,
+				reclaimedTokens: pruneResult.reclaimedTokens,
+				timestamp: Date.now(),
+				drafts: pruneResult.drafts,
+			};
+			for (const id of pruneResult.prunedTargetIds) {
+				if (!s.omittedEntries.includes(id)) {
+					s.omittedEntries.push(id);
+				}
+			}
+			return { entries: pruneResult.drafts, continue: event.continue };
+		}
+
+		return;
 	});
+
 	pi.on("agent_start", () => {
 		if (active) active.running = true;
 	});
@@ -523,7 +735,7 @@ export default function contextMonitor(
 		});
 	pi.registerCommand("aco", {
 		description:
-			"ACO monitor and explicit local checkpoint/recall; no pruning or compaction",
+			"ACO monitor, explicit local recovery and exact pruning control",
 		getArgumentCompletions: (prefix) =>
 			active ? complete(prefix, active.config.settings) : null,
 		handler: async (args, ctx) => {
@@ -568,6 +780,72 @@ export default function contextMonitor(
 				return;
 			}
 
+			if (cmd.kind === "prune") {
+				const branch =
+					typeof ctx.sessionManager?.getBranch === "function"
+						? ctx.sessionManager.getBranch()
+						: [];
+				let receipts: Receipt[] = [];
+				try {
+					receipts = (await continuity.access(ctx)).receipts;
+				} catch {}
+				const checkpoints = await continuity.getActiveCheckpoints(ctx);
+				linkCheckpoints(s.tasks, checkpoints);
+				const evalResult = evaluatePruneCandidates(s.tasks, branch, receipts, {
+					mode: s.config.settings.mode,
+					maxPruneTokens: s.config.settings.maxPruneTokens,
+				});
+				const info = {
+					mode: s.config.settings.mode,
+					eligible: evalResult.eligible,
+					ineligible: evalResult.ineligible,
+					omittedEntries: s.omittedEntries,
+					lastProjection: s.lastProjection ?? null,
+					lastExecution: s.pruneOutcome ?? null,
+				};
+				ctx.ui.notify(JSON.stringify(info, null, 2), "info");
+				return;
+			}
+
+			if (cmd.kind === "restore") {
+				const branch =
+					typeof ctx.sessionManager?.getBranch === "function"
+						? ctx.sessionManager.getBranch()
+						: [];
+				let receipts: Receipt[] = [];
+				try {
+					receipts = (await continuity.access(ctx)).receipts;
+				} catch {}
+				const restore = await createRestoreBoundaryDrafts(
+					cmd.targetId,
+					branch,
+					continuity.store,
+					receipts,
+					[],
+				);
+				if (restore.error) {
+					ctx.ui.notify(`ACO restore failed: ${restore.error}`, "error");
+					return;
+				}
+				s.pendingRestores.push(...restore.restoredTargetIds);
+				if (s.lastProjection) {
+					s.lastProjection.excludedEntryIds =
+						s.lastProjection.excludedEntryIds.filter(
+							(id) => !restore.restoredTargetIds.includes(id),
+						);
+				}
+				ctx.ui.notify(
+					JSON.stringify({
+						restored: true,
+						targetIds: restore.restoredTargetIds,
+						message:
+							"Restoration scheduled for next boundary commit; un-filtered in request projection",
+					}),
+					"info",
+				);
+				return;
+			}
+
 			if (cmd.kind === "declare") {
 				try {
 					const update = declare(s, ctx, JSON.parse(cmd.json), "command");
@@ -607,7 +885,7 @@ export default function contextMonitor(
 					if (active !== s) return;
 					update(s, ctx);
 					ctx.ui.notify(
-						`ACO saved ${cmd.key}=${cmd.value}; monitor only`,
+						`ACO saved ${cmd.key}=${cmd.value}; ${s.config.settings.mode}`,
 						"info",
 					);
 				} else if (cmd.kind === "reload") {
@@ -615,7 +893,8 @@ export default function contextMonitor(
 					if (active !== s) return;
 					update(s, ctx);
 					ctx.ui.notify(
-						s.config.error ?? "ACO configuration reloaded; monitor only",
+						s.config.error ??
+							`ACO configuration reloaded; ${s.config.settings.mode}`,
 						s.config.error ? "error" : "info",
 					);
 				} else if (cmd.kind === "get") {

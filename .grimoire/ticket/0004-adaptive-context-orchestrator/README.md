@@ -2,7 +2,7 @@
 
 **Source:** [Spec 0007](../../spec/0007-adaptive-context-orchestrator.md), including its settled conversation handoff S1–S6.
 **Ticket folder:** `.grimoire/ticket/0004-adaptive-context-orchestrator/`
-**Status:** In Progress — T0001/T0002/T0003 verified Done; V1 observation/recommendations and the V2 recovery foundation complete. T0004–T0008 remain Todo; exact pruning is not delivered.
+**Status:** In Progress — T0001–T0004 verified Done; V1 observation/recommendations, the V2 recovery foundation and exact pruning complete. T0005–T0008 remain Todo; semantic replacement/compaction/delegation are not delivered.
 **Architecture:** [ADR 0006](../../adr/0006-task-aware-context-working-set-and-isolation.md), alongside the collection's [package reference](../../../packages/README.md) and ADRs referenced by the spec.
 
 ## Overview and execution handoff
@@ -20,7 +20,7 @@ Settled constraints:
 - Use the established package stack, unified commands/completion/TUI configuration, loaded-only discovery and independent ownership. No host fork or mandatory collection manager.
 - The formulas, interface sketches and percentages in the original proposal are illustrative. No storage engine, delegation provider, publication identity, literal command/package name, calibrated weights, budget values or forecast/benchmark thresholds have been selected. Choose mechanisms within the contract; do not invent approved behavior or measured performance.
 
-**Current permissions:** Refinement produced documentation only. Explicit `grimoire-loop` invocations subsequently authorized T0001, T0002 and T0003 implementation and quality checks; their ticket receipts record completion. T0004–T0008, staging/committing/publishing and requirement changes remain unauthorized.
+**Current permissions:** Refinement produced documentation only. Explicit `grimoire-loop` invocations subsequently authorized T0001, T0002, T0003 and T0004 implementation and quality checks; their ticket receipts record completion. T0005–T0008, staging/committing/publishing and requirement changes remain unauthorized.
 
 **Record result:** ACO/Context Working Set concepts and the ADR index are in [CONTEXT](../../CONTEXT.md). ADR 0006 contains the confirmed boundaries and dated authorization clarification. No qualifying knowledge update or blocking behavioral question remains pending.
 

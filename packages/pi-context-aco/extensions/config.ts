@@ -4,9 +4,12 @@ import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { ForecastSettings } from "./pressure.ts";
 
+export type ACOMode = "observe" | "exact-prune";
 export interface Settings extends ForecastSettings {
 	enabled: boolean;
 	persistTraces: boolean;
+	mode: ACOMode;
+	maxPruneTokens: number;
 }
 export const defaults: Settings = {
 	enabled: true,
@@ -14,6 +17,8 @@ export const defaults: Settings = {
 	horizonTurns: 3,
 	reserveTokens: 4096,
 	persistTraces: false,
+	mode: "observe",
+	maxPruneTokens: 64000,
 };
 export const schema = Type.Partial(
 	Type.Object({
@@ -22,6 +27,8 @@ export const schema = Type.Partial(
 		horizonTurns: Type.Integer({ minimum: 1, maximum: 20 }),
 		reserveTokens: Type.Integer({ minimum: 0, maximum: 1000000 }),
 		persistTraces: Type.Boolean(),
+		mode: Type.Union([Type.Literal("observe"), Type.Literal("exact-prune")]),
+		maxPruneTokens: Type.Integer({ minimum: 0, maximum: 1000000 }),
 	}),
 	{ additionalProperties: false },
 );
@@ -48,6 +55,15 @@ export const options: Record<
 	persistTraces: {
 		description: "Persist numeric metadata in raw session, never model-visible",
 		values: ["false", "true"],
+	},
+	mode: {
+		description:
+			"Execution mode ('observe' for V1 observation, 'exact-prune' for V2 exact pruning)",
+		values: ["observe", "exact-prune"],
+	},
+	maxPruneTokens: {
+		description: "Maximum tokens pruned per turn (0–1000000)",
+		values: ["16000", "32000", "64000", "128000"],
 	},
 };
 export function settingKey(raw: string): keyof Settings | undefined {
@@ -95,15 +111,37 @@ export class Config {
 			const key = settingKey(rawKey);
 			if (!key) throw Error(`Unknown configuration key: ${rawKey}`);
 			const value =
-				typeof defaults[key] === "boolean"
-					? parseBoolean(rawValue)
-					: /^\d+$/.test(rawValue)
-						? Number(rawValue)
-						: undefined;
+				key === "mode"
+					? rawValue.toLowerCase() === "exact-prune" ||
+						rawValue.toLowerCase() === "observe"
+						? (rawValue.toLowerCase() as ACOMode)
+						: undefined
+					: typeof defaults[key] === "boolean"
+						? parseBoolean(rawValue)
+						: /^\d+$/.test(rawValue)
+							? Number(rawValue)
+							: undefined;
 			const next = { ...this.values, [key]: value };
 			if (value === undefined || !Check(schema, next))
 				throw Error(`Invalid/out-of-range value for ${key}`);
-			await writeJsonConfig(this.path, next, schema);
+			for (let attempt = 0; attempt < 5; attempt++) {
+				try {
+					await writeJsonConfig(this.path, next, schema);
+					break;
+				} catch (err) {
+					const code =
+						err && typeof err === "object" && "code" in err ? err.code : null;
+					if (
+						(code === "EPERM" || code === "EBUSY") &&
+						process.platform === "win32" &&
+						attempt < 4
+					) {
+						await new Promise((r) => setTimeout(r, 15 * (attempt + 1)));
+						continue;
+					}
+					throw err;
+				}
+			}
 			this.values = next;
 			this.error = undefined;
 		});

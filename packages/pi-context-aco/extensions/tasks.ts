@@ -24,6 +24,26 @@ const phaseSchema = Type.Union(
 const statusSchema = Type.Union(
 	["pending", "running", "completed", "blocked"].map((x) => Type.Literal(x)),
 );
+export type SegmentCategory =
+	| "user-constraint"
+	| "acceptance-criteria"
+	| "decision"
+	| "active-evidence"
+	| "completed-research"
+	| "reproducible-data"
+	| "redundant-content"
+	| "execution-state";
+
+export const categorySchema = Type.Union([
+	Type.Literal("user-constraint"),
+	Type.Literal("acceptance-criteria"),
+	Type.Literal("decision"),
+	Type.Literal("active-evidence"),
+	Type.Literal("completed-research"),
+	Type.Literal("reproducible-data"),
+	Type.Literal("redundant-content"),
+	Type.Literal("execution-state"),
+]);
 const nullable = <T extends TSchema>(s: T) => Type.Union([s, Type.Null()]);
 export const declarationSchema = Type.Object(
 	{
@@ -65,6 +85,7 @@ export const declarationSchema = Type.Object(
 								"checkpoint",
 							].map((x) => Type.Literal(x)),
 						),
+						category: Type.Optional(categorySchema),
 						sourceEntryIds: Type.Array(id(), {
 							minItems: 1,
 							maxItems: 32,
@@ -74,8 +95,24 @@ export const declarationSchema = Type.Object(
 						pinned: Type.Optional(Type.Boolean()),
 						precisionSensitive: Type.Optional(Type.Boolean()),
 						completedResearch: Type.Optional(Type.Boolean()),
+						redundant: Type.Optional(Type.Boolean()),
+						reproducibleData: Type.Optional(Type.Boolean()),
+						summary: Type.Optional(Type.String({ maxLength: 1024 })),
+						relevance: Type.Optional(
+							Type.Union(["high", "medium", "low"].map((x) => Type.Literal(x))),
+						),
 						estimatedTokens: Type.Optional(
 							nullable(Type.Integer({ minimum: 0, maximum: 100000000 })),
+						),
+						equivalentRepresentation: Type.Optional(
+							Type.Object(
+								{
+									verified: Type.Boolean(),
+									targetId: Type.Optional(id()),
+									description: Type.Optional(Type.String({ maxLength: 1024 })),
+								},
+								{ additionalProperties: false },
+							),
 						),
 					},
 					{ additionalProperties: false },
@@ -120,16 +157,36 @@ export interface Task {
 	provenance: Record<string, Provenance>;
 	signals: Signal[];
 }
+export interface StorageReference {
+	checkpointId: string;
+	segmentId: string;
+	verified: boolean;
+}
+export interface EquivalentRepresentation {
+	verified: boolean;
+	targetId?: string;
+	description?: string;
+}
 export interface Reference {
 	id: string;
 	kind: "constraint" | "decision" | "evidence" | "artifact" | "checkpoint";
+	category: SegmentCategory;
 	sourceEntryIds: string[];
 	dependencies: string[];
 	pinned: boolean;
 	precisionSensitive: boolean;
 	completedResearch: boolean;
+	redundant: boolean;
+	reproducibleData: boolean;
 	estimatedTokens: number | null;
 	protectedReasons: string[];
+	taskId: string | null;
+	summary: string | null;
+	storage: StorageReference | null;
+	relevance: "high" | "medium" | "low";
+	recoverability: "unverified" | "recoverable" | "non-recoverable";
+	activeConsumers: string[];
+	equivalentRepresentation: EquivalentRepresentation | null;
 }
 export interface TaskSnapshot {
 	activeTaskId: string | null;
@@ -285,9 +342,24 @@ function apply(
 				.size > 128
 		)
 			throw Error("Reference relationship capacity reached");
+		const category: SegmentCategory =
+			r.category ??
+			previous?.category ??
+			(r.completedResearch
+				? "completed-research"
+				: r.redundant
+					? "redundant-content"
+					: r.reproducibleData
+						? "reproducible-data"
+						: r.kind === "constraint"
+							? "user-constraint"
+							: r.kind === "decision"
+								? "decision"
+								: "active-evidence");
 		nextRefs.set(r.id, {
 			id: r.id,
 			kind: previous?.pinned ? previous.kind : r.kind,
+			category,
 			sourceEntryIds: [
 				...new Set([...(previous?.sourceEntryIds ?? []), ...r.sourceEntryIds]),
 			],
@@ -302,6 +374,8 @@ function apply(
 					r.pinned ||
 					r.kind === "constraint" ||
 					r.kind === "decision" ||
+					category === "user-constraint" ||
+					category === "acceptance-criteria" ||
 					r.sourceEntryIds.some((id) => userIds.has(id)),
 			),
 			precisionSensitive: Boolean(
@@ -309,8 +383,24 @@ function apply(
 			),
 			completedResearch:
 				r.completedResearch ?? previous?.completedResearch ?? false,
+			redundant: r.redundant ?? previous?.redundant ?? false,
+			reproducibleData:
+				r.reproducibleData ?? previous?.reproducibleData ?? false,
 			estimatedTokens: r.estimatedTokens ?? previous?.estimatedTokens ?? null,
 			protectedReasons: [],
+			taskId: update.taskId ?? previous?.taskId ?? null,
+			summary: r.summary ?? previous?.summary ?? null,
+			storage: previous?.storage ?? null,
+			relevance:
+				r.relevance ??
+				previous?.relevance ??
+				(r.kind === "constraint" || r.kind === "decision" ? "high" : "medium"),
+			recoverability: previous?.recoverability ?? "unverified",
+			activeConsumers: [],
+			equivalentRepresentation:
+				r.equivalentRepresentation ??
+				previous?.equivalentRepresentation ??
+				null,
 		});
 	}
 	nextTasks.set(t.taskId, t);
@@ -321,9 +411,42 @@ function apply(
 		active: update.active ? t.taskId : null,
 	};
 }
+export function linkCheckpoints(
+	snapshot: TaskSnapshot,
+	receipts: readonly {
+		id: string;
+		segmentIds?: string[];
+		sources?: { id: string }[];
+	}[],
+) {
+	for (const r of snapshot.references) {
+		if (r.storage) continue;
+		for (const ckpt of receipts) {
+			const segmentIds =
+				ckpt.segmentIds ?? ckpt.sources?.map((s) => s.id) ?? [];
+			if (
+				r.sourceEntryIds.length > 0 &&
+				r.sourceEntryIds.every((id) => segmentIds.includes(id))
+			) {
+				r.storage = {
+					checkpointId: ckpt.id,
+					segmentId: r.sourceEntryIds[0],
+					verified: true,
+				};
+				r.recoverability = "recoverable";
+				break;
+			}
+		}
+	}
+}
 export function buildTasks(
 	entries: readonly SessionEntry[],
 	cwd = process.cwd(),
+	receipts?: readonly {
+		id: string;
+		segmentIds?: string[];
+		sources?: { id: string }[];
+	}[],
 ): TaskSnapshot {
 	let tasks = new Map<string, Task>(),
 		refs = new Map<string, Reference>(),
@@ -345,6 +468,13 @@ export function buildTasks(
 		entry: SessionEntry,
 		pinned: boolean,
 		precision = false,
+		kind: Reference["kind"] = pinned && !precision ? "constraint" : "evidence",
+		category: SegmentCategory = pinned && !precision
+			? "user-constraint"
+			: precision
+				? "active-evidence"
+				: "execution-state",
+		taskId: string | null = active,
 	) => {
 		if (refs.size >= 256) {
 			limited = true;
@@ -361,14 +491,24 @@ export function buildTasks(
 				: textTokens(message);
 		refs.set("entry:" + entry.id, {
 			id: "entry:" + entry.id,
-			kind: pinned && !precision ? "constraint" : "evidence",
+			kind,
+			category,
 			sourceEntryIds: [entry.id],
 			dependencies: [],
 			pinned,
 			precisionSensitive: precision,
 			completedResearch: false,
+			redundant: false,
+			reproducibleData: category === "reproducible-data",
 			estimatedTokens: estimate,
 			protectedReasons: [],
+			taskId,
+			summary: null,
+			storage: null,
+			relevance: pinned || precision ? "high" : "medium",
+			recoverability: "unverified",
+			activeConsumers: [],
+			equivalentRepresentation: null,
 		});
 	};
 	for (const entry of entries) {
@@ -418,7 +558,7 @@ export function buildTasks(
 				);
 				tasks.set(active, t);
 			}
-			reference(entry, true);
+			reference(entry, true, false, "constraint", "user-constraint", active);
 			const t = tasks.get(active);
 			if (!t) {
 				limited = true;
@@ -434,8 +574,10 @@ export function buildTasks(
 				sourceEntryId: entry.id,
 			});
 		} else if (m.role === "assistant") {
+			let hasToolCalls = false;
 			for (const block of m.content) {
 				if (block.type !== "toolCall") continue;
+				hasToolCalls = true;
 				if (calls.size >= 256) {
 					limited = true;
 					issue("Tool attribution capacity reached");
@@ -446,9 +588,13 @@ export function buildTasks(
 					args: object(block.arguments),
 				});
 			}
+			if (hasToolCalls) {
+				reference(entry, false, false, "evidence", "execution-state", active);
+			}
 		} else if (m.role === "toolResult" && active) {
 			if (m.toolName === "aco_task") {
-				if (m.isError) reference(entry, true, true);
+				if (m.isError)
+					reference(entry, true, true, "evidence", "active-evidence", active);
 				continue;
 			}
 			const t = tasks.get(active);
@@ -461,7 +607,6 @@ export function buildTasks(
 			calls.delete(m.toolCallId);
 			const args = c?.args ?? {},
 				name = m.toolName;
-			reference(entry, m.isError, m.isError);
 			const path =
 				typeof args.path === "string"
 					? args.path
@@ -475,6 +620,14 @@ export function buildTasks(
 					command,
 				);
 			if (test) {
+				reference(
+					entry,
+					m.isError,
+					m.isError,
+					"evidence",
+					"active-evidence",
+					active,
+				);
 				const details = object(m.details),
 					structured = object(object(m).structuredContent);
 				const code =
@@ -504,6 +657,14 @@ export function buildTasks(
 				});
 				triggers.add("test-return");
 			} else if (/delegate|subagent/.test(name)) {
+				reference(
+					entry,
+					m.isError,
+					m.isError,
+					"evidence",
+					"active-evidence",
+					active,
+				);
 				signal(t, {
 					family: "tool",
 					event: "subagent-return",
@@ -516,6 +677,7 @@ export function buildTasks(
 				/^(write|edit|replace|replace_match|insert|move|copy)$/.test(name) &&
 				path
 			) {
+				reference(entry, false, false, "artifact", "execution-state", active);
 				if (!t.modifiedResources.includes(path)) {
 					if (t.modifiedResources.length >= 32 || path.length > 512) {
 						limited = true;
@@ -536,6 +698,7 @@ export function buildTasks(
 				(/plan|todo/.test(name) ||
 					(path && /(?:^|[/\\])(?:plans?[/\\]|plan\.md$)/i.test(path)))
 			) {
+				reference(entry, false, false, "artifact", "execution-state", active);
 				signal(t, {
 					family: "plan",
 					event: "plan-observed",
@@ -561,12 +724,22 @@ export function buildTasks(
 					if (t.planStatus === "completed") triggers.add("plan-completed");
 				}
 			} else if (!m.isError && /read|grep|search|find/.test(name)) {
+				reference(entry, false, false, "evidence", "reproducible-data", active);
 				signal(t, {
 					family: "tool",
 					event: "exploration",
 					phase: "explore",
 					sourceEntryId: entry.id,
 				});
+			} else {
+				reference(
+					entry,
+					m.isError,
+					m.isError,
+					"evidence",
+					"active-evidence",
+					active,
+				);
 			}
 		}
 	}
@@ -637,6 +810,38 @@ export function buildTasks(
 					"concrete normalized resource overlap; 1 is an overlap indicator, not calibrated probability",
 			};
 		}
+
+	// Active consumers: compute which active tasks or pinned decisions depend on each reference
+	const addConsumer = (
+		refId: string,
+		consumer: string,
+		seen = new Set<string>(),
+	) => {
+		if (seen.has(refId)) return;
+		seen.add(refId);
+		const r = refs.get(refId);
+		if (!r) return;
+		if (!r.activeConsumers.includes(consumer)) r.activeConsumers.push(consumer);
+		for (const dep of r.dependencies) addConsumer(dep, consumer, seen);
+	};
+	for (const t of tasks.values()) {
+		if (t.status !== "completed") {
+			for (const refId of t.requiredContextIds) {
+				addConsumer(refId, t.taskId);
+			}
+		}
+	}
+	for (const r of refs.values()) {
+		if (
+			(r.kind === "decision" || r.category === "decision") &&
+			(r.pinned || r.activeConsumers.length > 0)
+		) {
+			for (const dep of r.dependencies) {
+				addConsumer(dep, r.id);
+			}
+		}
+	}
+
 	const protect = (id: string, reason: string, seen = new Set<string>()) => {
 		if (seen.has(id)) return;
 		seen.add(id);
@@ -655,6 +860,11 @@ export function buildTasks(
 		if (r.pinned) protect(r.id, "pinned constraint/critical decision");
 		if (r.precisionSensitive)
 			protect(r.id, "precision-sensitive protocol/error evidence");
+		if (r.activeConsumers.length > 0)
+			protect(
+				r.id,
+				"active consumer dependency: " + r.activeConsumers.join(", "),
+			);
 	}
 	const protectTask = (
 		id: string,
@@ -688,7 +898,7 @@ export function buildTasks(
 				changed = true;
 			}
 	}
-	return {
+	const snapshot: TaskSnapshot = {
 		activeTaskId: active,
 		tasks: [...tasks.values()],
 		references: [...refs.values()],
@@ -697,6 +907,10 @@ export function buildTasks(
 		triggers: [...triggers],
 		sourceCount: entries.length,
 	};
+	if (receipts?.length) {
+		linkCheckpoints(snapshot, receipts);
+	}
+	return snapshot;
 }
 export function validateDeclaration(
 	raw: unknown,

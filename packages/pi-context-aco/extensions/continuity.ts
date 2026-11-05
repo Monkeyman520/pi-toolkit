@@ -76,6 +76,8 @@ export class Continuity {
 	private append: (type: string, data: unknown) => void;
 	private busy = false;
 	private generation = 0;
+	private manifestCache = new Map<string, string[]>();
+
 	constructor(
 		root: string,
 		append: (type: string, data: unknown) => void,
@@ -86,6 +88,28 @@ export class Continuity {
 	}
 	invalidate() {
 		this.generation++;
+		this.manifestCache.clear();
+	}
+	async getReceiptSegments(receipt: Receipt): Promise<string[]> {
+		const cached = this.manifestCache.get(receipt.id);
+		if (cached) return cached;
+		const m = await this.store.manifest(receipt);
+		const ids = m.segments.map((s) => s.id);
+		this.manifestCache.set(receipt.id, ids);
+		return ids;
+	}
+	async getActiveCheckpoints(
+		ctx: ExtensionContext,
+	): Promise<{ id: string; segmentIds: string[] }[]> {
+		const access = await this.access(ctx);
+		const result: { id: string; segmentIds: string[] }[] = [];
+		for (const r of access.receipts) {
+			try {
+				const segmentIds = await this.getReceiptSegments(r);
+				result.push({ id: r.id, segmentIds });
+			} catch {}
+		}
+		return result;
 	}
 	private guard(ctx: ExtensionContext, isCurrent: () => boolean) {
 		const key = fingerprint(ctx),

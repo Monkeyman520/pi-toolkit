@@ -94,7 +94,26 @@ export const fileIO: EvidenceIO = {
 	async mkdir(path, recursive) {
 		await mkdir(path, { recursive, mode: 0o700 });
 	},
-	rename,
+	async rename(from, to) {
+		for (let i = 0; i < 5; i++) {
+			try {
+				await rename(from, to);
+				return;
+			} catch (err) {
+				const code =
+					err && typeof err === "object" && "code" in err ? err.code : null;
+				if (
+					(code === "EPERM" || code === "EBUSY") &&
+					process.platform === "win32" &&
+					i < 4
+				) {
+					await new Promise((r) => setTimeout(r, 15 * (i + 1)));
+					continue;
+				}
+				throw err;
+			}
+		}
+	},
 };
 export async function projectKey(cwd: string) {
 	const canonical = await realpath(cwd);
@@ -169,7 +188,7 @@ export class EvidenceStore {
 		validReceipt(receipt);
 		return receipt;
 	}
-	private async manifest(receipt: Receipt): Promise<Manifest> {
+	async manifest(receipt: Receipt): Promise<Manifest> {
 		const raw = await this.io.read(
 			join(this.directory(receipt), "manifest.json"),
 			MAX_MANIFEST,

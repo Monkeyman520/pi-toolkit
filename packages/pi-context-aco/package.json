@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "Task-aware context monitor with scoped local evidence checkpoints and historical recall",
+	"description": "Task-aware context monitor with scoped local evidence checkpoints, historical recall and recovery-gated exact pruning",
 	"engines": {
 		"node": ">=22.19.0"
 	},
@@ -20,7 +20,8 @@
 		"test": "vitest run",
 		"smoke": "node tests/pi-smoke.mjs",
 		"smoke:tasks": "node tests/tasks-pi-smoke.mjs",
-		"smoke:evidence": "node tests/evidence-pi-smoke.mjs"
+		"smoke:evidence": "node tests/evidence-pi-smoke.mjs",
+		"smoke:prune": "node tests/prune-pi-smoke.mjs"
 	},
 	"pi": {
 		"extensions": [

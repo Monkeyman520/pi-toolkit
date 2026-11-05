@@ -3,7 +3,7 @@ import { settingCandidates } from "pi-plugin-support/settings";
 import { options, type Settings, schema, settingKey } from "./config.ts";
 
 export const usage =
-	"Usage: /aco [status | trace | tasks | recommend | declare <JSON> | checkpoint <JSON> | evidence | recall <JSON> | on | off | config [reload | <key> [value]] | help] — observation + explicit recovery; no pruning";
+	"Usage: /aco [status | trace | tasks | recommend | prune | restore <id|all> | declare <JSON> | checkpoint <JSON> | evidence | recall <JSON> | on | off | config [reload | <key> [value]] | help] — observation + explicit recovery + exact pruning";
 export type Command =
 	| {
 			kind:
@@ -14,9 +14,11 @@ export type Command =
 				| "help"
 				| "tasks"
 				| "recommend"
-				| "evidence";
+				| "evidence"
+				| "prune";
 	  }
 	| { kind: "declare" | "checkpoint" | "recall"; json: string }
+	| { kind: "restore"; targetId: string }
 	| { kind: "get"; key: string }
 	| { kind: "set"; key: string; value: string };
 export function parse(args: string): Command {
@@ -41,6 +43,8 @@ export function parse(args: string): Command {
 				return { kind: "status" };
 			case "evidence":
 				return { kind: "evidence" };
+			case "prune":
+				return { kind: "prune" };
 			case "tasks":
 				return { kind: "tasks" };
 			case "recommend":
@@ -54,6 +58,11 @@ export function parse(args: string): Command {
 			case "off":
 				return { kind: "set", key: "enabled", value: "false" };
 		}
+	}
+	if (p[0].toLowerCase() === "restore") {
+		return p.length === 2
+			? { kind: "restore", targetId: p[1] }
+			: { kind: "help" };
 	}
 	if (p[0].toLowerCase() === "config") {
 		if (p.length === 2)
@@ -85,6 +94,8 @@ export function complete(
 				"trace",
 				"tasks",
 				"recommend",
+				"prune",
+				"restore",
 				"declare",
 				"checkpoint",
 				"evidence",
