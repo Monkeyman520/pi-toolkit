@@ -17,6 +17,28 @@ afterEach(async () => {
 	);
 });
 describe("validated passive configuration", () => {
+	it("bounds V4 settings and exposes full-prefix delegation control without granting authority", async () => {
+		const c = new Config(join(await scope(), "aco.json"));
+		await c.reload();
+		await c.set("mode", "delegate");
+		await c.set("maxDelegationDepth", "0");
+		expect(c.settings.maxDelegationDepth).toBe(0);
+		await expect(c.set("maxDelegationDepth", "2")).rejects.toThrow();
+		await expect(c.set("maxDelegationConcurrency", "0")).rejects.toThrow();
+		await expect(c.set("maxDelegationTokens", "Infinity")).rejects.toThrow();
+		expect(parse('delegate {"tasks":[]}')).toEqual({
+			kind: "delegate",
+			json: '{"tasks":[]}',
+		});
+		expect(parse("delegation")).toEqual({ kind: "delegation" });
+		expect(parse('reconcile {"id":"child"}')).toEqual({
+			kind: "reconcile",
+			json: '{"id":"child"}',
+		});
+		expect(
+			complete("config mode del", c.settings)?.map((x) => x.value),
+		).toEqual(["config mode delegate"]);
+	});
 	it("uses bounded transparent defaults without strategy permission keys", async () => {
 		const c = new Config(join(await scope(), "aco.json"));
 		await c.reload();

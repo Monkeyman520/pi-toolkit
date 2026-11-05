@@ -3,7 +3,7 @@ import { settingCandidates } from "pi-plugin-support/settings";
 import { options, type Settings, schema, settingKey } from "./config.ts";
 
 export const usage =
-	"Usage: /aco [status | trace | tasks | recommend | prune | restore <id|all> | summarize <JSON> | compact | compaction | authorize <JSON> | revoke | declare <JSON> | checkpoint <JSON> | evidence | recall <JSON> | on | off | config [reload | <key> [value]] | help] — observation + verified recovery + scoped V3 actions";
+	"Usage: /aco [status | trace | tasks | recommend | prune | restore <id|all> | summarize <JSON> | delegate <JSON> | delegation | reconcile <JSON> | compact | compaction | authorize <JSON> | revoke | declare <JSON> | checkpoint <JSON> | evidence | recall <JSON> | on | off | config [reload | <key> [value]] | help] — observation + verified recovery + scoped V3/V4 actions";
 export type Command =
 	| {
 			kind:
@@ -18,10 +18,18 @@ export type Command =
 				| "prune"
 				| "compact"
 				| "compaction"
+				| "delegation"
 				| "revoke";
 	  }
 	| {
-			kind: "declare" | "checkpoint" | "recall" | "summarize" | "authorize";
+			kind:
+				| "declare"
+				| "checkpoint"
+				| "recall"
+				| "summarize"
+				| "authorize"
+				| "delegate"
+				| "reconcile";
 			json: string;
 	  }
 	| { kind: "restore"; targetId: string }
@@ -29,7 +37,9 @@ export type Command =
 	| { kind: "set"; key: string; value: string };
 export function parse(args: string): Command {
 	const jsonAction =
-		/^(declare|checkpoint|recall|summarize|authorize)\s+/i.exec(args.trim());
+		/^(declare|checkpoint|recall|summarize|authorize|delegate|reconcile)\s+/i.exec(
+			args.trim(),
+		);
 	if (jsonAction)
 		return args.length <=
 			(jsonAction[1].toLowerCase() === "declare" ? 32768 : 65536)
@@ -39,7 +49,9 @@ export function parse(args: string): Command {
 						| "checkpoint"
 						| "recall"
 						| "summarize"
-						| "authorize",
+						| "authorize"
+						| "delegate"
+						| "reconcile",
 					json: args.trim().slice(jsonAction[0].length),
 				}
 			: { kind: "help" };
@@ -50,6 +62,8 @@ export function parse(args: string): Command {
 		switch (p[0].toLowerCase()) {
 			case "compact":
 				return { kind: "compact" };
+			case "delegation":
+				return { kind: "delegation" };
 			case "compaction":
 				return { kind: "compaction" };
 			case "revoke":
@@ -113,6 +127,9 @@ export function complete(
 				"summarize",
 				"compact",
 				"compaction",
+				"delegation",
+				"delegate",
+				"reconcile",
 				"authorize",
 				"revoke",
 				"restore",

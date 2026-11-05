@@ -4,11 +4,15 @@ import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { ForecastSettings } from "./pressure.ts";
 
-export type ACOMode = "observe" | "exact-prune" | "compact";
+export type ACOMode = "observe" | "exact-prune" | "compact" | "delegate";
 export interface Settings extends ForecastSettings {
 	enabled: boolean;
 	persistTraces: boolean;
 	mode: ACOMode;
+	maxDelegationDepth: number;
+	maxDelegationConcurrency: number;
+	maxDelegationTokens: number;
+	maxChildOutputTokens: number;
 	maxPruneTokens: number;
 	maxCompactInputTokens: number;
 	maxSummaryTokens: number;
@@ -20,6 +24,10 @@ export const defaults: Settings = {
 	reserveTokens: 4096,
 	persistTraces: false,
 	mode: "observe",
+	maxDelegationDepth: 1,
+	maxDelegationConcurrency: 2,
+	maxDelegationTokens: 200000,
+	maxChildOutputTokens: 2000,
 	maxPruneTokens: 64000,
 	maxCompactInputTokens: 64000,
 	maxSummaryTokens: 8000,
@@ -35,7 +43,12 @@ export const schema = Type.Partial(
 			Type.Literal("observe"),
 			Type.Literal("exact-prune"),
 			Type.Literal("compact"),
+			Type.Literal("delegate"),
 		]),
+		maxDelegationDepth: Type.Integer({ minimum: 0, maximum: 1 }),
+		maxDelegationConcurrency: Type.Integer({ minimum: 1, maximum: 8 }),
+		maxDelegationTokens: Type.Integer({ minimum: 0, maximum: 10000000 }),
+		maxChildOutputTokens: Type.Integer({ minimum: 128, maximum: 8000 }),
 		maxPruneTokens: Type.Integer({ minimum: 0, maximum: 1000000 }),
 		maxCompactInputTokens: Type.Integer({ minimum: 1, maximum: 1000000 }),
 		maxSummaryTokens: Type.Integer({ minimum: 1, maximum: 100000 }),
@@ -68,8 +81,8 @@ export const options: Record<
 	},
 	mode: {
 		description:
-			"Execution mode: observe (V1), exact-prune (V2), compact (explicit V3 proposals; no authority)",
-		values: ["observe", "exact-prune", "compact"],
+			"Execution mode: observe (V1), exact-prune (V2), compact (V3), delegate (V4); proposals need separate authority",
+		values: ["observe", "exact-prune", "compact", "delegate"],
 	},
 	maxPruneTokens: {
 		description: "Maximum tokens pruned per turn (0–1000000)",
@@ -83,6 +96,23 @@ export const options: Record<
 	maxSummaryTokens: {
 		description: "Finite estimated summary output budget; not authorization",
 		values: ["2000", "8000", "16000"],
+	},
+	maxDelegationDepth: {
+		description: "Native children: depth 0 disables, 1 permits; no recursion",
+		values: ["0", "1"],
+	},
+	maxDelegationConcurrency: {
+		description: "Maximum simultaneous independent children (1–8)",
+		values: ["1", "2", "4", "8"],
+	},
+	maxDelegationTokens: {
+		description:
+			"Aggregate parent/child/coordination admission budget; retained reservations",
+		values: ["0", "100000", "200000", "1000000"],
+	},
+	maxChildOutputTokens: {
+		description: "Provider output limit and coordination reservation",
+		values: ["1000", "2000", "4000"],
 	},
 };
 
@@ -132,7 +162,7 @@ export class Config {
 			if (!key) throw Error(`Unknown configuration key: ${rawKey}`);
 			const value =
 				key === "mode"
-					? ["exact-prune", "observe", "compact"].includes(
+					? ["exact-prune", "observe", "compact", "delegate"].includes(
 							rawValue.toLowerCase(),
 						)
 						? (rawValue.toLowerCase() as ACOMode)

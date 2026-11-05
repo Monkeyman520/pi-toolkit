@@ -10,6 +10,7 @@ import { complete, parse, usage } from "./commands.ts";
 import { Compactor } from "./compaction.ts";
 import { Config, settingKey } from "./config.ts";
 import { Continuity, recallSchema } from "./continuity.ts";
+import { Delegator } from "./delegation.ts";
 import {
 	type Metric,
 	type Pressure,
@@ -125,6 +126,11 @@ export default function contextMonitor(
 		(type, data) => pi.appendEntry(type, data),
 	);
 
+	const delegator = new Delegator(
+		(type, data) => pi.appendEntry(type, data),
+		continuity,
+		() => active?.config.settings,
+	);
 	const compactor = new Compactor(pi, continuity, () =>
 		active ? { owner: active, settings: active.config.settings } : undefined,
 	);
@@ -186,6 +192,7 @@ export default function contextMonitor(
 		);
 		if (JSON.stringify(update).length > 32768)
 			throw Error("Task declaration too large");
+		delegator.reset(ctx);
 		pi.appendEntry("aco-task", { version: 1, origin, update });
 		if (origin === "tool") s.declarationCalls++;
 		observe(s, ctx, "declaration");
@@ -243,7 +250,9 @@ export default function contextMonitor(
 		const strat =
 			s.config.settings.mode === "exact-prune"
 				? "exact-pruning active"
-				: "strategies unavailable";
+				: s.config.settings.mode === "delegate"
+					? "bounded delegation proposals"
+					: "strategies unavailable";
 		return `V2 ${s.config.settings.mode} ${s.config.settings.enabled ? "on" : "off"} · context ${value} est · projected ${future} est · ${s.recommendation?.kind ?? "no-op"} · ${strat}`;
 	};
 	function observe(
@@ -377,6 +386,7 @@ export default function contextMonitor(
 	}
 
 	function stop() {
+		delegator.reset();
 		compactor.reset();
 		continuity.invalidate();
 		const old = active;
@@ -387,6 +397,7 @@ export default function contextMonitor(
 	}
 	const update = (s: State, ctx: ExtensionContext) => {
 		if (active !== s) return;
+		delegator.reset(ctx);
 		s.monitor.reset("configuration changed");
 		syncHooks(s);
 		observe(s, ctx, "configuration");
@@ -405,45 +416,66 @@ export default function contextMonitor(
 	function report(s: State, ctx: ExtensionContext, includeTraces = false) {
 		observe(s, ctx, "status", false, false);
 		const isExactPrune = s.config.settings.mode === "exact-prune";
+		const delegation = delegator.report(ctx);
 		return {
 			stage:
-				"V1 + V2 recovery/T0003 + V2 exact-pruning/T0004 + V3 scoped extractive/native compaction/T0005",
+				"V1 + V2 recovery/T0003 + V2 exact-pruning/T0004 + V3 scoped extractive/native compaction/T0005 + V4 bounded delegation/T0006",
 			compaction: compactor.report(ctx),
+			delegation,
 			mode:
-				s.config.settings.mode === "compact"
-					? "compact"
-					: isExactPrune
-						? "exact-prune"
-						: "observe-only",
+				s.config.settings.mode === "delegate"
+					? "delegate"
+					: s.config.settings.mode === "compact"
+						? "compact"
+						: isExactPrune
+							? "exact-prune"
+							: "observe-only",
 			sampling: s.config.settings.enabled
 				? "enabled"
 				: "disabled; event snapshots may be stale",
 			authorizedStrategies: !s.config.settings.enabled
 				? []
-				: isExactPrune
-					? ["exact-prune"]
-					: s.config.settings.mode === "compact"
-						? [
-								...new Set(
-									compactor.permissions.inspect(ctx).map((g) => g.operation),
-								),
-							]
-						: [],
-			availableStrategies:
-				s.config.settings.mode === "compact"
-					? ["semantic", "native"]
+				: s.config.settings.mode === "delegate"
+					? delegation.authority.length
+						? ["delegate"]
+						: []
 					: isExactPrune
 						? ["exact-prune"]
-						: [],
+						: s.config.settings.mode === "compact"
+							? [
+									...new Set(
+										compactor.permissions.inspect(ctx).map((g) => g.operation),
+									),
+								]
+							: [],
+			availableStrategies:
+				s.config.settings.mode === "delegate"
+					? ["delegate"]
+					: s.config.settings.mode === "compact"
+						? ["semantic", "native"]
+						: isExactPrune
+							? ["exact-prune"]
+							: [],
 			strategyExecution:
-				s.config.settings.mode === "compact"
-					? "V3 explicit proposals only; confirmation or scoped automation and independent safety verification required; delegation unavailable"
-					: isExactPrune
-						? "V2 recovery-gated exact pruning; compaction requires separate compact mode"
-						: "V1 observation-only; no ACO strategy execution",
+				s.config.settings.mode === "delegate"
+					? "V4 explicit bounded independent children; confirmation/scoped authorization required; staged deliverables, parent verification"
+					: s.config.settings.mode === "compact"
+						? "V3 explicit proposals only; confirmation or scoped automation and independent safety verification required; delegation unavailable"
+						: isExactPrune
+							? "V2 recovery-gated exact pruning; compaction requires separate compact mode"
+							: "V1 observation-only; no ACO strategy execution",
 			evidence:
 				"explicit local checkpoint and bounded historical recall available; /aco evidence re-verifies active-task receipts",
-			tasks: s.tasks,
+			tasks: {
+				...s.tasks,
+				delegation: delegation.outcomes.map((o) => ({
+					id: o.id,
+					taskId: o.taskId,
+					parentTaskId: o.parentTaskId,
+					checkpoints: o.checkpoints,
+					status: o.status,
+				})),
+			},
 			recommendation: s.recommendation,
 			pruning: {
 				mode: s.config.settings.mode,
@@ -562,6 +594,7 @@ export default function contextMonitor(
 		observe(s, ctx, reason);
 	};
 	pi.on("model_select", (_event, ctx) => {
+		delegator.reset(ctx);
 		reset("model_select", ctx);
 	});
 	pi.on("session_compact", (_event, ctx) => {
@@ -572,6 +605,7 @@ export default function contextMonitor(
 		if (!s) return;
 		continuity.invalidate();
 		compactor.reset();
+		delegator.reset();
 		reset("session_tree", ctx);
 		const recovery = await continuity.reconcile(ctx);
 		if (
@@ -813,6 +847,26 @@ export default function contextMonitor(
 				return;
 			}
 			const cmd = parse(args);
+
+			if (
+				cmd.kind === "delegate" ||
+				cmd.kind === "delegation" ||
+				cmd.kind === "reconcile"
+			) {
+				try {
+					const result =
+						cmd.kind === "delegate"
+							? await delegator.run(ctx, JSON.parse(cmd.json))
+							: cmd.kind === "reconcile"
+								? await delegator.reconcile(ctx, JSON.parse(cmd.json))
+								: delegator.report(ctx);
+					if (active === s) ctx.ui.notify(JSON.stringify(result), "info");
+				} catch (error) {
+					if (active === s)
+						ctx.ui.notify("ACO delegation refused: " + String(error), "error");
+				}
+				return;
+			}
 			if (
 				cmd.kind === "checkpoint" ||
 				cmd.kind === "recall" ||
@@ -859,13 +913,14 @@ export default function contextMonitor(
 					else if (cmd.kind === "compact") result = await compactor.native(ctx);
 					else if (cmd.kind === "authorize")
 						result = {
-							authorized: compactor.permissions.grant(
-								ctx,
-								JSON.parse(cmd.json),
-							),
+							authorized:
+								JSON.parse(cmd.json)?.operation === "delegate"
+									? delegator.authorize(ctx, JSON.parse(cmd.json))
+									: compactor.permissions.grant(ctx, JSON.parse(cmd.json)),
 							persistent: false,
 						};
 					else if (cmd.kind === "revoke") {
+						delegator.reset(ctx);
 						compactor.reset();
 						result = { revoked: true };
 					} else result = compactor.report(ctx);
@@ -873,7 +928,7 @@ export default function contextMonitor(
 				} catch (error) {
 					if (active === s)
 						ctx.ui.notify(
-							`ACO compaction refused: ${error instanceof Error ? error.message : String(error)}`,
+							`ACO action/authorization refused: ${error instanceof Error ? error.message : String(error)}`,
 							"error",
 						);
 				}
