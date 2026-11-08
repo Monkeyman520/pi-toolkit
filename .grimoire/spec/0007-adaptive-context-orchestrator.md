@@ -1,7 +1,7 @@
 # Adaptive Context Orchestrator
 
 **Spec ID:** 0007
-**Status:** In Progress
+**Status:** Implemented
 **Date:** 2026-11-05
 **Selected endpoint:** Requirements specification → ticket set; no implementation or implementation-plan authorization.
 
@@ -261,3 +261,8 @@ These scenarios define required input-to-outcome evidence, not tests already run
 - V1 execution of the four strategies.
 - Default cross-project memory sharing, default remote evidence upload or a mandatory shared collection manager.
 - Mandating the unverified third-party projects, a storage backend, published identity, invented numeric policy, benchmark victory or lossless-summary guarantee.
+
+
+## Final implementation evidence
+
+The later explicit implementation/loop authorizations superseded the original refinement-only permission for implementation work without changing these requirements. T0001–T0008 are now Done; [final R01–R16/E01–E14 coverage](../ticket/0004-adaptive-context-orchestrator/T0008-verification.md) and [failure-inclusive evaluation](../ticket/0004-adaptive-context-orchestrator/T0007-final-evaluation.md) establish the bounded delivered contract. Actual failed model tasks, blocked oversized checkpoints, partial usage and unknown invoice/cache metrics remain explicit. The final proxied package/runtime checks passed; no statistical superiority, universal summary equivalence or OS-enforced spending guarantee is claimed.

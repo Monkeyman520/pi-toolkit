@@ -2,7 +2,7 @@
 
 **Ticket ID:** T0007
 **Source:** [Spec 0007](../../spec/0007-adaptive-context-orchestrator.md) — R02, R07, R11, R12, R15, R16; scenarios E02, E09, E10, E13. [ADR 0006](../../adr/0006-task-aware-context-working-set-and-isolation.md).
-**Status:** In Progress — controlled composition verified; representative-task evaluation and policy validation remain open
+**Status:** Done — available-strategy composition and failure-inclusive representative evaluation verified
 
 ## Goal
 
@@ -28,10 +28,10 @@ Compose the delivered exact-prune, compaction and delegation capabilities throug
 - [x] Ordered combinations can checkpoint/offload/delegate/prune/compact as appropriate; failed or stale prerequisites stop dependent actions and preserve recovery (E10).
 - [x] Only available, authorized, safe and budget-valid actions execute; confirmation-required steps cannot inherit permission from an earlier automatic exact-prune step (E09).
 - [x] Ordinary stable turns do not trigger mandatory extra model decisions; substantive task changes, forecast deterioration and semantic conflicts are explainable triggers.
-- [ ] Prediction/decision traces identify estimated savings/continuity/recovery/risk/overhead and compare with observed results; task-dependent weighting is evaluated, not asserted optimal.
-- [ ] Comparable adaptive and no-ACO/fixed-watermark or compaction-only runs report task success/continuity, recovery attempts/failures, mistaken decisions, total parent/child/management tokens/cost, latency and human interventions (E13).
+- [x] Prediction/decision traces identify estimated savings/continuity/recovery/risk/overhead and compare with observed results; task-dependent weighting is evaluated, not asserted optimal.
+- [x] Comparable adaptive and no-ACO/fixed-watermark or compaction-only runs report task success/continuity, recovery attempts/failures, mistaken decisions, total parent/child/management tokens/cost, latency and human interventions (E13).
 - [x] Cache-read/write/new-input effects and missing provider metrics are explicit. Reduced main-agent context alone cannot establish lower total cost or superiority.
-- [ ] Controlled runtime composition and real representative-task evidence are distinguished; hypothetical percentage traces are not benchmark results.
+- [x] Controlled runtime composition and real representative-task evidence are distinguished; hypothetical percentage traces are not benchmark results.
 
 ## Out of Scope
 
@@ -42,7 +42,7 @@ Invented quantitative acceptance thresholds, unconditional “adaptive wins” c
 Run the affected package's type check, Biome and Vitest separately and record the tested versions. Supply a controlled Pi loading/usage check for this ticket's delivered behavior; mock-only hooks and direct Node entry execution are insufficient. Keep the package README/configuration and permissions accurate as capabilities change. This ticket describes future verification, not checks already performed.
 
 
-## T0007 execution receipt
+## Initial T0007 execution receipt (historical)
 
 ### Contract and delivered scope
 
@@ -86,3 +86,23 @@ Actual Pi also exposed a new native race: writing coordinator metadata after lau
 ### Remaining work and verdict
 
 **Issues remaining, not Done.** The enabled implementation/static/unit/controlled-Pi gates passed and inline review found no remaining confirmed code blocker in the inspected diff. T0007 still cannot establish full acceptance: run real comparable representative coding tasks with trustworthy success/continuity/recovery/mistake/token/cost/cache/latency/intervention evidence and evaluate the task-dependent policy (without inventing an optimality threshold). No external provider benchmark, live spending or project-data upload was performed. The current no-ACO fixture control and explicit parameter requirements are documented, not substitutes for that evidence. T0008 remains unexecuted and blocked on T0007 completion.
+
+
+## Subsequent evaluation preparation
+
+The authorized T0008 continuation prepared a [representative evaluation protocol](./T0007-representative-evaluation-protocol.md) using actual defect-replay tasks and independent acceptance criteria. T0008's local host safety checks are now recorded in its current receipt; the earlier statement that T0008 was unexecuted is historical. No representative model run has occurred. Provider/model selection, approved input data and finite run/token/spending limits remain required before execution; T0007 stays In Progress.
+
+
+## Authorized representative evaluation continuation
+
+The user selected remote `antigravity/gemini-3.8-flash`, thinking `high`, allowed source transmission from isolated package copies, and explicitly requested no evaluation token/fee/time caps for now, with complete recording. Existing finite plugin child budgets/grants remain unchanged. The [protocol](./T0007-representative-evaluation-protocol.md) records the authority, isolation and missing-metric rules. A P1 control/adaptive pilot uses identical baseline source/task/hidden-acceptance hashes; local verifier bootstrap failures are retained separately. Live inference has started, but no unchecked acceptance criterion is passed merely because the provider responds. P2/P3 and task-dependent policy evaluation remain outstanding.
+
+
+## Current representative evidence checkpoint
+
+P1 and P2 pairs now provide actual remote-model task outcomes, including failed artifacts, native transport errors, positive partial stream usage and a safely blocked oversized checkpoint. See the [representative receipt](./T0007-representative-evaluation.md) for matched source/acceptance hashes, independent checks, total versus known-subtotal accounting, policy reasons, management overhead and tail-only matched-horizon forecast scores. Earlier statements that no representative run existed describe their historical stage, not current permission or evidence. P3 review/no-op is now active after a positive independent preflight; no final acceptance is inferred from an in-progress run. The two remaining comparative/weighting checkboxes stay open pending that integrated assessment. No successful real-task unloading or superiority is currently demonstrated.
+
+
+## Final acceptance
+
+All original criteria are now supported by the [final evaluation and criterion-to-evidence assessment](./T0007-final-evaluation.md), [chronological failure-inclusive receipt](./T0007-representative-evaluation.md) and [final integrated coverage](./T0008-verification.md). Earlier missing-evidence statements above describe their historical stage, not outstanding work. P1/P2 failures, the P3 control startup timeout and unknown costs remain unchanged; P3 adaptive passed independently. Task-fit weighting is evaluated across no-op/phase-change/blocked-exact/review cases, with matched-horizon tail forecasts and no claim of optimal weights, successful real-task unloading or superiority. Final combined-source static/unit and process-proxied runtime gates pass. Evaluation completion is not an assertion that every sample succeeded. No requirement was removed or benchmark victory made a gate.

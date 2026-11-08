@@ -1,6 +1,6 @@
 # Task-aware context working set and isolation
 
-**Status:** Implementing
+**Status:** Completed
 **Date:** 2026-11-05
 
 ## Context
@@ -28,3 +28,6 @@ Current occupancy alone does not establish whether intervention benefits a task:
 - This decision selects neither a storage engine nor a delegation provider, and does not claim implementation or runtime verification. Proposed denotes recorded but unrealized work, not a lack of user approval of the decisions above.
 
 **Implementation progress (2026-11-05):** The final sentence above describes the original recording state. The [T0001 receipt](../ticket/0004-adaptive-context-orchestrator/T0001-v1-context-monitor-and-plugin-control.md#t0001-execution-receipt--2026-11-05) establishes the passive monitoring/control foundation; the [T0002 receipt](../ticket/0004-adaptive-context-orchestrator/T0002-v1-task-context-graph-and-recommendations.md#t0002-execution-receipt--2026-11-05) completes controlled task-aware V1 observation/recommendations with package checks and actual Pi RPC/ConPTY evidence. Status stays Implementing because storage, full semantic safety and all strategy/isolation execution capabilities remain pending; this is not full ADR realization.
+
+
+**Realization (2026-11-07):** T0001–T0008 now establish the recorded decision across passive V1, recovery-gated exact pruning, scoped historical recall, independently authorized compaction/children and command-only adaptive composition. The [final coverage receipt](../ticket/0004-adaptive-context-orchestrator/T0008-verification.md) links actual Pi/ConPTY projection, persistence, isolation, confirmation/budget and failure-recovery evidence. The [real-task evaluation](../ticket/0004-adaptive-context-orchestrator/T0007-final-evaluation.md) retains negative/blocked outcomes and unknown costs; realization does not assert optimal weights or superior performance. This updates implementation status only; the original decision and authorization clarification are unchanged.
