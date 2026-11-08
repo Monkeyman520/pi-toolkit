@@ -21,6 +21,7 @@ import {
 	type TaskContract,
 	validateResult,
 } from "./delegation-contracts.ts";
+import { assistantUsage } from "./evaluation.ts";
 import { buildTasks } from "./tasks.ts";
 
 const snapshotSchema = Type.Object(
@@ -71,6 +72,24 @@ const outcomeSchema = Type.Object(
 	{ additionalProperties: false },
 );
 type Outcome = Static<typeof outcomeSchema>;
+function normalizeOutcome(outcome: Outcome): Outcome {
+	if (
+		["failed", "cancelled"].includes(outcome.status) &&
+		assistantUsage({
+			stopReason: "error",
+			usage: { totalTokens: outcome.tokens },
+		}) === undefined
+	)
+		return {
+			...outcome,
+			tokens: null,
+			cost: null,
+			cacheRead: null,
+			cacheWrite: null,
+			budgetVerified: false,
+		};
+	return outcome;
+}
 const finite = (v: unknown): number | null =>
 	typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
 const owned = (e: SessionEntry) =>
@@ -201,7 +220,9 @@ export class Delegator {
 				)
 				.at(-1);
 			const outcome =
-				returned?.type === "custom" ? (returned.data as Outcome) : undefined;
+				returned?.type === "custom"
+					? normalizeOutcome(returned.data as Outcome)
+					: undefined;
 			const reviewEntry = branch
 				.filter(
 					(e) =>
@@ -260,7 +281,12 @@ export class Delegator {
 			throw Error(
 				"Delegation batch already active; no unsafe concurrent scheduler",
 			);
-		if (!ctx.model || typeof ctx.modelRegistry?.streamSimple !== "function")
+		if (
+			!ctx.model ||
+			typeof ctx.modelRegistry?.streamSimple !== "function" ||
+			typeof ctx.modelRegistry?.getProvider !== "function" ||
+			!ctx.modelRegistry.getProvider(ctx.model.provider)
+		)
 			return {
 				status: "recommendation",
 				ids: [],
@@ -410,7 +436,8 @@ export class Delegator {
 					!(
 						entry?.type === "custom" &&
 						Check(outcomeSchema, entry.data) &&
-						entry.data.budgetVerified
+						normalizeOutcome(entry.data).budgetVerified &&
+						finite(entry.data.tokens) !== null
 					)
 				)
 					throw Error(
@@ -573,6 +600,7 @@ export class Delegator {
 						outcome.status = controller.signal.aborted ? "cancelled" : "failed";
 						outcome.error = String(error).slice(0, 2048);
 					} finally {
+						Object.assign(outcome, normalizeOutcome(outcome));
 						clearTimeout(timer);
 						outcome.latencyMs = performance.now() - start;
 						ctx.signal?.removeEventListener("abort", abort);

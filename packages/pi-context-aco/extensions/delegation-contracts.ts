@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
+import { assistantUsage } from "./evaluation.ts";
 import { fileIO } from "./evidence.ts";
 
 const text = () => Type.String({ minLength: 1, maxLength: 2048 });
@@ -123,9 +124,11 @@ export function parentUsage(branch: SessionEntry[]) {
 	for (const e of branch) {
 		const usage =
 			e.type === "message"
-				? e.message.role === "assistant" || e.message.role === "toolResult"
-					? e.message.usage
-					: undefined
+				? e.message.role === "assistant"
+					? assistantUsage(e.message)
+					: e.message.role === "toolResult"
+						? e.message.usage
+						: undefined
 				: e.type === "usage" ||
 						e.type === "compaction" ||
 						e.type === "branch_summary"
@@ -138,7 +141,16 @@ export function parentUsage(branch: SessionEntry[]) {
 			(e.type === "message" && e.message.role === "assistant");
 		if (!usage && !requiresUsage) continue;
 		const n = usage?.totalTokens;
-		if (typeof n !== "number" || !Number.isFinite(n) || n < 0)
+		// Failed streams may report positive cumulative usage before their final charge is known.
+		if (
+			(e.type === "message" &&
+				e.message.role === "assistant" &&
+				(e.message.stopReason === "error" ||
+					e.message.stopReason === "aborted")) ||
+			typeof n !== "number" ||
+			!Number.isFinite(n) ||
+			n < 0
+		)
 			throw Error(
 				"Parent token usage unknown; aggregate budget cannot admit delegation",
 			);

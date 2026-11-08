@@ -1,6 +1,25 @@
 import { appendFileSync, writeFileSync } from "node:fs";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 export default function fixture(pi) {
+	let fault = "none";
+	const pending = new Set();
+	pi.registerCommand("delegation-fault", {
+		handler: async (args) => {
+			if (
+				!["none", "malformed", "error", "overrun", "tool", "hold"].includes(
+					args,
+				)
+			)
+				throw Error("Invalid fixture fault");
+			fault = args;
+		},
+	});
+	const release = () => {
+		for (const done of pending) done();
+		pending.clear();
+	};
+	pi.registerCommand("delegation-release", { handler: async () => release() });
+	pi.on("session_shutdown", release);
 	const probe = (ctx) => {
 		const data = {
 			sessionFile: ctx.sessionManager.getSessionFile(),
@@ -40,7 +59,7 @@ export default function fixture(pi) {
 				JSON.stringify({ child, context, maxTokens: options?.maxTokens }) +
 					"\n",
 			);
-			let payload;
+			let payload, forbiddenRecall;
 			if (child) {
 				const last = context.messages.at(-1);
 				const raw =
@@ -51,6 +70,13 @@ export default function fixture(pi) {
 								.map((c) => c.text)
 								.join("");
 				const request = JSON.parse(raw);
+				const stolen = request.contract.constraints.find((s) =>
+					s.startsWith("UNAUTHORIZED_RECALL:"),
+				);
+				if (stolen)
+					forbiddenRecall = JSON.parse(
+						stolen.slice("UNAUTHORIZED_RECALL:".length),
+					);
 				payload = {
 					conclusions: ["Controlled analysis: " + request.contract.goal],
 					deliverables: request.resources
@@ -90,12 +116,40 @@ export default function fixture(pi) {
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 				},
 			};
+			const currentFault = child ? fault : "none";
+			if (currentFault === "malformed") message.content[0].text = "not JSON";
+			if (currentFault === "error") {
+				message.stopReason = "error";
+				message.errorMessage = "Controlled failed child";
+			}
+			if (currentFault === "overrun") {
+				message.usage.output = (options?.maxTokens ?? 2000) + 1;
+				message.usage.totalTokens = 1000000;
+			}
+			if (currentFault === "tool")
+				message.content = [
+					{
+						type: "toolCall",
+						id: "unauthorized-recall",
+						name: "aco_recall",
+						arguments: forbiddenRecall ?? {
+							checkpointId: "00000000-0000-0000-0000-000000000000",
+							segmentId: "ungranted",
+							budgetBytes: 8192,
+						},
+					},
+				];
 			const stream = createAssistantMessageEventStream();
-			queueMicrotask(() => {
+			const finish = () => {
 				stream.push({ type: "start", partial: message });
-				stream.push({ type: "done", reason: "stop", message });
+				if (message.stopReason === "error")
+					stream.push({ type: "error", reason: "error", error: message });
+				else stream.push({ type: "done", reason: "stop", message });
 				stream.end();
-			});
+			};
+			// Deliberately uncooperative child: revoke must not wait for provider cooperation.
+			if (currentFault === "hold") pending.add(finish);
+			else queueMicrotask(finish);
 			return stream;
 		},
 	});

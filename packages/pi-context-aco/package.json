@@ -24,7 +24,9 @@
 		"smoke:prune": "node tests/prune-pi-smoke.mjs",
 		"smoke:compact": "node tests/compaction-pi-smoke.mjs",
 		"smoke:delegate": "node tests/delegation-pi-smoke.mjs",
-		"smoke:adaptive": "node tests/adaptive-pi-smoke.mjs"
+		"smoke:adaptive": "node tests/adaptive-pi-smoke.mjs",
+		"smoke:lifecycle": "node tests/lifecycle-pi-smoke.mjs",
+		"smoke:recovery": "node tests/recovery-pi-smoke.mjs"
 	},
 	"pi": {
 		"extensions": [

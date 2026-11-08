@@ -143,13 +143,18 @@ it("preserves frozen tool/results/boundary proposals and never registers mutatio
 	expect(report.providerUsage.input.value).toBe(100);
 	expect(report.management.modelCalls).toBe(0);
 	expect(h.appendEntry).not.toHaveBeenCalled();
+	expect(
+		await h.emit(
+			"before_agent_start",
+			Object.freeze({ systemPrompt: "unchanged" }),
+		),
+	).toBeUndefined();
 	for (const name of [
 		"context",
 		"context_with_system",
 		"tool_call",
 		"tool_result",
 		"before_provider_request",
-		"before_agent_start",
 	])
 		expect(h.hooks.has(name)).toBe(false);
 });
@@ -318,3 +323,28 @@ it("offers a metadata-only tool, refuses disabled updates and never fabricates e
 	expect(h.appendEntry.mock.calls.length).toBe(before);
 	expect((await h.report()).authorizedStrategies).toEqual([]);
 });
+
+it.each(["error", "aborted"])(
+	"reports failed SDK-normalized zero %s usage as unavailable",
+	async (stopReason) => {
+		const h = await harness();
+		await h.emit("turn_end", {
+			message: {
+				role: "assistant",
+				stopReason,
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			},
+		});
+		const r = await h.report();
+		expect(r.providerUsage.totalTokens.value).toBeNull();
+		expect(r.providerUsage.costTotal.value).toBeNull();
+		expect(r.providerUsage.cacheRead.value).toBeNull();
+	},
+);

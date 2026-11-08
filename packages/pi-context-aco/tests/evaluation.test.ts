@@ -7,6 +7,63 @@ import {
 } from "../extensions/evaluation.ts";
 
 describe("honest comparative accounting", () => {
+	it.each(["failed", "cancelled"])(
+		"keeps zero-usage %s child results unknown",
+		(status) => {
+			const e = {
+				type: "custom",
+				customType: "aco-delegation-result",
+				data: {
+					id: "child",
+					status,
+					budgetVerified: false,
+					providerUsage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							total: 0,
+						},
+					},
+				},
+			} as unknown as SessionEntry;
+			expect(branchAccounting([e]).byOwner.child.totalTokens).toBeNull();
+			expect(branchAccounting([e]).total.costTotal).toBeNull();
+		},
+	);
+	it.each(["error", "aborted"])(
+		"does not turn failed normalized-zero %s replies into measured usage",
+		(stopReason) => {
+			const usage = {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			};
+			const entry = {
+				type: "message",
+				message: { role: "assistant", stopReason, usage },
+			} as unknown as SessionEntry;
+			const r = branchAccounting([entry]);
+			expect(r.total.totalTokens).toBeNull();
+			expect(r.total.costTotal).toBeNull();
+			expect(r.total.cacheRead).toBeNull();
+			expect(r.gaps).toContain("parent[0].totalTokens");
+			const success = {
+				type: "message",
+				message: { role: "assistant", stopReason: "stop", usage },
+			} as unknown as SessionEntry;
+			expect(branchAccounting([success]).total.totalTokens).toBe(0);
+		},
+	);
 	it("keeps missing metrics unknown and separates parent/child/management", () => {
 		const reported = {
 			input: 10,

@@ -3,7 +3,15 @@ import { spawn } from "node:child_process";
 import { setTimeout as pause } from "node:timers/promises";
 
 /** Test-only client: isolated callers supply cwd, environment and extension paths. */
-export function startPi({ cwd, env, extensions, args = [], persist = false }) {
+export function startPi({
+	cwd,
+	env,
+	extensions,
+	args = [],
+	persist = false,
+	commandTimeoutMs = 20000,
+	onEvent,
+}) {
 	const events = [];
 	let output = "",
 		stderr = "",
@@ -51,7 +59,13 @@ export function startPi({ cwd, env, extensions, args = [], persist = false }) {
 			const line = output.slice(0, end);
 			output = output.slice(end + 1);
 			try {
-				events.push(JSON.parse(line));
+				const event = JSON.parse(line);
+				events.push(event);
+				try {
+					onEvent?.(event);
+				} catch (error) {
+					failure = error;
+				}
 			} catch {}
 		}
 	});
@@ -73,6 +87,7 @@ export function startPi({ cwd, env, extensions, args = [], persist = false }) {
 			() =>
 				events.some((event) => event.type === "response" && event.id === key),
 			type,
+			commandTimeoutMs ?? Infinity,
 		);
 		const response = events.find(
 			(event) => event.type === "response" && event.id === key,

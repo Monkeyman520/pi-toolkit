@@ -66,13 +66,22 @@ export function accountUsage(samples: UsageSample[]) {
 			"Provider-reported usage on active branch; input is new input, cache counters separate. Totals assume compatible provider currency/tariffs; no conversion. Currency, tariffs and hidden third-party activity are not independently verified.",
 	};
 }
+/** Failed/aborted SDK default zero is not a measured zero-token request. */
+export function assistantUsage<
+	T extends { stopReason?: unknown; usage?: unknown },
+>(message: T): T["usage"] | undefined {
+	return (message.stopReason === "error" || message.stopReason === "aborted") &&
+		object(message.usage).totalTokens === 0
+		? undefined
+		: message.usage;
+}
 export function branchAccounting(branch: readonly SessionEntry[]) {
 	const samples: UsageSample[] = [];
 	const intents = new Set<string>(),
 		results = new Set<string>();
 	for (const e of branch) {
 		if (e.type === "message" && e.message.role === "assistant") {
-			samples.push({ owner: "parent", usage: e.message.usage });
+			samples.push({ owner: "parent", usage: assistantUsage(e.message) });
 		} else if (
 			e.type === "message" &&
 			e.message.role === "toolResult" &&
@@ -99,12 +108,17 @@ export function branchAccounting(branch: readonly SessionEntry[]) {
 				results.add(data.id);
 				samples.push({
 					owner: "child",
-					usage: data.providerUsage ?? {
-						totalTokens: data.tokens,
-						cacheRead: data.cacheRead,
-						cacheWrite: data.cacheWrite,
-						cost: { total: data.cost },
-					},
+					usage: assistantUsage({
+						stopReason: ["failed", "cancelled"].includes(String(data.status))
+							? "error"
+							: undefined,
+						usage: data.providerUsage ?? {
+							totalTokens: data.tokens,
+							cacheRead: data.cacheRead,
+							cacheWrite: data.cacheWrite,
+							cost: { total: data.cost },
+						},
+					}),
 				});
 			}
 		}

@@ -1,6 +1,19 @@
 import { appendFileSync } from "node:fs";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 export default function fixture(pi) {
+	let failures = 0;
+	let positivePartial = false;
+	pi.registerCommand("evidence-partial", {
+		handler: async () => {
+			failures = 1;
+			positivePartial = true;
+		},
+	});
+	pi.registerCommand("evidence-failures", {
+		handler: async (args) => {
+			failures = Number(args);
+		},
+	});
 	pi.registerCommand("evidence-probe", {
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
@@ -98,6 +111,43 @@ export default function fixture(pi) {
 			};
 			const stream = createAssistantMessageEventStream();
 			queueMicrotask(() => {
+				if (failures > 0) {
+					failures--;
+					const error = {
+						...message,
+						content: [],
+						stopReason: "error",
+						errorMessage: positivePartial
+							? "stream stalled: controlled positive partial usage"
+							: "503 controlled transient failure",
+						// Reproduce the SDK zero-default shape when a failed request has no usage metadata.
+						usage: positivePartial
+							? {
+									...message.usage,
+									input: 96702,
+									output: 151,
+									totalTokens: 96853,
+								}
+							: {
+									input: 0,
+									output: 0,
+									cacheRead: 0,
+									cacheWrite: 0,
+									totalTokens: 0,
+									cost: {
+										input: 0,
+										output: 0,
+										cacheRead: 0,
+										cacheWrite: 0,
+										total: 0,
+									},
+								},
+					};
+					positivePartial = false;
+					stream.push({ type: "error", reason: "error", error });
+					stream.end(error);
+					return;
+				}
 				stream.push({ type: "done", reason, message });
 				stream.end(message);
 			});

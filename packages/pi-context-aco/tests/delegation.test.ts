@@ -76,6 +76,7 @@ async function fixture() {
 		},
 		model: { id: "test", provider: "fixture", maxTokens: 1000 },
 		modelRegistry: {
+			getProvider: () => ({}),
 			streamSimple: (_m: unknown, context: unknown) => {
 				calls++;
 				expect(JSON.stringify(context)).not.toContain("PARENT_SECRET");
@@ -137,6 +138,179 @@ async function fixture() {
 	};
 }
 describe("authorized bounded delegation", () => {
+	it.each(["error", "aborted"] as const)(
+		"refuses an unfinished %s parent even with positive partial usage",
+		async (stopReason) => {
+			const f = await fixture();
+			f.grant();
+			f.branch.push({
+				type: "message",
+				id: "partial-positive",
+				parentId: null,
+				timestamp: new Date(1).toISOString(),
+				message: {
+					role: "assistant",
+					api: "google-generative-ai",
+					provider: "fixture",
+					model: "test",
+					timestamp: 1,
+					stopReason,
+					content: [],
+					usage: {
+						input: 96702,
+						output: 151,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 96853,
+						cost: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							total: 0,
+						},
+					},
+				},
+			} as SessionEntry);
+			await expect(f.d.run(f.ctx, { tasks: [f.contract] })).rejects.toThrow(
+				/Parent token usage unknown/,
+			);
+			expect(f.calls()).toBe(0);
+			expect(f.d.report(f.ctx).reservedTokens).toBe(0);
+			expect(
+				f.branch.filter(
+					(e) =>
+						e.type === "custom" && e.customType === "aco-delegation-intent",
+				),
+			).toHaveLength(0);
+		},
+	);
+	it("reconstructs legacy zero-usage failures as unknown without rewriting their records", async () => {
+		const f = await fixture();
+		f.grant();
+		await f.d.run(f.ctx, { tasks: [f.contract] });
+		const e = f.branch.find(
+			(e) => e.type === "custom" && e.customType === "aco-delegation-result",
+		);
+		if (e?.type !== "custom" || !e.data || typeof e.data !== "object")
+			throw Error("Missing result");
+		Object.assign(e.data, {
+			status: "failed",
+			budgetVerified: true,
+			tokens: 0,
+			cost: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			providerUsage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		});
+		Object.freeze(e.data);
+		expect(f.d.report(f.ctx).outcomes[0].tokens).toBeNull();
+		expect(f.d.report(f.ctx).outcomes[0].budgetVerified).toBe(false);
+		await expect(
+			f.d.run(f.ctx, { tasks: [{ ...f.contract, taskId: "other" }] }),
+		).rejects.toThrow(/unknown/);
+		expect(f.calls()).toBe(1);
+		expect((e.data as { tokens: number }).tokens).toBe(0);
+	});
+	it.each(["error", "aborted", "stop"])(
+		"retains unknown usage and reservations for a zero-usage unsuccessful %s child",
+		async (stopReason) => {
+			const f = await fixture();
+			f.grant();
+			Object.assign(f.ctx.modelRegistry, {
+				streamSimple: () => ({
+					result: async () => ({
+						role: "assistant",
+						content: [],
+						stopReason,
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: {
+								input: 0,
+								output: 0,
+								cacheRead: 0,
+								cacheWrite: 0,
+								total: 0,
+							},
+						},
+					}),
+				}),
+			});
+			await f.d.run(f.ctx, { tasks: [f.contract] });
+			const o = f.d.report(f.ctx).outcomes[0];
+			expect(o.status).toBe("failed");
+			expect(o.tokens).toBeNull();
+			expect(o.cost).toBeNull();
+			expect(o.cacheRead).toBeNull();
+			expect(o.cacheWrite).toBeNull();
+			expect(o.budgetVerified).toBe(false);
+			expect(f.d.report(f.ctx).reservedTokens).toBeGreaterThan(0);
+		},
+	);
+	it.each(["error", "aborted"])(
+		"refuses SDK-normalized zero parent usage after %s before reservation",
+		async (stopReason) => {
+			const f = await fixture();
+			f.grant();
+			f.branch.push({
+				type: "message",
+				id: "failed-parent",
+				message: {
+					role: "assistant",
+					content: [],
+					stopReason,
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							total: 0,
+						},
+					},
+				},
+			} as unknown as SessionEntry);
+			expect(() => parentUsage(f.branch)).toThrow(/Parent token usage unknown/);
+			await expect(f.d.run(f.ctx, { tasks: [f.contract] })).rejects.toThrow(
+				/Parent token usage unknown/,
+			);
+			expect(f.calls()).toBe(0);
+			expect(f.d.report(f.ctx).reservedTokens).toBe(0);
+			expect(
+				f.branch.some(
+					(e) =>
+						e.type === "custom" && e.customType === "aco-delegation-intent",
+				),
+			).toBe(false);
+		},
+	);
+	it("a present stream API without a registered provider reserves and launches nothing", async () => {
+		const f = await fixture();
+		f.grant();
+		Object.assign(f.ctx.modelRegistry, { getProvider: () => undefined });
+		expect((await f.d.run(f.ctx, { tasks: [f.contract] })).status).toBe(
+			"recommendation",
+		);
+		expect(f.calls()).toBe(0);
+		expect(f.d.report(f.ctx).reservedTokens).toBe(0);
+		expect(f.d.report(f.ctx).outcomes).toEqual([]);
+	});
 	it("never dispatches from V1 or without noninteractive authority", async () => {
 		const f = await fixture();
 		expect((await f.d.run(f.ctx, { tasks: [f.contract] })).status).toBe(

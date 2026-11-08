@@ -10,7 +10,10 @@ import { Continuity } from "../extensions/continuity.ts";
 import {
 	createRestoreBoundaryDrafts,
 	evaluatePruneCandidates,
+	legalMessages,
+	previewEdits,
 	reconcileBranchPrunes,
+	restoreRequestContext,
 } from "../extensions/prune.ts";
 import { buildTasks, linkCheckpoints } from "../extensions/tasks.ts";
 
@@ -178,3 +181,57 @@ test("restoring an omitted tool result restores its verified call in the same pr
 	expect(result.error).toBeUndefined();
 	expect(result.restoredTargetIds.sort()).toEqual(["a1", "r1"]);
 });
+
+test.each(["r1", "a1"])(
+	"explicit request restoration repairs partial %s omission without dropping peer messages",
+	async (targetId) => {
+		const h = await setup();
+		const checkpoints = await h.service.getActiveCheckpoints(h.ctx);
+		h.branch.push({
+			...h.base("omit-one", h.branch.at(-1)?.id ?? null),
+			type: "context_edit",
+			targetId,
+			replacement: null,
+		});
+		const peer = { role: "user", content: "peer context", timestamp: 2 };
+		// Repeated terminal assistant messages must not push a recovered result past its tool call.
+		h.branch.push(
+			...["later-a", "later-b"].map(
+				(id) =>
+					({
+						...h.base(id, h.branch.at(-1)?.id ?? null),
+						type: "message",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: "same completion" }],
+							timestamp: 3,
+						},
+					}) as SessionEntry,
+			),
+		);
+		h.branch.push({
+			...h.base("future", h.branch.at(-1)?.id ?? null),
+			type: "message",
+			message: {
+				role: "user",
+				content: "unique future question",
+				timestamp: 4,
+			},
+		} as SessionEntry);
+		const messages = [peer, ...previewEdits(h.branch, [])];
+		expect(legalMessages(messages)).toBe(false);
+		const recovered = await restoreRequestContext(
+			messages,
+			h.branch,
+			checkpoints,
+			[targetId],
+		);
+		expect(legalMessages(recovered)).toBe(true);
+		expect(recovered[0]).toBe(peer);
+		expect(JSON.stringify(recovered)).toContain("historical 0x42");
+		expect(h.branch.filter((e) => e.type === "context_edit")).toHaveLength(1);
+		await expect(
+			restoreRequestContext(messages, h.branch, [], [targetId]),
+		).rejects.toThrow(/verified/);
+	},
+);

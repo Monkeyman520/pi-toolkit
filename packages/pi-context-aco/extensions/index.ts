@@ -12,7 +12,7 @@ import { Compactor } from "./compaction.ts";
 import { Config, settingKey } from "./config.ts";
 import { Continuity, recallSchema } from "./continuity.ts";
 import { Delegator } from "./delegation.ts";
-import { branchAccounting } from "./evaluation.ts";
+import { assistantUsage, branchAccounting } from "./evaluation.ts";
 import { type Decision, decide } from "./policy.ts";
 import {
 	type Metric,
@@ -28,9 +28,11 @@ import {
 	createRestoreBoundaryDrafts,
 	evaluatePruneCandidates,
 	latestEdits,
+	legalMessages,
 	type PruneExecutionOutcome,
 	projectRequestContext,
 	reconcileBranchPrunes,
+	restoreRequestContext,
 } from "./prune.ts";
 import { type Recommendation, recommend } from "./recommend.ts";
 import {
@@ -59,7 +61,10 @@ function reported(value: unknown): Metric {
 }
 function providerUsage(message: unknown) {
 	const m = object(message),
-		u = m.role === "assistant" ? object(m.usage) : {},
+		u =
+			m.role === "assistant"
+				? object(assistantUsage({ stopReason: m.stopReason, usage: m.usage }))
+				: {},
 		cost = object(u.cost);
 	return {
 		input: reported(u.input),
@@ -358,6 +363,54 @@ export default function contextMonitor(
 		linkCheckpoints(s.tasks, checkpoints);
 		return checkpoints;
 	}
+	async function ensurePartialRequest(s: State, ctx: ExtensionContext) {
+		const branch = ctx.sessionManager.getBranch();
+		if (!reconcileActions(branch).some((a) => !a.success)) return;
+		const messages = ctx.sessionManager.buildSessionProjection().messages;
+		if (legalMessages(messages)) return;
+		if (
+			!s.config.settings.enabled ||
+			s.config.settings.mode !== "exact-prune" ||
+			!s.pendingRestores.length
+		)
+			throw Error(
+				"Select exact-prune mode and schedule /aco restore all, or use native tree recovery",
+			);
+		await restoreRequestContext(
+			messages,
+			branch,
+			await verifiedRecovery(s, ctx),
+			s.pendingRestores,
+		);
+	}
+	pi.on("input", async (_event, ctx) => {
+		const s = active;
+		if (!s) return;
+		try {
+			await ensurePartialRequest(s, ctx);
+		} catch (error) {
+			ctx.ui.notify(
+				"ACO partial action blocks this request; restore required: " +
+					String(error),
+				"error",
+			);
+			return { action: "handled" as const };
+		}
+	});
+	pi.on("before_agent_start", async (_event, ctx) => {
+		const s = active;
+		if (!s) return;
+		try {
+			await ensurePartialRequest(s, ctx);
+		} catch (error) {
+			ctx.abort();
+			ctx.ui.notify(
+				"ACO partial action aborted this run; restore required: " +
+					String(error),
+				"error",
+			);
+		}
+	});
 	function syncHooks(s: State) {
 		if (s.config.settings.enabled && s.config.settings.mode === "exact-prune") {
 			if (!s.contextUnlisten)
@@ -369,7 +422,17 @@ export default function contextMonitor(
 					)
 						return;
 					try {
-						if (s.pendingRestores.length) return;
+						if (s.pendingRestores.length) {
+							const checkpoints = await verifiedRecovery(s, ctx);
+							return {
+								messages: (await restoreRequestContext(
+									event.messages as unknown as AgentMessage[],
+									ctx.sessionManager.getBranch(),
+									checkpoints,
+									s.pendingRestores,
+								)) as unknown as typeof event.messages,
+							};
+						}
 						const checkpoints = await verifiedRecovery(s, ctx);
 						const branch = ctx.sessionManager.getBranch();
 						if (reconcileActions(branch).some((a) => !a.success)) return;
@@ -401,7 +464,14 @@ export default function contextMonitor(
 									projection.messages as unknown as typeof event.messages,
 							};
 						}
-					} catch {
+					} catch (error) {
+						if (s.pendingRestores.length) {
+							ctx.abort();
+							ctx.ui.notify(
+								"ACO request restoration failed: " + String(error),
+								"error",
+							);
+						}
 						return;
 					}
 				});

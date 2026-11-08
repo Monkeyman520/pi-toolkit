@@ -186,6 +186,16 @@ try {
 			})}`,
 		);
 	await grant("semantic", [resultId]);
+	await command("/aco config maxCompactInputTokens 1");
+	await command(localRequest);
+	assert.match(notice().message, /budget/);
+	assert.ok(
+		!(await query("/evidence-probe")).branch.some(
+			(e) => e.type === "context_edit",
+		),
+	);
+	await command("/aco config maxCompactInputTokens 64000");
+	await grant("semantic", [resultId]);
 	await command(
 		`/aco summarize ${JSON.stringify({ sourceEntryIds: [resultId], summary: "Plausible but unsupported paraphrase" })}`,
 	);
@@ -235,6 +245,16 @@ try {
 	await query(`/aco checkpoint ${JSON.stringify({ sourceEntryIds: allIds })}`);
 	await grant("native", allIds);
 	const preNative = (await query("/evidence-probe")).leaf;
+	await command("/aco config maxCompactInputTokens 1");
+	await command("/aco compact");
+	assert.match(notice().message, /budget/);
+	assert.ok(
+		!(await query("/evidence-probe")).branch.some(
+			(e) => e.type === "compaction",
+		),
+	);
+	await command("/aco config maxCompactInputTokens 64000");
+	await grant("native", (await query("/evidence-probe")).projectionSourceIds);
 	const providerRequestsBeforeNative = (await jsonLines(requests)).length;
 	const requested = await query("/aco compact");
 	assert.ok(

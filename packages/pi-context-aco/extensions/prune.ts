@@ -477,3 +477,72 @@ export function reconcileBranchPrunes(
 		),
 	};
 }
+
+/** Exact request-local repair only after an explicit restore was scheduled; no durable replay. */
+export async function restoreRequestContext(
+	messages: { role: string; content?: unknown }[],
+	branch: readonly SessionEntry[],
+	checkpoints: readonly VerifiedCheckpoint[],
+	roots: readonly string[],
+): Promise<{ role: string; content?: unknown }[]> {
+	if (legalMessages(messages)) return messages;
+	let drafts: SessionBoundaryDraft[] = [];
+	for (const root of roots) {
+		const restore = await createRestoreBoundaryDrafts(
+			root,
+			branch,
+			checkpoints,
+			drafts,
+		);
+		if (restore.error) throw Error(restore.error);
+		drafts = restore.drafts;
+	}
+	const recovered = previewEdits(branch, drafts);
+	const restored = [...messages];
+	const edits = latestEdits(branch);
+	const serialized = (m: unknown) => JSON.stringify(m);
+	for (const draft of drafts) {
+		if (draft.type !== "context_edit" || edits.get(draft.targetId) !== null)
+			continue;
+		const original = verifiedOriginal(
+			draft.targetId,
+			branch,
+			checkpoints,
+		)?.entry;
+		if (original?.type !== "message")
+			throw Error("No verified original for request restoration");
+		const value = serialized(original.message);
+		if (restored.some((m) => serialized(m) === value)) continue;
+		const positions = recovered.flatMap((m, i) =>
+			serialized(m) === value ? [i] : [],
+		);
+		if (positions.length !== 1) throw Error("Ambiguous restoration source");
+		const locate = (m: unknown) =>
+			restored.flatMap((candidate, i) =>
+				serialized(candidate) === serialized(m) ? [i] : [],
+			);
+		let insertion: number | undefined;
+		for (
+			let distance = 1;
+			distance < recovered.length && insertion === undefined;
+			distance++
+		) {
+			const next = recovered[positions[0] + distance];
+			const previous = recovered[positions[0] - distance];
+			if (next) {
+				const matches = locate(next);
+				if (matches.length === 1) insertion = matches[0];
+			}
+			if (insertion === undefined && previous) {
+				const matches = locate(previous);
+				if (matches.length === 1) insertion = matches[0] + 1;
+			}
+		}
+		if (insertion === undefined)
+			throw Error("No unambiguous request restoration anchor");
+		restored.splice(insertion, 0, original.message);
+	}
+	if (!legalMessages(restored))
+		throw Error("Request restoration cannot preserve legal tool relationships");
+	return restored;
+}
