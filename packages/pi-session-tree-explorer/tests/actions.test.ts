@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createActionRegistry } from "../extensions/actions.ts";
 import { buildDisplayProjection } from "../extensions/display.ts";
+import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
-import type {
-	ActionContext,
-	ExplorerState,
-	SessionEntry,
-} from "../extensions/types.ts";
+import type { ActionContext, SessionEntry } from "../extensions/types.ts";
 
 describe("Action Registry & Browsing Invariants", () => {
 	it("registers all 17 node actions, 13 branch actions, and session.close", () => {
@@ -57,7 +54,7 @@ describe("Action Registry & Browsing Invariants", () => {
 		}
 
 		expect(registry.has("session.close")).toBe(true);
-		expect(registry.size).toBe(31);
+		expect(registry.size).toBe(52);
 	});
 
 	it("executes actions updating ExplorerState in memory without mutating session entries", () => {
@@ -70,18 +67,18 @@ describe("Action Registry & Browsing Invariants", () => {
 		const rawSnapshot = JSON.stringify(entries);
 
 		const index = buildTreeIndex(entries);
-		const state: ExplorerState = {
-			sessionId: "test-sess",
+		const state = createInitialState("test-sess", {
 			selectedEntryId: "root",
 			sessionLeafId: "child2",
-			focusedBranchId: null,
 			focusedPathIds: new Set(["root", "child2"]),
-			mode: "normal",
-			searchQuery: "",
-			recentLeafByBranch: new Map(),
-			scrollOffset: 0,
-			version: 1,
-		};
+			foldOptions: {
+				mode: "all",
+				collapseInactiveBranches: false,
+				collapseLinearPaths: false,
+				rememberManualOverrides: false,
+				maxExpandDepth: 0,
+			},
+		});
 
 		const visibleNodes = buildDisplayProjection(index, state);
 		let closed = false;

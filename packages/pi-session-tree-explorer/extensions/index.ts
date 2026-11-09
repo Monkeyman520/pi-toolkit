@@ -3,12 +3,23 @@ import type {
 	ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { createActionRegistry } from "./actions.ts";
+import { createInitialState } from "./state.ts";
+
+export { createInitialState } from "./state.ts";
+
 import { buildTreeIndex } from "./tree-index.ts";
 import { SessionTreeComponent } from "./tui.ts";
-import type { ExplorerResult, ExplorerState, SessionEntry } from "./types.ts";
+import type { ExplorerResult, SessionEntry } from "./types.ts";
 
-export { createActionRegistry } from "./actions.ts";
-export { buildDisplayProjection } from "./display.ts";
+export { createActionRegistry, getDefaultKeybindings } from "./actions.ts";
+export {
+	buildDisplayProjection,
+	defaultDisplayOptions,
+	defaultFoldOptions,
+	isNodeCollapsed,
+	isNodeVisible,
+} from "./display.ts";
+export { KeyResolver, validateKeymap } from "./keymap.ts";
 export * from "./navigation.ts";
 export { buildTreeIndex } from "./tree-index.ts";
 export { SessionTreeComponent } from "./tui.ts";
@@ -51,18 +62,11 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 						? index.preorderIds[0]
 						: null;
 
-			const state: ExplorerState = {
-				sessionId,
+			const state = createInitialState(sessionId, {
 				selectedEntryId: initialSelection,
 				sessionLeafId: currentLeafId,
-				focusedBranchId: null,
 				focusedPathIds,
-				mode: "normal",
-				searchQuery: "",
-				recentLeafByBranch: new Map<string, string>(),
-				scrollOffset: 0,
-				version: 1,
-			};
+			});
 
 			const registry = createActionRegistry();
 
@@ -79,8 +83,7 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 				},
 			);
 
-			// In T0001, only safe read-only browsing and close are executed.
-			// No session leaf or file mutation occurs.
+			// Only safe read-only browsing and close in T0001/T0002
 			if (result && result.type === "close") {
 				// Pure close, no-op
 			}

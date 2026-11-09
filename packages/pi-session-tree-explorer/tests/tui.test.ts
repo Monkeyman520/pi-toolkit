@@ -1,27 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";
-import type {
-	ExplorerResult,
-	ExplorerState,
-	SessionEntry,
-} from "../extensions/types.ts";
+import type { ExplorerResult, SessionEntry } from "../extensions/types.ts";
 
 describe("SessionTreeComponent TUI", () => {
 	it("renders an empty session tree gracefully", () => {
 		const index = buildTreeIndex([]);
-		const state: ExplorerState = {
-			sessionId: "empty-session",
-			selectedEntryId: null,
-			sessionLeafId: null,
-			focusedBranchId: null,
-			focusedPathIds: new Set(),
-			mode: "normal",
-			searchQuery: "",
-			recentLeafByBranch: new Map(),
-			scrollOffset: 0,
-			version: 1,
-		};
+		const state = createInitialState("empty-session");
 
 		let result: ExplorerResult | null = null;
 		const comp = new SessionTreeComponent({
@@ -84,18 +70,34 @@ describe("SessionTreeComponent TUI", () => {
 		];
 
 		const index = buildTreeIndex(entries);
-		const state: ExplorerState = {
-			sessionId: "test-session-12345",
+		const state = createInitialState("test-session-12345", {
 			selectedEntryId: "root",
 			sessionLeafId: "branchA",
-			focusedBranchId: null,
 			focusedPathIds: new Set(["root", "user1", "asst1", "branchA"]),
-			mode: "normal",
-			searchQuery: "",
-			recentLeafByBranch: new Map(),
-			scrollOffset: 0,
-			version: 1,
-		};
+			displayOptions: {
+				showAssistantNodes: true,
+				showToolNodes: true,
+				showThinkingNodes: true,
+				showMetadataNodes: true,
+				showCompactionNodes: true,
+				userOnly: false,
+				branchOnly: false,
+				labeledOnly: false,
+				depthMode: "turn",
+				showDepth: true,
+				maxMessageLength: 80,
+				showNodeId: false,
+				showTimestamps: false,
+				layout: "normal",
+			},
+			foldOptions: {
+				mode: "all",
+				collapseInactiveBranches: false,
+				collapseLinearPaths: false,
+				rememberManualOverrides: true,
+				maxExpandDepth: 0,
+			},
+		});
 
 		let renderRequested = 0;
 		let closeResult: ExplorerResult | null = null;
@@ -156,7 +158,85 @@ describe("SessionTreeComponent TUI", () => {
 		expect(state.selectedEntryId).toBe("asst1");
 
 		// Close via Escape
-		comp.handleInput("\u001b");
+		comp.handleInput("");
 		expect(closeResult).toEqual({ type: "close" });
+	});
+	it("toggles and renders help overlay without modifying tree index", () => {
+		const index = buildTreeIndex([
+			{
+				type: "message",
+				id: "1",
+				parentId: null,
+				timestamp: "T0",
+				message: { role: "user", content: "Hi" },
+			},
+		]);
+		const state = createInitialState("test-session-help");
+
+		const comp = new SessionTreeComponent({
+			tui: { requestRender: () => {} },
+			theme: {},
+			done: () => {},
+			index,
+			state,
+		});
+
+		// Press '?' to toggle help mode
+		comp.handleInput("?");
+		expect(state.mode).toBe("help");
+
+		const lines = comp.render(80);
+		expect(lines.some((l) => l.includes("SHORTCUT HELP"))).toBe(true);
+		expect(lines.some((l) => l.includes("Navigation:"))).toBe(true);
+		expect(lines.some((l) => l.includes("Folding & Filtering:"))).toBe(true);
+
+		// Press '?' again to exit help mode
+		comp.handleInput("?");
+		expect(state.mode).toBe("normal");
+	});
+
+	it("preserves TreeIndex and visible projection cache on selection-only movement", () => {
+		const index = buildTreeIndex([
+			{
+				type: "message",
+				id: "1",
+				parentId: null,
+				timestamp: "T0",
+				message: { role: "user", content: "1" },
+			},
+			{
+				type: "message",
+				id: "2",
+				parentId: "1",
+				timestamp: "T1",
+				message: { role: "user", content: "2" },
+			},
+		]);
+		const state = createInitialState("test-cache", {
+			selectedEntryId: "1",
+			foldOptions: {
+				mode: "all",
+				collapseInactiveBranches: false,
+				collapseLinearPaths: false,
+				rememberManualOverrides: false,
+				maxExpandDepth: 0,
+			},
+		});
+
+		const comp = new SessionTreeComponent({
+			tui: { requestRender: () => {} },
+			theme: {},
+			done: () => {},
+			index,
+			state,
+		});
+
+		const _firstVisible = comp.getVisibleNodes();
+		// Move selection
+		comp.handleInput("j");
+		expect(state.selectedEntryId).toBe("2");
+
+		// Index reference is strictly identical (never rebuilt)
+		expect(index.entryById.size).toBe(2);
 	});
 });

@@ -1,11 +1,7 @@
-import {
-	Key,
-	matchesKey,
-	truncateToWidth,
-	visibleWidth,
-} from "@earendil-works/pi-tui";
-import { createActionRegistry } from "./actions.ts";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { createActionRegistry, getDefaultKeybindings } from "./actions.ts";
 import { buildDisplayProjection } from "./display.ts";
+import { KeyResolver } from "./keymap.ts";
 import type {
 	ActionContext,
 	ActionDefinition,
@@ -22,6 +18,7 @@ export interface SessionTreeComponentOptions {
 	index: TreeIndex;
 	state: ExplorerState;
 	registry?: Map<string, ActionDefinition>;
+	keybindings?: Record<string, string[]>;
 	pageSize?: number;
 }
 
@@ -31,9 +28,10 @@ export class SessionTreeComponent {
 	private index: TreeIndex;
 	private state: ExplorerState;
 	private registry: Map<string, ActionDefinition>;
+	private keyResolver: KeyResolver;
 	private pageSize: number;
-	private keyBuffer = "";
-	private keyTimeout: NodeJS.Timeout | null = null;
+	private cachedVisibleNodes: DisplayNode[] | null = null;
+	private cachedVersion = -1;
 
 	constructor(options: SessionTreeComponentOptions) {
 		this.tui = options.tui;
@@ -42,22 +40,73 @@ export class SessionTreeComponent {
 		this.state = options.state;
 		this.registry = options.registry ?? createActionRegistry();
 		this.pageSize = options.pageSize ?? 16;
+
+		const bindings = options.keybindings ?? getDefaultKeybindings();
+		this.keyResolver = new KeyResolver({
+			bindings,
+			vimMode: this.state.vimMode,
+		});
 	}
 
 	public invalidate(): void {
+		this.cachedVisibleNodes = null;
 		this.tui.requestRender();
 	}
 
 	public getVisibleNodes(): DisplayNode[] {
-		return buildDisplayProjection(this.index, this.state);
+		if (
+			this.cachedVisibleNodes === null ||
+			this.cachedVersion !== this.state.version
+		) {
+			this.cachedVisibleNodes = buildDisplayProjection(this.index, this.state);
+			this.cachedVersion = this.state.version;
+		}
+		return this.cachedVisibleNodes;
 	}
 
 	public render(width: number): string[] {
 		const lines: string[] = [];
 		const safeWidth = Math.max(40, width);
+
+		// 1. Help View Overlay
+		if (this.state.mode === "help") {
+			lines.push(
+				truncateToWidth("SESSION TREE EXPLORER - SHORTCUT HELP", safeWidth),
+			);
+			lines.push("─".repeat(safeWidth));
+			lines.push("Navigation:");
+			lines.push("  j / Down       Next visible node");
+			lines.push("  k / Up         Previous visible node");
+			lines.push("  H              Logical parent node");
+			lines.push("  L              Logical first child");
+			lines.push("  ]b / [b        Next / previous sibling branch");
+			lines.push("  gp / gb / ge   Branch parent / root / leaf");
+			lines.push("  ]f / [f        Next / previous fork point");
+			lines.push("  gg / G         Root / last visible node");
+			lines.push("  Tab            Current session leaf");
+			lines.push("");
+			lines.push("Folding & Filtering:");
+			lines.push("  Space / Enter  Toggle folding of selected node");
+			lines.push("  l / h          Expand / collapse selected node");
+			lines.push("  zR / zM        Expand all / collapse all");
+			lines.push(
+				"  za / zs / zc   Active only / focused only / collapse siblings",
+			);
+			lines.push(
+				"  z+ / z- / zr   Increase / decrease depth / restore defaults",
+			);
+			lines.push("");
+			lines.push("Controls:");
+			lines.push("  ?              Close help");
+			lines.push("  q / Esc        Close explorer");
+			lines.push("─".repeat(safeWidth));
+			lines.push("Press '?' or 'q' to return to tree view.");
+			return lines;
+		}
+
 		const visibleNodes = this.getVisibleNodes();
 
-		// Ensure valid selection
+		// Selection guard
 		if (
 			visibleNodes.length > 0 &&
 			(!this.state.selectedEntryId ||
@@ -66,11 +115,12 @@ export class SessionTreeComponent {
 			this.state.selectedEntryId = visibleNodes[0].id;
 		}
 
-		// 1. Header
+		// 2. Header
 		const entryCount = this.index.entryById.size;
 		const forkCount = this.index.forkPointIds.size;
 		const sessionDisplay = this.state.sessionId.slice(0, 16);
-		const headerLeft = "SESSION TREE EXPLORER [NORMAL]";
+		const vimTag = this.state.vimMode ? "NORMAL" : "NON-VIM";
+		const headerLeft = `SESSION TREE EXPLORER [${vimTag}]`;
 		const headerRight = `Session: ${sessionDisplay}  Entries: ${entryCount}  Forks: ${forkCount}`;
 		const padLen = Math.max(
 			2,
@@ -84,15 +134,21 @@ export class SessionTreeComponent {
 		);
 		lines.push("─".repeat(safeWidth));
 
-		// 2. Tree content viewport
-		if (visibleNodes.length === 0) {
+		// 3. Tree Content Viewport
+		if (this.index.entryById.size === 0) {
 			lines.push("  (empty session tree)");
 			lines.push("─".repeat(safeWidth));
 			lines.push("Press 'q' to close.");
 			return lines;
 		}
 
-		// Scroll calculation
+		if (visibleNodes.length === 0) {
+			lines.push("  (no matching visible entries - check filter settings)");
+			lines.push("─".repeat(safeWidth));
+			lines.push("Press '?' for help, 'q' to close.");
+			return lines;
+		}
+
 		const selectedIndex = visibleNodes.findIndex(
 			(n) => n.id === this.state.selectedEntryId,
 		);
@@ -111,10 +167,14 @@ export class SessionTreeComponent {
 			const isCurrent = node.id === this.state.sessionLeafId;
 
 			let marker = "◇";
-			if (this.index.rootIds.includes(node.id)) {
+			if (node.isVirtualSummary) {
+				marker = "▸";
+			} else if (this.index.rootIds.includes(node.id)) {
 				marker = "●";
 			} else if (isCurrent) {
 				marker = "◉";
+			} else if (node.isCollapsed) {
+				marker = "▸";
 			} else if (node.isFork) {
 				marker = "▾";
 			}
@@ -124,7 +184,6 @@ export class SessionTreeComponent {
 			const depthStr = `D${node.turnDepth}`;
 			const labelTag = node.label ? ` [${node.label}]` : "";
 
-			// Assemble row
 			const prefix = `${selPrefix}${indent}${marker} `;
 			const suffix = `  ${depthStr}`;
 			const availableTextWidth = Math.max(
@@ -145,11 +204,13 @@ export class SessionTreeComponent {
 
 		lines.push("─".repeat(safeWidth));
 
-		// 3. Selection detail panel
+		// 4. Details Panel
 		const selectedNode = visibleNodes[Math.max(selectedIndex, 0)];
 		if (selectedNode) {
 			const detailLine1 = `Selected: ${selectedNode.summaryText}`;
-			const detailLine2 = `ID: ${selectedNode.id}  RawDepth: ${selectedNode.rawDepth}  Turn: ${selectedNode.turnDepth}  BranchDepth: ${selectedNode.branchDepth}`;
+			const detailLine2 = selectedNode.isVirtualSummary
+				? `Virtual Branch Summary  Descendants: ${selectedNode.virtualDescendantCount ?? 0}  Forks: ${selectedNode.virtualForkCount ?? 0}`
+				: `ID: ${selectedNode.id}  RawDepth: ${selectedNode.rawDepth}  Turn: ${selectedNode.turnDepth}  BranchDepth: ${selectedNode.branchDepth}`;
 			lines.push(truncateToWidth(detailLine1, safeWidth));
 			lines.push(truncateToWidth(detailLine2, safeWidth));
 		} else {
@@ -157,10 +218,10 @@ export class SessionTreeComponent {
 			lines.push("");
 		}
 
-		// 4. Footer key hints
+		// 5. Footer Key Hints
 		lines.push("─".repeat(safeWidth));
 		const footer =
-			"j/k Move  H Parent  L Child  [b/]b Branch  gp Fork  gb Root  ge Leaf  q Close";
+			"j/k Move  H/L Parent/Child  [b/]b Branch  Space Fold  ? Help  q Close";
 		lines.push(truncateToWidth(footer, safeWidth));
 
 		return lines;
@@ -177,114 +238,38 @@ export class SessionTreeComponent {
 			visibleNodes,
 			close: () => this.done({ type: "close" }),
 			pageSize: this.pageSize,
+			reproject: () => {
+				this.cachedVisibleNodes = null;
+				this.cachedVersion = -1;
+			},
 		};
 
 		if (!action.enabled || action.enabled(this.state, this.index)) {
 			action.execute(ctx);
-			this.tui.requestRender();
+			this.invalidate();
 		}
 	}
 
 	public handleInput(data: string): void {
-		// Single-key immediate matches
-		if (matchesKey(data, Key.escape) || data === "q") {
-			this.dispatch("session.close");
-			return;
-		}
+		this.keyResolver.setVimMode(this.state.vimMode);
 
-		if (matchesKey(data, Key.down) || data === "j") {
-			this.dispatch("node.next");
-			return;
-		}
+		const result = this.keyResolver.handleInput(
+			data,
+			this.state.mode,
+			(actionId) => this.dispatch(actionId),
+		);
 
-		if (matchesKey(data, Key.up) || data === "k") {
-			this.dispatch("node.prev");
-			return;
-		}
-
-		if (data === "H") {
-			this.dispatch("node.parent");
-			return;
-		}
-
-		if (data === "L") {
-			this.dispatch("node.firstChild");
-			return;
-		}
-
-		if (data === "G") {
-			this.dispatch("node.last");
-			return;
-		}
-
-		if (matchesKey(data, Key.tab) || data === "\t") {
-			this.dispatch("node.current");
-			return;
-		}
-
-		// Multi-key handling
-		if (this.keyBuffer.length > 0) {
-			const seq = this.keyBuffer + data;
-			this.keyBuffer = "";
-			if (this.keyTimeout) {
-				clearTimeout(this.keyTimeout);
-				this.keyTimeout = null;
+		if (result.type === "action") {
+			this.dispatch(result.actionId);
+		} else if (result.type === "text") {
+			if (this.state.mode === "search") {
+				if (result.text === "\b") {
+					this.state.searchQuery = this.state.searchQuery.slice(0, -1);
+				} else {
+					this.state.searchQuery += result.text;
+				}
+				this.invalidate();
 			}
-
-			if (seq === "]b") {
-				this.dispatch("branch.next");
-			} else if (seq === "[b") {
-				this.dispatch("branch.prev");
-			} else if (seq === "gp") {
-				this.dispatch("branch.parent");
-			} else if (seq === "gb") {
-				this.dispatch("branch.root");
-			} else if (seq === "ge") {
-				this.dispatch("branch.leaf");
-			} else if (seq === "gg") {
-				this.dispatch("node.root");
-			} else if (seq === "gL") {
-				this.dispatch("node.lastChild");
-			} else if (seq === "gs") {
-				this.dispatch("node.firstSibling");
-			} else if (seq === "g[") {
-				this.dispatch("branch.first");
-			} else if (seq === "g]") {
-				this.dispatch("branch.last");
-			} else if (seq === "ga") {
-				this.dispatch("branch.active");
-			} else if (seq === "]s") {
-				this.dispatch("node.nextSibling");
-			} else if (seq === "[s") {
-				this.dispatch("node.prevSibling");
-			} else if (seq === "]f") {
-				this.dispatch("branch.nextFork");
-			} else if (seq === "[f") {
-				this.dispatch("branch.prevFork");
-			} else if (seq === "]m") {
-				this.dispatch("node.nextLabel");
-			} else if (seq === "[m") {
-				this.dispatch("node.prevLabel");
-			} else if (seq === "]u") {
-				this.dispatch("node.nextUser");
-			} else if (seq === "[u") {
-				this.dispatch("node.prevUser");
-			} else if (seq === "]l") {
-				this.dispatch("branch.nextLeaf");
-			} else if (seq === "[l") {
-				this.dispatch("branch.prevLeaf");
-			}
-			return;
-		}
-
-		// Prefix initiation
-		if (data === "]" || data === "[" || data === "g") {
-			this.keyBuffer = data;
-			this.keyTimeout = setTimeout(() => {
-				this.keyBuffer = "";
-				this.keyTimeout = null;
-			}, 800);
-			return;
 		}
 	}
 }

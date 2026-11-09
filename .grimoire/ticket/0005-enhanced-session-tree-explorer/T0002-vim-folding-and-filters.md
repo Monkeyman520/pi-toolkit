@@ -2,7 +2,7 @@
 
 **Ticket ID:** T0002
 **Source:** [Spec 0008](../../spec/0008-enhanced-session-tree-explorer.md) (R03-R06; help/Vim controls in R11; R14-R15; E01); sources U1/U2/U3 and repository/host contracts as cited there
-**Status:** Todo
+**Status:** Done
 
 ## Goal
 
@@ -24,16 +24,16 @@ Build on T0001's real navigation and Action registry. Keep filter projection sep
 
 ## Acceptance
 
-- [ ] All 11 fold and 8 filter Actions in R05 are implemented and reachable; all R04 node/branch Actions use the same registry through configured keys.
-- [ ] Hidden assistant chains reconnect to the nearest logical visible parent without modifying real parentId. Nested raw fork targets resolve correctly even when filtered or folded.
-- [ ] Focused-only defaults focus the active path; branch actions update focus while j/k alone does not refold. all/active-only/depth-limited/manual modes and manual overrides have behavior tests.
-- [ ] Search-overlay > manual > policy > default precedence is verified using injected reveal state. Removing it preserves underlying manual settings for T0004.
-- [ ] Virtual summaries expose anchor/count/fork metadata, expand on Enter and cannot be mistaken for a raw session target. Test linear-path display compression when enabled without losing raw identity/depth.
-- [ ] Type visibility and userOnly/branchOnly/labeledOnly intersect; necessary structural summaries remain. Impossible combinations show an empty state rather than relaxed filters.
-- [ ] Single, modifier, alternative, multi-key and prefix-ambiguous bindings work once per resolution. Duplicate/invalid/conflicting bindings are diagnosed; timeout and mode changes clear stale prefixes.
-- [ ] Search-mode j/k become query text; arrows/Ctrl+n/p select and Enter dispatches accept, not Navigate. Input contract tests can use a search-state fixture before T0004.
-- [ ] view.help shows effective keys/modes and unavailable actions; view.toggleVim supports non-Vim arrows. selection-only movement does not rebuild TreeIndex.
-- [ ] Pass typecheck, Biome, Vitest and an actual Pi TUI keyboard smoke for this slice; preserve browse-only session-file and leaf invariants.
+- [x] All 11 fold and 8 filter Actions in R05 are implemented and reachable; all R04 node/branch Actions use the same registry through configured keys.
+- [x] Hidden assistant chains reconnect to the nearest logical visible parent without modifying real parentId. Nested raw fork targets resolve correctly even when filtered or folded.
+- [x] Focused-only defaults focus the active path; branch actions update focus while j/k alone does not refold. all/active-only/depth-limited/manual modes and manual overrides have behavior tests.
+- [x] Search-overlay > manual > policy > default precedence is verified using injected reveal state. Removing it preserves underlying manual settings for T0004.
+- [x] Virtual summaries expose anchor/count/fork metadata, expand on Enter and cannot be mistaken for a raw session target. Test linear-path display compression when enabled without losing raw identity/depth.
+- [x] Type visibility and userOnly/branchOnly/labeledOnly intersect; necessary structural summaries remain. Impossible combinations show an empty state rather than relaxed filters.
+- [x] Single, modifier, alternative, multi-key and prefix-ambiguous bindings work once per resolution. Duplicate/invalid/conflicting bindings are diagnosed; timeout and mode changes clear stale prefixes.
+- [x] Search-mode j/k become query text; arrows/Ctrl+n/p select and Enter dispatches accept, not Navigate. Input contract tests can use a search-state fixture before T0004.
+- [x] view.help shows effective keys/modes and unavailable actions; view.toggleVim supports non-Vim arrows. selection-only movement does not rebuild TreeIndex.
+- [x] Pass typecheck, Biome, Vitest and an actual Pi TUI keyboard smoke for this slice; preserve browse-only session-file and leaf invariants.
 
 ## Out of Scope
 

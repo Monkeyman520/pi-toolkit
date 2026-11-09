@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildDisplayProjection } from "../extensions/display.ts";
+import {
+	buildDisplayProjection,
+	defaultDisplayOptions,
+	defaultFoldOptions,
+} from "../extensions/display.ts";
 import {
 	findNearestBranch,
 	getBranchLeaves,
@@ -35,23 +39,12 @@ import {
 	navNodeRoot,
 	resolveBranchLeaf,
 } from "../extensions/navigation.ts";
+import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import type { ExplorerState, SessionEntry } from "../extensions/types.ts";
 
 function createMockState(override: Partial<ExplorerState> = {}): ExplorerState {
-	return {
-		sessionId: "test-session",
-		selectedEntryId: null,
-		sessionLeafId: null,
-		focusedBranchId: null,
-		focusedPathIds: new Set<string>(),
-		mode: "normal",
-		searchQuery: "",
-		recentLeafByBranch: new Map<string, string>(),
-		scrollOffset: 0,
-		version: 1,
-		...override,
-	};
+	return createInitialState("test-session", override);
 }
 
 describe("Navigation & Branch Semantics", () => {
@@ -140,7 +133,18 @@ describe("Navigation & Branch Semantics", () => {
 			},
 		];
 		const index = buildTreeIndex(entries);
-		const state = createMockState({ selectedEntryId: "D1" });
+		const state = createMockState({
+			selectedEntryId: "D1",
+			displayOptions: {
+				...defaultDisplayOptions(),
+				showAssistantNodes: true,
+				showMetadataNodes: true,
+			},
+			foldOptions: {
+				...defaultFoldOptions(),
+				mode: "all",
+			},
+		});
 		const visibleNodes = buildDisplayProjection(index, state);
 		return { index, state, visibleNodes };
 	}
@@ -281,6 +285,13 @@ describe("Navigation & Branch Semantics", () => {
 		});
 
 		it("exercises branch.nextFork and branch.prevFork within current Root", () => {
+			// Root
+			// └─ Fork1
+			//    ├─ F1_Child1
+			//    │  └─ Fork2
+			//    │     ├─ LeafA
+			//    │     └─ LeafB
+			//    └─ F1_Child2
 			const entries: SessionEntry[] = [
 				{ type: "message", id: "Root", parentId: null, timestamp: "T0" },
 				{ type: "message", id: "Fork1", parentId: "Root", timestamp: "T1" },
@@ -318,6 +329,13 @@ describe("Navigation & Branch Semantics", () => {
 		});
 
 		it("exercises branch.nextLeaf and branch.prevLeaf within branch leaf set", () => {
+			// Fork
+			// ├─ Branch1
+			// │  ├─ SubFork
+			// │  │  ├─ Leaf1A
+			// │  │  └─ Leaf1B
+			// │  └─ Other
+			// └─ Branch2
 			const entries: SessionEntry[] = [
 				{ type: "message", id: "Fork", parentId: null, timestamp: "T0" },
 				{ type: "message", id: "Branch1", parentId: "Fork", timestamp: "T1" },
@@ -350,6 +368,8 @@ describe("Navigation & Branch Semantics", () => {
 
 	describe("Boundary and Special Rules", () => {
 		it("selected fork node is located relative to its own ancestors, not entering its child", () => {
+			// Root (has single child A)
+			// └─ A (fork with children B1, B2)
 			const entries: SessionEntry[] = [
 				{ type: "message", id: "Root", parentId: null, timestamp: "T0" },
 				{ type: "message", id: "A", parentId: "Root", timestamp: "T1" },
@@ -358,12 +378,19 @@ describe("Navigation & Branch Semantics", () => {
 			];
 			const index = buildTreeIndex(entries);
 
+			// A is a fork, but looking for nearest branch from A checks ancestors of A
+			// Root has only 1 child (A), so no ancestor fork exists
 			const branch = findNearestBranch("A", index);
 			expect(branch).toBeNull();
 			expect(navBranchNext("A", index)).toBe("A");
 		});
 
 		it("handles nested forks: nearest fork takes precedence over outer fork", () => {
+			// OuterFork
+			// ├─ InnerFork
+			// │  ├─ Leaf1
+			// │  └─ Leaf2
+			// └─ Other
 			const entries: SessionEntry[] = [
 				{ type: "message", id: "OuterFork", parentId: null, timestamp: "T0" },
 				{
@@ -399,6 +426,7 @@ describe("Navigation & Branch Semantics", () => {
 			expect(branch?.branchRootId).toBe("Leaf1");
 			expect(navBranchNext("Leaf1", index)).toBe("Leaf2");
 
+			// At last sibling of inner fork, stops at boundary; does NOT jump to outer fork "Other"
 			expect(navBranchNext("Leaf2", index)).toBe("Leaf2");
 		});
 
@@ -416,6 +444,11 @@ describe("Navigation & Branch Semantics", () => {
 		});
 
 		it("resolves branch.leaf with priorities: focused path > recent visit > last session order", () => {
+			// Fork
+			// └─ Branch
+			//    ├─ Leaf1
+			//    ├─ Leaf2
+			//    └─ Leaf3
 			const entries: SessionEntry[] = [
 				{ type: "message", id: "Fork", parentId: null, timestamp: "T0" },
 				{ type: "message", id: "Branch", parentId: "Fork", timestamp: "T1" },

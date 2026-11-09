@@ -64,6 +64,38 @@ export interface BranchLocation {
 
 export type InputMode = "normal" | "search" | "preview" | "help";
 
+export type FoldMode =
+	| "all"
+	| "focused-only"
+	| "active-only"
+	| "depth-limited"
+	| "manual";
+
+export interface FoldOptions {
+	mode: FoldMode;
+	collapseInactiveBranches: boolean;
+	collapseLinearPaths: boolean;
+	rememberManualOverrides: boolean;
+	maxExpandDepth: number;
+}
+
+export interface DisplayOptions {
+	showAssistantNodes: boolean;
+	showToolNodes: boolean;
+	showThinkingNodes: boolean;
+	showMetadataNodes: boolean;
+	showCompactionNodes: boolean;
+	userOnly: boolean;
+	branchOnly: boolean;
+	labeledOnly: boolean;
+	depthMode: "raw" | "turn" | "branch";
+	showDepth: boolean;
+	maxMessageLength: number;
+	showNodeId: boolean;
+	showTimestamps: boolean;
+	layout: "normal" | "compact";
+}
+
 export interface ExplorerState {
 	sessionId: string;
 	selectedEntryId: string | null;
@@ -75,6 +107,13 @@ export interface ExplorerState {
 	recentLeafByBranch: Map<string, string>;
 	scrollOffset: number;
 	version: number;
+
+	vimMode: boolean;
+	displayOptions: DisplayOptions;
+	foldOptions: FoldOptions;
+	manualExpandedIds: Set<string>;
+	manualCollapsedIds: Set<string>;
+	temporaryRevealedIds: Set<string>;
 }
 
 export interface DisplayNode {
@@ -96,6 +135,14 @@ export interface DisplayNode {
 	isCurrentLeaf: boolean;
 	isSelected: boolean;
 	label?: string;
+
+	visibleParentId: string | null;
+	isCollapsed?: boolean;
+	isExpanded?: boolean;
+	isVirtualSummary?: boolean;
+	anchorEntryId?: string;
+	virtualDescendantCount?: number;
+	virtualForkCount?: number;
 }
 
 export interface ActionContext {
@@ -104,6 +151,7 @@ export interface ActionContext {
 	visibleNodes: DisplayNode[];
 	close: () => void;
 	pageSize?: number;
+	reproject?: () => void;
 }
 
 export interface ActionDefinition {
@@ -119,3 +167,10 @@ export type ExplorerResult =
 	| { type: "close" }
 	| { type: "navigate"; entryId: string }
 	| { type: "fork"; entryId: string; position: "at" | "before" };
+
+export interface KeymapDiagnostic {
+	type: "duplicate" | "conflict" | "invalid";
+	message: string;
+	keys: string[];
+	actionId?: string;
+}

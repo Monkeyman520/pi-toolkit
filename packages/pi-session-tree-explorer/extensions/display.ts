@@ -1,11 +1,42 @@
 import type {
 	DisplayNode,
+	DisplayOptions,
 	ExplorerState,
+	FoldOptions,
 	SessionEntry,
 	TreeIndex,
 } from "./types.ts";
 
-function extractSummary(entry: SessionEntry): {
+export function defaultDisplayOptions(): DisplayOptions {
+	return {
+		showAssistantNodes: false,
+		showToolNodes: false,
+		showThinkingNodes: false,
+		showMetadataNodes: false,
+		showCompactionNodes: true,
+		userOnly: false,
+		branchOnly: false,
+		labeledOnly: false,
+		depthMode: "turn",
+		showDepth: true,
+		maxMessageLength: 80,
+		showNodeId: false,
+		showTimestamps: false,
+		layout: "normal",
+	};
+}
+
+export function defaultFoldOptions(): FoldOptions {
+	return {
+		mode: "focused-only",
+		collapseInactiveBranches: true,
+		collapseLinearPaths: false,
+		rememberManualOverrides: true,
+		maxExpandDepth: 0,
+	};
+}
+
+export function extractSummary(entry: SessionEntry): {
 	summaryText: string;
 	role?: string;
 } {
@@ -96,8 +127,199 @@ function extractSummary(entry: SessionEntry): {
 }
 
 /**
- * Build initial visible projection from TreeIndex.
- * In T0001, projects all indexed nodes in preorder.
+ * Check whether a node satisfies current display filtering options.
+ */
+export function isNodeVisible(
+	entry: SessionEntry,
+	index: TreeIndex,
+	display: DisplayOptions,
+	isTemporaryRevealed: boolean,
+): boolean {
+	if (isTemporaryRevealed) {
+		return true;
+	}
+
+	// Message type toggles
+	if (entry.type === "message" && entry.message) {
+		const role = entry.message.role;
+		if (role === "assistant" && !display.showAssistantNodes) return false;
+		if (role === "toolResult" && !display.showToolNodes) return false;
+		if (role === "system" && !display.showMetadataNodes) return false;
+	} else if (entry.type === "compaction") {
+		if (!display.showCompactionNodes) return false;
+	} else if (
+		entry.type === "model_change" ||
+		entry.type === "thinking_level_change" ||
+		entry.type === "usage" ||
+		entry.type === "session_info" ||
+		entry.type === "custom"
+	) {
+		if (!display.showMetadataNodes) return false;
+	}
+
+	// Intersecting constraints
+	if (display.userOnly) {
+		const isUser =
+			(entry.type === "message" && entry.message?.role === "user") ||
+			entry.type === "custom_message";
+		if (!isUser) return false;
+	}
+
+	if (display.branchOnly) {
+		const isBranchSummary = entry.type === "branch_summary";
+		const isFork = index.forkPointIds.has(entry.id);
+		if (!isBranchSummary && !isFork) return false;
+	}
+
+	if (display.labeledOnly) {
+		if (!entry.label) return false;
+	}
+
+	return true;
+}
+
+export function countSubtreeDescendants(id: string, index: TreeIndex): number {
+	let count = 0;
+	function walk(nodeId: string) {
+		const children = index.childrenById.get(nodeId) ?? [];
+		count += children.length;
+		for (const c of children) {
+			walk(c);
+		}
+	}
+	walk(id);
+	return count;
+}
+
+export function countSubtreeForks(id: string, index: TreeIndex): number {
+	let forks = 0;
+	function walk(nodeId: string) {
+		const children = index.childrenById.get(nodeId) ?? [];
+		if (children.length > 1) {
+			forks++;
+		}
+		for (const c of children) {
+			walk(c);
+		}
+	}
+	walk(id);
+	return forks;
+}
+
+/**
+ * Determine whether a node should be collapsed based on precedence:
+ * Temporary Reveal > Manual Overrides > Configured Policy > Default
+ */
+export function isNodeCollapsed(
+	nodeId: string,
+	index: TreeIndex,
+	state: ExplorerState,
+): boolean {
+	// 1. Temporary search reveal precedence (expanded)
+	if (state.temporaryRevealedIds.has(nodeId)) {
+		return false;
+	}
+
+	// Check if any descendant is temporarily revealed (must expand ancestor)
+	const children = index.childrenById.get(nodeId) ?? [];
+	for (const childId of children) {
+		if (
+			state.temporaryRevealedIds.has(childId) ||
+			isSubtreeRevealed(childId, index, state.temporaryRevealedIds)
+		) {
+			return false;
+		}
+	}
+
+	// 2. Manual overrides
+	if (state.manualCollapsedIds.has(nodeId)) {
+		return true;
+	}
+	if (state.manualExpandedIds.has(nodeId)) {
+		return false;
+	}
+
+	// 3. Configured policy
+	const mode = state.foldOptions.mode;
+	if (mode === "all" || mode === "manual") {
+		return false;
+	}
+
+	if (mode === "depth-limited") {
+		const rawDepth = index.rawDepthById.get(nodeId) ?? 0;
+		return rawDepth >= state.foldOptions.maxExpandDepth;
+	}
+
+	if (mode === "focused-only" || mode === "active-only") {
+		const parentId = index.parentById.get(nodeId);
+		if (!parentId) {
+			return false;
+		}
+
+		// If parent is a fork point
+		const siblings = index.childrenById.get(parentId) ?? [];
+		if (siblings.length > 1) {
+			// Check if this branch is on the target path
+			const targetPath =
+				mode === "active-only"
+					? getActivePathIds(index, state.sessionLeafId)
+					: state.focusedPathIds;
+
+			const isBranchFocused =
+				targetPath.has(nodeId) || isSubtreeFocused(nodeId, index, targetPath);
+
+			if (!isBranchFocused) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+function isSubtreeRevealed(
+	id: string,
+	index: TreeIndex,
+	revealed: Set<string>,
+): boolean {
+	const children = index.childrenById.get(id) ?? [];
+	for (const c of children) {
+		if (revealed.has(c) || isSubtreeRevealed(c, index, revealed)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function isSubtreeFocused(
+	id: string,
+	index: TreeIndex,
+	focused: Set<string>,
+): boolean {
+	const children = index.childrenById.get(id) ?? [];
+	for (const c of children) {
+		if (focused.has(c) || isSubtreeFocused(c, index, focused)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function getActivePathIds(
+	index: TreeIndex,
+	leafId: string | null,
+): Set<string> {
+	const set = new Set<string>();
+	let cur = leafId;
+	while (cur) {
+		set.add(cur);
+		cur = index.parentById.get(cur) ?? null;
+	}
+	return set;
+}
+
+/**
+ * Build visible projection with fold and filter semantics applied.
  */
 export function buildDisplayProjection(
 	index: TreeIndex,
@@ -105,35 +327,111 @@ export function buildDisplayProjection(
 ): DisplayNode[] {
 	const nodes: DisplayNode[] = [];
 
-	for (const id of index.preorderIds) {
+	function processNode(
+		id: string,
+		nearestVisibleParentId: string | null,
+	): void {
 		const entry = index.entryById.get(id);
-		if (!entry) continue;
+		if (!entry) return;
 
-		const { summaryText, role } = extractSummary(entry);
+		const isTemporary = state.temporaryRevealedIds.has(id);
+		const visible = isNodeVisible(
+			entry,
+			index,
+			state.displayOptions,
+			isTemporary,
+		);
+
 		const children = index.childrenById.get(id) ?? [];
-		const isLeaf = children.length === 0;
 		const isFork = children.length > 1;
+		const isLeaf = children.length === 0;
 		const isCurrentLeaf = id === state.sessionLeafId;
 		const isSelected = id === state.selectedEntryId;
+		const collapsed = isNodeCollapsed(id, index, state);
 
-		nodes.push({
-			id,
-			realId: id,
-			isVirtual: false,
-			kind: entry.type,
-			role,
-			summaryText,
-			timestamp: entry.timestamp,
-			rawDepth: index.rawDepthById.get(id) ?? 0,
-			turnDepth: index.turnDepthById.get(id) ?? 0,
-			branchDepth: index.branchDepthById.get(id) ?? 0,
-			hasChildren: children.length > 0,
-			isLeaf,
-			isFork,
-			isCurrentLeaf,
-			isSelected,
-			label: typeof entry.label === "string" ? entry.label : undefined,
-		});
+		if (visible) {
+			const { summaryText, role } = extractSummary(entry);
+			const node: DisplayNode = {
+				id,
+				realId: id,
+				isVirtual: false,
+				kind: entry.type,
+				role,
+				summaryText,
+				timestamp: entry.timestamp,
+				rawDepth: index.rawDepthById.get(id) ?? 0,
+				turnDepth: index.turnDepthById.get(id) ?? 0,
+				branchDepth: index.branchDepthById.get(id) ?? 0,
+				hasChildren: children.length > 0,
+				isLeaf,
+				isFork,
+				isCurrentLeaf,
+				isSelected,
+				label: typeof entry.label === "string" ? entry.label : undefined,
+				visibleParentId: nearestVisibleParentId,
+				isCollapsed: collapsed,
+				isExpanded: !collapsed,
+			};
+			nodes.push(node);
+
+			if (collapsed) {
+				// Stop descending into children because this node is collapsed!
+				return;
+			}
+
+			// If this node is a fork and children might be collapsed as sibling branches
+			for (const childId of children) {
+				const isChildBranchCollapsed =
+					isFork && isNodeCollapsed(childId, index, state);
+
+				if (isChildBranchCollapsed) {
+					// Render virtual collapsed branch row!
+					const childEntry = index.entryById.get(childId);
+					const childSummary = childEntry
+						? extractSummary(childEntry).summaryText
+						: "(branch)";
+					const descCount = countSubtreeDescendants(childId, index) + 1;
+					const forkCount = countSubtreeForks(childId, index);
+
+					const virtualId = `virtual:branch:${childId}`;
+					nodes.push({
+						id: virtualId,
+						realId: null,
+						isVirtual: true,
+						isVirtualSummary: true,
+						anchorEntryId: childId,
+						kind: "collapsed_branch",
+						summaryText: `▸ ${childSummary} [${descCount} nodes${forkCount > 0 ? `, ${forkCount} forks` : ""}]`,
+						timestamp: childEntry?.timestamp ?? entry.timestamp,
+						rawDepth: index.rawDepthById.get(childId) ?? 0,
+						turnDepth: index.turnDepthById.get(childId) ?? 0,
+						branchDepth: index.branchDepthById.get(childId) ?? 0,
+						hasChildren: false,
+						isLeaf: false,
+						isFork: false,
+						isCurrentLeaf: false,
+						isSelected: virtualId === state.selectedEntryId,
+						visibleParentId: id,
+						isCollapsed: true,
+						isExpanded: false,
+						virtualDescendantCount: descCount,
+						virtualForkCount: forkCount,
+					});
+				} else {
+					processNode(childId, id);
+				}
+			}
+		} else {
+			// Hidden node (e.g. assistant or filtered out)
+			// Pass the nearestVisibleParentId down to its children!
+			for (const childId of children) {
+				processNode(childId, nearestVisibleParentId);
+			}
+		}
+	}
+
+	for (const rootId of index.rootIds) {
+		processNode(rootId, null);
 	}
 
 	return nodes;
