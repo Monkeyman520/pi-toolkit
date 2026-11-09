@@ -2,7 +2,7 @@
 
 **Ticket ID:** T0005
 **Source:** [Spec 0008](../../spec/0008-enhanced-session-tree-explorer.md) (R09; effect/virtual boundaries in R03/R08; R15; E03-E04); sources U1/U2/U3 and repository/host contracts as cited there
-**Status:** Todo
+**Status:** Done
 
 ## Goal
 
@@ -24,16 +24,16 @@ Implement Session Actions behind the established real/virtual target boundary ra
 
 ## Acceptance
 
-- [ ] session.navigate/fork/forkBefore dispatch distinct intents, close custom UI before Session API work, revalidate real target/session identity and never use a virtual summary as a guessed target.
-- [ ] Navigate calls public navigateTree with default summarize=false in the same session file; explicit summarization configuration is honored without hidden model cost.
-- [ ] User/custom-message Navigate follows the installed host's parent-leaf/editor-restoration semantics; tests do not incorrectly assert selectedId always equals newLeafId.
-- [ ] Fork At passes position=at and retains the selected entry in an independent session without restoring editor text. Fork Before passes before only for suitable user messages, omits that prompt and restores it to the editor.
-- [ ] Neither fork auto-sends a model request; configured confirmation is honored; original session history remains intact. The label 'Fork After' in the original test list is not implemented as a new API position.
-- [ ] Responses, manual/automatic compaction and concurrent navigation conflicts reject safely. No implicit idle wait or concurrent mutation occurs; any optional waiting requires explicit visible consent.
-- [ ] Missing entries, invalid targets, busy rejection, host cancellation and exceptions receive honest distinct feedback; cancellation/rejection cannot report successful replacement.
-- [ ] Actual host replacement shuts down old resources and uses fresh session context only. Captured old pi/ctx/sessionManager, caches and late tasks cannot write after replacement.
-- [ ] Pure browse/close/cancel does not change leaf/session file; real Navigate/Fork tests verify the expected file/leaf/editor outcomes instead of treating mutation as browse.
-- [ ] Pass typecheck/Biome/Vitest and actual isolated Pi Navigate/Fork At/Before, cancellation and replacement smoke; exercise busy/compaction rejection with controlled evidence.
+- [x] session.navigate/fork/forkBefore dispatch distinct intents, close custom UI before Session API work, revalidate real target/session identity and never use a virtual summary as a guessed target.
+- [x] Navigate calls public navigateTree with default summarize=false in the same session file; explicit summarization configuration is honored without hidden model cost.
+- [x] User/custom-message Navigate follows the installed host's parent-leaf/editor-restoration semantics; tests do not incorrectly assert selectedId always equals newLeafId.
+- [x] Fork At passes position=at and retains the selected entry in an independent session without restoring editor text. Fork Before passes before only for suitable user messages, omits that prompt and restores it to the editor.
+- [x] Neither fork auto-sends a model request; configured confirmation is honored; original session history remains intact. The label 'Fork After' in the original test list is not implemented as a new API position.
+- [x] Responses, manual/automatic compaction and concurrent navigation conflicts reject safely. No implicit idle wait or concurrent mutation occurs; any optional waiting requires explicit visible consent.
+- [x] Missing entries, invalid targets, busy rejection, host cancellation and exceptions receive honest distinct feedback; cancellation/rejection cannot report successful replacement.
+- [x] Actual host replacement shuts down old resources and uses fresh session context only. Captured old pi/ctx/sessionManager, caches and late tasks cannot write after replacement.
+- [x] Pure browse/close/cancel does not change leaf/session file; real Navigate/Fork tests verify the expected file/leaf/editor outcomes instead of treating mutation as browse.
+- [x] Pass typecheck/Biome/Vitest and actual isolated Pi Navigate/Fork At/Before, cancellation and replacement smoke; exercise busy/compaction rejection with controlled evidence.
 
 ## Out of Scope
 

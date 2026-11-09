@@ -173,6 +173,8 @@ export interface ActionContext {
 	) => Promise<void> | void;
 	refresh?: () => Promise<void> | void;
 	notify?: (message: string, type?: "info" | "warning" | "error") => void;
+	navigate?: (entryId: string, summarize?: boolean) => void;
+	fork?: (entryId: string, position: "at" | "before") => void;
 }
 
 export interface ActionDefinition {
@@ -186,7 +188,7 @@ export interface ActionDefinition {
 
 export type ExplorerResult =
 	| { type: "close" }
-	| { type: "navigate"; entryId: string }
+	| { type: "navigate"; entryId: string; summarize?: boolean }
 	| { type: "fork"; entryId: string; position: "at" | "before" };
 
 export interface KeymapDiagnostic {

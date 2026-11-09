@@ -350,7 +350,7 @@ export class SessionTreeComponent {
 		// 5. Footer Key Hints
 		lines.push("─".repeat(safeWidth));
 		const footer =
-			"j/k Move  H/L Parent/Child  [b/]b Branch  Space Fold  ? Help  q Close";
+			"Enter Go  f Fork  F ForkBefore  Space Fold  / Search  ? Help  q Close";
 		lines.push(truncateToWidth(footer, safeWidth));
 
 		return lines;
@@ -374,6 +374,12 @@ export class SessionTreeComponent {
 			setLabel: this.onSetLabel,
 			refresh: this.onRefresh,
 			notify: this.onNotify,
+			navigate: (entryId, summarize) => {
+				this.done({ type: "navigate", entryId, summarize });
+			},
+			fork: (entryId, position) => {
+				this.done({ type: "fork", entryId, position });
+			},
 		};
 
 		if (!action.enabled || action.enabled(this.state, this.index)) {

@@ -1,3 +1,7 @@
+import { executeSessionIntent } from "./session-effects.ts";
+
+export { executeSessionIntent } from "./session-effects.ts";
+
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
@@ -234,8 +238,18 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 				},
 			);
 
-			if (result && result.type === "close") {
-				// Pure close, no-op
+			if (result && result.type !== "close") {
+				await executeSessionIntent({
+					intent: result,
+					ctx,
+					config: effectiveConfig,
+					onNotify: (msg, type) => {
+						ctx.ui.notify(msg, type);
+					},
+					onReplacementCleanup: () => {
+						// Clean up cached index or references upon session replacement
+					},
+				});
 			}
 		},
 	});

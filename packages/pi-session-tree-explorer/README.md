@@ -2,9 +2,9 @@
 
 An independently installable Pi coding agent extension providing an enhanced session tree explorer with fast navigation, branch discovery, and read-only tree inspection.
 
-## Current status (Tickets T0001, T0002, T0003 & T0004)
+## Current status (Tickets T0001, T0002, T0003, T0004 & T0005)
 
-This package delivers **T0001 (Read-only Tree Explorer foundation)**, **T0002 (Vim Navigation, Folding & Filter Projections)**, **T0003 (Layered Configuration & Settings Panel)**, and **T0004 (Full-Text Search, Preview & Label Metadata)**:
+This package delivers **T0001 (Read-only Tree Explorer foundation)**, **T0002 (Vim Navigation, Folding & Filter Projections)**, **T0003 (Layered Configuration & Settings Panel)**, **T0004 (Full-Text Search, Preview & Label Metadata)**, and **T0005 (Safe Native Navigate & Fork Session Operations)**:
 - Independent package setup under `packages/pi-session-tree-explorer/` with isolated dependencies, TypeScript ESM, erasable syntax, and Pi 1.5.0 compatibility.
 - Core `TreeIndex` indexing all raw session entry types with original order, cycle protection, and safe handling of missing parents and multiple roots.
 - Exact raw depth, turn depth, and branch depth calculations matching the specification.
@@ -16,23 +16,28 @@ This package delivers **T0001 (Read-only Tree Explorer foundation)**, **T0002 (V
   - Searches complete text content beyond row truncation, tool names, tool call IDs, labels, entry IDs, and timestamps.
   - Modes: `fuzzy` (default), `exact` (substring), and `regex`.
   - Scopes: `all` raw entries vs `focused-subtree` only.
-  - Multi-tier ranking: Exact label match (+500), label substring (+300), summary prefix (+200), fulltext (+100), recency boost (+0..30), and focused branch boost (+40). Ties broken by original session order.
-  - **Reversible Search Reveals:**
-    - Opening search (`/`) snapshots pre-search selection, query, and manual folds.
-    - Search cancellation (`Esc` in search mode) restores the pre-search snapshot completely.
-    - Search acceptance (`Enter` in search mode) selects match and retains query and ancestor reveal path **without triggering session navigation**.
-    - Clearing in normal mode (`Esc` in normal mode) clears search query and temporary reveals; if the selected entry becomes hidden, it automatically falls back to its nearest visible ancestor.
-    - Hidden assistant matches are temporarily exposed as real entries with preview/navigation eligibility, without permanently modifying `displayOptions.showAssistantNodes`.
-- **Full Content Preview Overlay (`p`):** Formats and displays complete un-truncated text, role, model, tool details, and timestamps. Exits on `p`, `q`, or `Esc`.
+  - Multi-tier ranking with label match priority, summary prefix bonus, and recency/focus boosts. Ties broken by original session order.
+  - **Reversible Search Reveals:** Search cancellation (`Esc`) restores pre-search snapshot; search acceptance (`Enter`) selects match and retains query and reveal path **without triggering session navigation**; normal `Esc` clears query and temporary reveals.
+- **Full Content Preview Overlay (`p`):** Formats and displays complete un-truncated text, role, model, tool details, and timestamps.
+- **Safe Native Session Navigation (`Enter`):**
+  - Dispatches intent from TUI and executes `ctx.navigateTree` after custom UI closes.
+  - Default `summarize: false` avoids silent model charges.
+  - Respects host semantics: User message targets restore editor prompt and set parent as resulting leaf; non-user targets set target as resulting leaf.
+  - Virtual branch summaries expand on Enter rather than navigating.
+- **Independent Session Fork Operations:**
+  - **Fork At (`f`):** Creates new independent session duplicating active path through selected entry (`position: "at"`) without restoring editor text.
+  - **Fork Before (`F`):** For user messages only, omits selected user prompt from retained path and restores it into editor (`position: "before"`).
+  - Neither fork auto-sends model request; optional confirmation dialog (`confirmFork`) is honored; original session remains completely intact.
+- **Conflict & Busy Safety:** Rejects operations safely with clear feedback during agent streaming, manual/automatic compaction, or concurrent navigation.
+- **Clean Replacement Lifecycle:** Discards old session references and caches upon replacement, binding cleanly to the fresh session context.
 - **Clipboard Integration:** Copy real Entry ID (`yi`) and node content (`yy`). Refuses virtual branch summaries with informative feedback.
-- **Label Management (`m`):** Sets or clears bookmark labels via host API, updating markers and search ranking.
+- **Label Management (`m`):** Sets or clears bookmark labels via host API.
 - **Host Refresh (`r`):** Reloads session entries from host SessionManager without restarting explorer.
 - **Validated 4-Layer Configuration:** Precedence: `Built-in Defaults` -> `Global session-tree.json` -> `Trusted Project .pi/session-tree.json` -> `Runtime Overrides`.
 - **Interactive TUI Settings Panel & Autocompletion:** `/stree config` opens interactive `SettingsList` panel; autocompletion suggests subcommands, keys, and values.
 - **Installed-Only Panel Discovery:** Uses `pi.events` protocol (`pi-packages:ui:discover`) to announce and discover loaded collection plugin panels without hardcoded cross-package imports.
-- **Pure browsing guarantees:** Tree navigation, search, and folding never call `resetLeaf()`, never append session entries, and never modify session history.
 
-_Note on full v1.0 scope:_ Safe native Navigate/Fork session operations (T0005), historical Context estimates (T0006), and view state persistence (T0007) are scheduled in subsequent tickets.
+_Note on full v1.0 scope:_ Historical Context estimates (T0006) and view state persistence (T0007) are scheduled in subsequent tickets.
 
 ## Compatibility and resources
 
@@ -96,7 +101,7 @@ pi install ./packages/pi-session-tree-explorer
 
 #### Folding & Filtering
 
-- `Space` / `Enter`: Toggle fold of selected node or virtual branch summary
+- `Space`: Toggle fold of selected node or virtual branch summary
 - `l` / `h`: Expand / collapse selected subtree
 - `zR` / `zM`: Expand all / collapse all
 - `za` / `zs`: Active-only / focused-only folding
@@ -109,6 +114,12 @@ pi install ./packages/pi-session-tree-explorer
 - `/`: Open search mode
 - In search mode: printable keys edit query text; `Up`/`Down` or `ctrl+p`/`ctrl+n` navigate matches; `Enter` accepts match without navigation; `Esc` cancels search and restores pre-search state
 - In normal mode: `n` / `N` jumps to next / previous match; `Esc` clears search query and reveals (re-focusing nearest visible ancestor if selection becomes hidden)
+
+#### Session Operations
+
+- `Enter`: Navigate to selected entry in current session (or expand if on virtual branch summary)
+- `f`: Fork new independent session at selected entry (`position: "at"`)
+- `F`: Fork before selected user entry and restore prompt (`position: "before"`)
 
 #### Inspection & Metadata
 
@@ -137,12 +148,12 @@ npm run smoke
 
 - `npm run typecheck`: Runs `tsc --noEmit` (verifies erasable syntax with no emitted JavaScript).
 - `npm run check`: Runs Biome linter and formatter verification.
-- `npm test`: Runs Vitest unit test suite (11 test files, 69 tests passed) covering `TreeIndex`, 17 node actions, 13 branch actions, 11 fold actions, 8 filter actions, keymap parser, layered config, multi-token completions, search engine, preview overlay, clipboard, and label metadata.
+- `npm test`: Runs Vitest unit test suite (12 test files, 76 tests passed) covering `TreeIndex`, 17 node actions, 13 branch actions, 11 fold actions, 8 filter actions, keymap parser, layered config, multi-token completions, search engine, preview overlay, clipboard, label metadata, and safe Navigate / Fork session operations.
 - `npm run smoke`: Copies the package to an isolated temporary directory, runs offline dependency installation via `npm ci --omit=dev`, spawns real Pi RPC process, and verifies command registration, `/stree config`, `/stree config reload`, and non-TUI notifications.
 
 ## Permissions and risks
 
 This extension executes within Pi's process privileges:
-- **Filesystem access:** Reads active session history via host SessionManager. Reads and writes `session-tree.json` configuration files. Does not modify or write session JSONL files during browsing.
+- **Filesystem access:** Reads active session history via host SessionManager. Reads and writes `session-tree.json` configuration files. Creates new session files when explicit Fork operations (`f` or `F`) are invoked.
 - **Process execution:** Uses system clipboard commands (`clip` on Windows, `pbcopy` on macOS, `wl-copy`/`xclip` on Linux) only when `yi` or `yy` copy actions are explicitly invoked by the user.
 - **Network access:** None. Purely local in-memory tree browsing.

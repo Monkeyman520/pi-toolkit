@@ -112,7 +112,7 @@ export function getDefaultKeybindings(): Record<string, string[]> {
 		"branch.cycle": [],
 
 		// Fold actions
-		"fold.toggle": ["space", "enter"],
+		"fold.toggle": ["space"],
 		"fold.expand": ["l"],
 		"fold.collapse": ["h"],
 		"fold.expandAll": ["zR"],
@@ -149,6 +149,9 @@ export function getDefaultKeybindings(): Record<string, string[]> {
 		"view.reloadConfig": [],
 
 		// Session actions
+		"session.navigate": ["enter"],
+		"session.fork": ["f"],
+		"session.forkBefore": ["F"],
 		"session.preview": ["p"],
 		"session.copyId": ["yi"],
 		"session.copyContent": ["yy"],
@@ -1060,6 +1063,63 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	});
 
 	// Session Inspection & Metadata Actions (Spec R08)
+	register({
+		id: "session.navigate",
+		description: "Navigate to selected entry in current session",
+		defaultKeys: ["enter"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			const sel = ctx.state.selectedEntryId;
+			if (!sel) return;
+			if (sel.startsWith("virtual:branch:")) {
+				const anchorId = sel.replace("virtual:branch:", "");
+				ctx.state.manualExpandedIds.add(anchorId);
+				ctx.state.manualCollapsedIds.delete(anchorId);
+				updateSelection(ctx, anchorId);
+				ctx.state.version++;
+				ctx.reproject?.();
+				return;
+			}
+			ctx.navigate?.(sel);
+		},
+	});
+
+	register({
+		id: "session.fork",
+		description: "Fork independent session at selected entry",
+		defaultKeys: ["f"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			const sel = ctx.state.selectedEntryId;
+			if (!sel || sel.startsWith("virtual:branch:")) {
+				ctx.notify?.(
+					"Cannot fork from virtual branch summary. Expand branch first.",
+					"warning",
+				);
+				return;
+			}
+			ctx.fork?.(sel, "at");
+		},
+	});
+
+	register({
+		id: "session.forkBefore",
+		description: "Fork before selected user entry and restore prompt",
+		defaultKeys: ["F"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			const sel = ctx.state.selectedEntryId;
+			if (!sel || sel.startsWith("virtual:branch:")) {
+				ctx.notify?.(
+					"Cannot fork from virtual branch summary. Expand branch first.",
+					"warning",
+				);
+				return;
+			}
+			ctx.fork?.(sel, "before");
+		},
+	});
+
 	register({
 		id: "session.preview",
 		description: "Preview complete node content",
