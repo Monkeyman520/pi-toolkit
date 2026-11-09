@@ -130,6 +130,9 @@ export interface ExplorerState {
 	searchResults: Array<{ id: string; score: number }>;
 	searchResultIndex: number;
 	previewNodeId: string | null;
+	showDetails: boolean;
+	showContext: boolean;
+	renderOverscan: number;
 }
 
 export interface ContextMetrics {

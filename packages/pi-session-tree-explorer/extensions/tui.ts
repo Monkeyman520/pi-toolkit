@@ -365,8 +365,19 @@ export class SessionTreeComponent {
 
 			const selPrefix = isSel ? "▶ " : "  ";
 			const indent = "  ".repeat(Math.min(10, node.rawDepth));
-			const depthStr = `D${node.turnDepth}`;
-			const labelTag = node.label ? ` [${node.label}]` : "";
+			let depthVal = node.turnDepth;
+			let depthPrefix = "D";
+			if (this.state.displayOptions.depthMode === "raw") {
+				depthVal = node.rawDepth;
+				depthPrefix = "R";
+			} else if (this.state.displayOptions.depthMode === "branch") {
+				depthVal = node.branchDepth;
+				depthPrefix = "B";
+			}
+			const depthStr = this.state.displayOptions.showDepth
+				? `${depthPrefix}${depthVal}`
+				: "";
+			const labelTag = node.label ? ` ★[${node.label}]` : "";
 
 			let contextSuffix = "";
 			const metrics = this.getMetricsForEntry(node.id);

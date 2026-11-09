@@ -78,8 +78,21 @@ describe("Action Registry & Browsing Invariants", () => {
 			expect(registry.has(id), `Missing session action: ${id}`).toBe(true);
 		}
 
-		expect(registry.has("view.reloadConfig")).toBe(true);
-		expect(registry.size).toBe(68);
+		const expectedViewActions = [
+			"view.toggleDetails",
+			"view.toggleContext",
+			"view.cycleDepthMode",
+			"view.cycleLayout",
+			"view.help",
+			"view.toggleVim",
+			"view.reloadConfig",
+			"view.reset",
+		];
+		for (const id of expectedViewActions) {
+			expect(registry.has(id), `Missing view action: ${id}`).toBe(true);
+		}
+
+		expect(registry.size).toBe(73);
 	});
 
 	it("executes actions updating ExplorerState in memory without mutating session entries", () => {

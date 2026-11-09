@@ -144,9 +144,14 @@ export function getDefaultKeybindings(): Record<string, string[]> {
 		"search.toggleScope": [],
 
 		// View actions
-		"view.toggleVim": [],
+		"view.toggleDetails": ["d"],
+		"view.toggleContext": ["c"],
+		"view.cycleDepthMode": ["D"],
+		"view.cycleLayout": ["C"],
 		"view.help": ["?"],
+		"view.toggleVim": [],
 		"view.reloadConfig": [],
+		"view.reset": [],
 
 		// Session actions
 		"session.navigate": ["enter"],
@@ -870,6 +875,71 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	});
 
 	// View Actions
+	register({
+		id: "view.toggleDetails",
+		description: "Toggle selection details region",
+		defaultKeys: ["d"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			ctx.state.showDetails = !ctx.state.showDetails;
+			ctx.state.version++;
+		},
+	});
+
+	register({
+		id: "view.toggleContext",
+		description: "Toggle context columns visibility",
+		defaultKeys: ["c"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			ctx.state.showContext = !ctx.state.showContext;
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "view.cycleDepthMode",
+		description: "Cycle depth display mode (turn -> raw -> branch)",
+		defaultKeys: ["D"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			const cur = ctx.state.displayOptions.depthMode;
+			const next = cur === "turn" ? "raw" : cur === "raw" ? "branch" : "turn";
+			ctx.state.displayOptions.depthMode = next;
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "view.cycleLayout",
+		description: "Cycle layout density (normal <-> compact)",
+		defaultKeys: ["C"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			ctx.state.displayOptions.layout =
+				ctx.state.displayOptions.layout === "normal" ? "compact" : "normal";
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "view.reset",
+		description: "Reset view options to defaults",
+		defaultKeys: [],
+		modes: ["normal"],
+		execute: (ctx) => {
+			ctx.state.displayOptions.depthMode = "turn";
+			ctx.state.displayOptions.layout = "normal";
+			ctx.state.showDetails = true;
+			ctx.state.showContext = true;
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
 	register({
 		id: "view.toggleVim",
 		description: "Toggle Vim navigation mode",

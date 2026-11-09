@@ -2,7 +2,7 @@
 
 **Ticket ID:** T0007
 **Source:** [Spec 0008](../../spec/0008-enhanced-session-tree-explorer.md) (R11-R12; rendering portion of R03/R14; R13 precedence; R15; E06); sources U1/U2/U3 and repository/host contracts as cited there
-**Status:** Todo
+**Status:** Done
 
 ## Goal
 
@@ -24,15 +24,15 @@ Use T0002's actual focus/filter/manual-fold state and T0003's validated effectiv
 
 ## Acceptance
 
-- [ ] Complete R11 layout at >=120, 80-119 and <80 columns, respecting configured context/model/detail visibility and keeping tree connectors aligned for long/wide Unicode text.
-- [ ] Header/counts/mode, tree, search, selection details and key hints are present. Root/selection/active/label/hit/fold/estimated/unknown states can coexist without a single icon concealing other state.
-- [ ] view.toggleDetails/toggleContext/cycleDepthMode/cycleLayout/reset are reachable. Integrate view.help/toggleVim from T0002 and view.reloadConfig from T0003 without duplicate handlers.
-- [ ] Viewport plus configured overscan bounds rendered work; selection-only changes reuse the raw index and do not wait for context computation. Empty/filtered/malformed states retain refresh/settings/exit access.
-- [ ] Persist view overrides, last filters/focus, manual folds/expansions, density and depth mode outside Session JSONL, isolated by sessionId under the resolved Pi agent directory.
-- [ ] Do not persist search results/reveals, queued/running commands, obsolete computations or busy state. Ignore stale IDs; different and replacement sessions do not inherit old mutable ownership.
-- [ ] Restart restoration observes configuration precedence and rememberManualOverrides; it does not append CustomEntry noise or mutate raw history.
-- [ ] Tests use realistic fold/filter state plus estimated/unknown ContextMetrics fixtures; actual Pi resize/restart usage verifies display and persistence rather than claiming correctness from screenshots alone.
-- [ ] Pass typecheck/Biome/Vitest and the slice's actual Pi TUI smoke; leave integrated cross-platform/performance evidence to T0008.
+- [x] Complete R11 layout at >=120, 80-119 and <80 columns, respecting configured context/model/detail visibility and keeping tree connectors aligned for long/wide Unicode text.
+- [x] Header/counts/mode, tree, search, selection details and key hints are present. Root/selection/active/label/hit/fold/estimated/unknown states can coexist without a single icon concealing other state.
+- [x] view.toggleDetails/toggleContext/cycleDepthMode/cycleLayout/reset are reachable. Integrate view.help/toggleVim from T0002 and view.reloadConfig from T0003 without duplicate handlers.
+- [x] Viewport plus configured overscan bounds rendered work; selection-only changes reuse the raw index and do not wait for context computation. Empty/filtered/malformed states retain refresh/settings/exit access.
+- [x] Persist view overrides, last filters/focus, manual folds/expansions, density and depth mode outside Session JSONL, isolated by sessionId under the resolved Pi agent directory.
+- [x] Do not persist search results/reveals, queued/running commands, obsolete computations or busy state. Ignore stale IDs; different and replacement sessions do not inherit old mutable ownership.
+- [x] Restart restoration observes configuration precedence and rememberManualOverrides; it does not append CustomEntry noise or mutate raw history.
+- [x] Tests use realistic fold/filter state plus estimated/unknown ContextMetrics fixtures; actual Pi resize/restart usage verifies display and persistence rather than claiming correctness from screenshots alone.
+- [x] Pass typecheck/Biome/Vitest and the slice's actual Pi TUI smoke; leave integrated cross-platform/performance evidence to T0008.
 
 ## Out of Scope
 

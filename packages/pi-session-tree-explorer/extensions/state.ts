@@ -27,6 +27,9 @@ export function createInitialState(
 		searchResults: [],
 		searchResultIndex: -1,
 		previewNodeId: null,
+		showDetails: true,
+		showContext: true,
+		renderOverscan: 20,
 		...override,
 	};
 }

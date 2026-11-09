@@ -1,3 +1,12 @@
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { loadViewState, saveViewState } from "./view-state.ts";
+
+export {
+	getViewStateFilePath,
+	loadViewState,
+	saveViewState,
+} from "./view-state.ts";
+
 import { executeSessionIntent } from "./session-effects.ts";
 
 export { executeSessionIntent } from "./session-effects.ts";
@@ -210,6 +219,37 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 				foldOptions: { ...effectiveConfig.fold },
 			});
 
+			const agentDir = getAgentDir();
+			const savedViewState = await loadViewState(
+				agentDir,
+				sessionId,
+				index,
+				effectiveConfig.fold.rememberManualOverrides,
+			);
+			if (savedViewState) {
+				if (savedViewState.displayOptions) {
+					state.displayOptions = {
+						...state.displayOptions,
+						...savedViewState.displayOptions,
+					};
+				}
+				if (savedViewState.showDetails !== undefined) {
+					state.showDetails = savedViewState.showDetails;
+				}
+				if (savedViewState.showContext !== undefined) {
+					state.showContext = savedViewState.showContext;
+				}
+				if (savedViewState.focusedBranchId) {
+					state.focusedBranchId = savedViewState.focusedBranchId;
+				}
+				if (savedViewState.manualExpandedIds) {
+					state.manualExpandedIds = savedViewState.manualExpandedIds;
+				}
+				if (savedViewState.manualCollapsedIds) {
+					state.manualCollapsedIds = savedViewState.manualCollapsedIds;
+				}
+			}
+
 			const registry = createActionRegistry();
 
 			const result = await ctx.ui.custom<ExplorerResult>(
@@ -237,6 +277,9 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 					});
 				},
 			);
+
+			// Persist view state outside Session JSONL
+			await saveViewState(agentDir, sessionId, state);
 
 			if (result && result.type !== "close") {
 				await executeSessionIntent({
