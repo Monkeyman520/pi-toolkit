@@ -2,7 +2,7 @@
 
 **Ticket ID:** T0001
 **Source:** [Spec 0008](../../spec/0008-enhanced-session-tree-explorer.md) (R01-R04; baseline R11, R13-R15; E01); sources U1/U2/U3 and repository/host contracts as cited there
-**Status:** Todo
+**Status:** Done
 
 ## Goal
 
@@ -24,14 +24,14 @@ Deliver package setup with its first real consumer, not an empty scaffold ticket
 
 ## Acceptance
 
-- [ ] Package independently discovers only its own extension through Pi; TypeScript ESM/erasable syntax, Node >=22.19.0 and host '*' peers match R01. No required emitted build or undeclared sibling import.
-- [ ] Actual Pi /stree opening/closing and current-leaf identification are demonstrated. Initial UI allows browsing and exiting even for an empty session; native /tree remains unaffected.
-- [ ] Index tests cover full entry types, original order, raw/turn/branch depth, chains, nested/wide forks, one/many roots, missing parents and invalid/cyclic relationships without unbounded traversal.
-- [ ] All 17 node Actions and 13 branch Actions from R04 have direct behavioral tests, including boundaries and visible-versus-raw target rules. Full configured-key access is completed in T0002, not silently omitted.
-- [ ] Normative D1/C2 cases distinguish node.nextSibling from branch.next, use nearest fork, handle selected fork nodes and nested forks, and do not rotate sibling branches across Roots.
-- [ ] Preferred leaf selection uses focused path, then recent visit, then last leaf in session order; raw-preorder fork/leaf traversal and branch.cycle behavior are tested.
-- [ ] Selection, focus/path and real Session Leaf remain separately owned. No browsing Action writes session entries, changes parentId/resetLeaf, or calls a model.
-- [ ] Run package-local typecheck, Biome and non-empty Vitest plus an isolated Pi loading/usage smoke. Document initial limitations honestly; the initial slice is not full v1.0.
+- [x] Package independently discovers only its own extension through Pi; TypeScript ESM/erasable syntax, Node >=22.19.0 and host '*' peers match R01. No required emitted build or undeclared sibling import.
+- [x] Actual Pi /stree opening/closing and current-leaf identification are demonstrated. Initial UI allows browsing and exiting even for an empty session; native /tree remains unaffected.
+- [x] Index tests cover full entry types, original order, raw/turn/branch depth, chains, nested/wide forks, one/many roots, missing parents and invalid/cyclic relationships without unbounded traversal.
+- [x] All 17 node Actions and 13 branch Actions from R04 have direct behavioral tests, including boundaries and visible-versus-raw target rules. Full configured-key access is completed in T0002, not silently omitted.
+- [x] Normative D1/C2 cases distinguish node.nextSibling from branch.next, use nearest fork, handle selected fork nodes and nested forks, and do not rotate sibling branches across Roots.
+- [x] Preferred leaf selection uses focused path, then recent visit, then last leaf in session order; raw-preorder fork/leaf traversal and branch.cycle behavior are tested.
+- [x] Selection, focus/path and real Session Leaf remain separately owned. No browsing Action writes session entries, changes parentId/resetLeaf, or calls a model.
+- [x] Run package-local typecheck, Biome and non-empty Vitest plus an isolated Pi loading/usage smoke. Document initial limitations honestly; the initial slice is not full v1.0.
 
 ## Out of Scope
 
