@@ -1,5 +1,7 @@
 # Follow-up: when adaptive context management helps
 
+> **Experimental — pending optimization and broader testing.** This receipt preserves bounded historical acceptance, not stable-release approval or a recommendation for default adaptive intervention. Retain safe refusals and all existing authorization/recovery/message/budget guards; further optimization must be tested before broader use.
+
 ## Predeclared experiment
 
 The user asks for completed tests demonstrating actual context-management benefit and when adaptive is useful. This follow-up does not replace T0007's earlier three-family outcomes or turn safety acceptance into a performance claim.

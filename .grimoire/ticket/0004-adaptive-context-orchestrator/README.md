@@ -3,6 +3,8 @@
 **Source:** [Spec 0007](../../spec/0007-adaptive-context-orchestrator.md), including its settled conversation handoff S1–S6.
 **Ticket folder:** `.grimoire/ticket/0004-adaptive-context-orchestrator/`
 **Status:** Done — T0001–T0008 verified within the documented staged/compatibility boundary. Representative evaluation is complete with failures and unknown costs retained, not a superiority claim. See [final evaluation](./T0007-final-evaluation.md) and [integrated coverage](./T0008-verification.md).
+
+**Implementation maturity:** Experimental — pending optimization and broader testing. Done describes the original bounded ticket acceptance, not production readiness or a recommendation for default adaptive use. Preserve the evidence/status history; use observation-first controlled trials and do not weaken guards or expand authority to force a favorable result.
 **Architecture:** [ADR 0006](../../adr/0006-task-aware-context-working-set-and-isolation.md), alongside the collection's [package reference](../../../packages/README.md) and ADRs referenced by the spec.
 
 ## Overview and execution handoff

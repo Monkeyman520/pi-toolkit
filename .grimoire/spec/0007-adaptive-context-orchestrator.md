@@ -2,6 +2,8 @@
 
 **Spec ID:** 0007
 **Status:** Implemented
+
+**Maturity:** Experimental — pending optimization and broader testing. Implemented records bounded requirement acceptance, not a stable-release endorsement. Evaluate observation-first; broader automatic intervention requires additional evidence and must not bypass existing safety or authorization requirements.
 **Date:** 2026-11-05
 **Selected endpoint:** Requirements specification → ticket set; no implementation or implementation-plan authorization.
 

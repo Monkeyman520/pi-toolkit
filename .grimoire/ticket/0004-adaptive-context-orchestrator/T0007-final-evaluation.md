@@ -1,5 +1,7 @@
 # T0007 final comparative evaluation and acceptance
 
+> **Experimental — pending optimization and broader testing.** This receipt preserves bounded historical acceptance, not stable-release approval or a recommendation for default adaptive intervention. Retain safe refusals and all existing authorization/recovery/message/budget guards; further optimization must be tested before broader use.
+
 ## Scope and verdict
 
 The original T0007 acceptance is evaluated against the real coding trials plus actual installed-Pi executor tests, not a new savings target. All three predeclared task families completed their evaluation. **Evaluation complete; efficacy/superiority not established.** Failed executions, rejected artifacts, startup failures and incomplete costs remain findings of the experiment, not successful samples.

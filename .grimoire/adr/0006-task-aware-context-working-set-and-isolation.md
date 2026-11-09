@@ -3,6 +3,8 @@
 **Status:** Completed
 **Date:** 2026-11-05
 
+**Implementation maturity:** Experimental — pending optimization and broader testing. Completed realization evidence below does not establish stable operational readiness or net performance gains. Retain observation-first, narrowly authorized evaluation and all safety gates; this clarification does not reverse the recorded architecture or its historical acceptance.
+
 ## Context
 
 The user proposed an Adaptive Context Orchestrator (ACO) for Pi and accepted the refinement recommendations: describe the complete ACO requirements with staged delivery, begin with observation and recommendations only, permit later automatic exact offloading/pruning only after recovery verification, and isolate memory to a project and the current task's session lineage. The selected refinement endpoint is a requirements specification followed by independently verifiable tickets, not implementation.

@@ -1,6 +1,16 @@
-# Pi Context ACO
+# Pi Context ACO (Experimental)
 
 **V1 observation/recommendations, V2 verified recovery/exact pruning, and T0005 V3 scoped extractive/native compaction** for the Adaptive Context Orchestrator. V1 remains observation-only. V3 explicitly proposes mechanically verified local summaries or native prefix compaction, requiring confirmation by default or operation/source/task/session-scoped automation authorization. T0006 V4 adds explicitly authorized independent single-request children with staged deliverables and parent reconciliation. T0007 adds opt-in command-only adaptive composition and controlled comparison reporting. Bounded V5 composition and representative-task evaluation are accepted; failed trials and unknown charges remain documented, with no proven cost/quality superiority.
+
+## Experimental status and conservative use
+
+> **Experimental — pending optimization and broader real-task, provider and platform testing.** Existing implementation acceptance and bounded test results do not establish production readiness, general reliability or net token/cost/latency/quality gains.
+
+- Start with `observe` in an isolated, disposable evaluation session. Observation is not a guarantee of correctness or a reason to grant intervention authority.
+- Keep context-changing actions and `adaptive` opt-in for controlled trials, with narrow scope, finite budgets, preserved originals and verified recovery. Persistent installation is an evaluation choice, not a recommendation to enable automatic intervention in ordinary work.
+- Retain safe refusals and no-ops. Do not strip thinking/signature data, relax message/dependency/recovery checks, broaden authorization or increase safety limits merely to make an experiment execute.
+- Mixed thinking/tool-call/text messages can block current exact pruning, as observed in the [B1 follow-up](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0007-benefit-scenarios.md). A completed checkpoint does not mean context was unloaded.
+- Further optimization and testing are pending. Validate any future adapter or finer-grained offloading against provider replay, tool relationships, exact recovery, peer-plugin coexistence, independent coding quality and complete usage accounting before recommending broader use.
 
 ## Compatibility and resources
 
