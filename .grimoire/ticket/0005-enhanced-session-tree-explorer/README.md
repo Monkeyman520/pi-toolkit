@@ -2,7 +2,7 @@
 
 **Source:** [Spec 0008](../../spec/0008-enhanced-session-tree-explorer.md)
 **Ticket folder:** .grimoire/ticket/0005-enhanced-session-tree-explorer/
-**Status:** In Progress; T0001-T0007 Done, T0008 Todo
+**Status:** Completed; all tickets T0001-T0008 Done
 **Date:** 2026-11-09
 **Selected route:** grimoire-refine -> grimoire-spec -> grimoire-slice; stop at artifacts
 

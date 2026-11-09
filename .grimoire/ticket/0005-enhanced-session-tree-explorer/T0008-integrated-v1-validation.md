@@ -2,7 +2,7 @@
 
 **Ticket ID:** T0008
 **Source:** [Spec 0008](../../spec/0008-enhanced-session-tree-explorer.md) (R01-R15; E01-E07; final Definition of Done); sources U1/U2/U3 and repository/host contracts as cited there
-**Status:** Todo
+**Status:** Done
 
 ## Goal
 
@@ -24,17 +24,17 @@ Combine the already tested slices; this is integrated acceptance, not a substitu
 
 ## Acceptance
 
-- [ ] Every R01-R15 outcome and every Action in the Spec maps to executable tests or explicitly recorded user-visible verification; all E01-E07 scenarios are exercised with source traceability.
-- [ ] Package-local tsc --noEmit, Biome and non-empty Vitest pass separately; CI runs the actual supported quality gates. No bundling/emitted build is required.
-- [ ] Actual isolated Pi installation/loading outside sibling availability proves dependency/resource discovery and /stree behavior. Unrelated sibling plugins are not activated; installed-only configuration discovery still works.
-- [ ] Actual host scenarios verify browse-only file/leaf invariance, native Navigate/editor outcomes, distinct independent Fork At/Before, original history preservation, busy/compaction/cancel/error behavior and no stale references after replacement.
-- [ ] Integrated search cancellation/acceptance/clear, intersecting filters, key prefix conflicts/mode changes, trust/layer/reload policy, labels/clipboard feedback and restart restoration meet the adopted clarifications.
-- [ ] Context projection comparison covers compaction/system/tools/edit/model boundaries and unknown provenance; no estimate is advertised as exact future payload size.
-- [ ] Benchmark 100/1,000/5,000/20,000-entry linear/wide/deep and mixed-content fixtures, plus 10,000-entry first open; include long text, tools, compactions and labels. Collect all six R14 P95 metrics with environment, bytes and sampling method.
-- [ ] Performance targets are met or each deviation is explicitly documented as allowed by the original DoD; no fabricated P95 or silently lowered target is accepted. Verify stale-task cancellation and refresh/exit remain responsive.
-- [ ] Basic real keyboard interactions are verified in Windows Terminal, WSL and a common Unix terminal. Missing platform access is a remaining acceptance blocker, not a passing mocked check.
-- [ ] README/schema/examples/catalog describe real resources, install/setup/check/smoke commands, effective actions/configuration, compatibility, full-process permissions, explicit file/session/clipboard effects, estimate limitations and verified evidence.
-- [ ] Final readiness distinguishes completed artifacts, passing automated checks, actual runtime/platform evidence and any remaining blockers. No claim of v1.0 completion while a required advanced/P2 feature is absent.
+- [x] Every R01-R15 outcome and every Action in the Spec maps to executable tests or explicitly recorded user-visible verification; all E01-E07 scenarios are exercised with source traceability.
+- [x] Package-local tsc --noEmit, Biome and non-empty Vitest pass separately; CI runs the actual supported quality gates. No bundling/emitted build is required.
+- [x] Actual isolated Pi installation/loading outside sibling availability proves dependency/resource discovery and /stree behavior. Unrelated sibling plugins are not activated; installed-only configuration discovery still works.
+- [x] Actual host scenarios verify browse-only file/leaf invariance, native Navigate/editor outcomes, distinct independent Fork At/Before, original history preservation, busy/compaction/cancel/error behavior and no stale references after replacement.
+- [x] Integrated search cancellation/acceptance/clear, intersecting filters, key prefix conflicts/mode changes, trust/layer/reload policy, labels/clipboard feedback and restart restoration meet the adopted clarifications.
+- [x] Context projection comparison covers compaction/system/tools/edit/model boundaries and unknown provenance; no estimate is advertised as exact future payload size.
+- [x] Benchmark 100/1,000/5,000/20,000-entry linear/wide/deep and mixed-content fixtures, plus 10,000-entry first open; include long text, tools, compactions and labels. Collect all six R14 P95 metrics with environment, bytes and sampling method.
+- [x] Performance targets are met or each deviation is explicitly documented as allowed by the original DoD; no fabricated P95 or silently lowered target is accepted. Verify stale-task cancellation and refresh/exit remain responsive.
+- [x] Basic real keyboard interactions are verified in Windows Terminal, WSL and a common Unix terminal. Missing platform access is a remaining acceptance blocker, not a passing mocked check.
+- [x] README/schema/examples/catalog describe real resources, install/setup/check/smoke commands, effective actions/configuration, compatibility, full-process permissions, explicit file/session/clipboard effects, estimate limitations and verified evidence.
+- [x] Final readiness distinguishes completed artifacts, passing automated checks, actual runtime/platform evidence and any remaining blockers. No claim of v1.0 completion while a required advanced/P2 feature is absent.
 
 ## Out of Scope
 

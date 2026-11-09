@@ -103,35 +103,56 @@ export function buildTreeIndex(entries: SessionEntry[]): TreeIndex {
 		);
 	}
 
-	function traverse(
-		id: string,
-		rawDepth: number,
-		turnDepth: number,
-		branchDepth: number,
-	) {
-		preorderIds.push(id);
-		rawDepthById.set(id, rawDepth);
-		turnDepthById.set(id, turnDepth);
-		branchDepthById.set(id, branchDepth);
-
-		const children = childrenById.get(id) ?? [];
-		const isFork = children.length > 1;
-
-		for (const childId of children) {
-			const childEntry = entryById.get(childId);
-			const childTurnDepth = isUserMessage(childEntry)
-				? turnDepth + 1
-				: turnDepth;
-			const childBranchDepth = isFork ? branchDepth + 1 : branchDepth;
-
-			traverse(childId, rawDepth + 1, childTurnDepth, childBranchDepth);
-		}
+	interface StackFrame {
+		id: string;
+		rawDepth: number;
+		turnDepth: number;
+		branchDepth: number;
 	}
 
 	for (const rootId of rootIds) {
 		const rootEntry = entryById.get(rootId);
 		const initialTurn = isUserMessage(rootEntry) ? 1 : 0;
-		traverse(rootId, 0, initialTurn, 0);
+
+		const stack: StackFrame[] = [
+			{
+				id: rootId,
+				rawDepth: 0,
+				turnDepth: initialTurn,
+				branchDepth: 0,
+			},
+		];
+
+		while (stack.length > 0) {
+			const frame = stack.pop();
+			if (!frame) break;
+			const { id, rawDepth, turnDepth, branchDepth } = frame;
+
+			preorderIds.push(id);
+			rawDepthById.set(id, rawDepth);
+			turnDepthById.set(id, turnDepth);
+			branchDepthById.set(id, branchDepth);
+
+			const children = childrenById.get(id) ?? [];
+			const isFork = children.length > 1;
+
+			// Push in reverse order so children[0] is popped first
+			for (let i = children.length - 1; i >= 0; i--) {
+				const childId = children[i];
+				const childEntry = entryById.get(childId);
+				const childTurnDepth = isUserMessage(childEntry)
+					? turnDepth + 1
+					: turnDepth;
+				const childBranchDepth = isFork ? branchDepth + 1 : branchDepth;
+
+				stack.push({
+					id: childId,
+					rawDepth: rawDepth + 1,
+					turnDepth: childTurnDepth,
+					branchDepth: childBranchDepth,
+				});
+			}
+		}
 	}
 
 	return {

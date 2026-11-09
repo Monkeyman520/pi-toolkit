@@ -180,29 +180,33 @@ export function isNodeVisible(
 
 export function countSubtreeDescendants(id: string, index: TreeIndex): number {
 	let count = 0;
-	function walk(nodeId: string) {
-		const children = index.childrenById.get(nodeId) ?? [];
+	const stack: string[] = [id];
+	while (stack.length > 0) {
+		const cur = stack.pop();
+		if (!cur) break;
+		const children = index.childrenById.get(cur) ?? [];
 		count += children.length;
 		for (const c of children) {
-			walk(c);
+			stack.push(c);
 		}
 	}
-	walk(id);
 	return count;
 }
 
 export function countSubtreeForks(id: string, index: TreeIndex): number {
 	let forks = 0;
-	function walk(nodeId: string) {
-		const children = index.childrenById.get(nodeId) ?? [];
+	const stack: string[] = [id];
+	while (stack.length > 0) {
+		const cur = stack.pop();
+		if (!cur) break;
+		const children = index.childrenById.get(cur) ?? [];
 		if (children.length > 1) {
 			forks++;
 		}
 		for (const c of children) {
-			walk(c);
+			stack.push(c);
 		}
 	}
-	walk(id);
 	return forks;
 }
 
@@ -216,17 +220,11 @@ export function isNodeCollapsed(
 	state: ExplorerState,
 ): boolean {
 	// 1. Temporary search reveal precedence (expanded)
-	if (state.temporaryRevealedIds.has(nodeId)) {
-		return false;
-	}
-
-	// Check if any descendant is temporarily revealed (must expand ancestor)
-	const children = index.childrenById.get(nodeId) ?? [];
-	for (const childId of children) {
-		if (
-			state.temporaryRevealedIds.has(childId) ||
-			isSubtreeRevealed(childId, index, state.temporaryRevealedIds)
-		) {
+	if (state.temporaryRevealedIds.size > 0) {
+		if (state.temporaryRevealedIds.has(nodeId)) {
+			return false;
+		}
+		if (isSubtreeRevealed(nodeId, index, state.temporaryRevealedIds)) {
 			return false;
 		}
 	}
@@ -265,8 +263,7 @@ export function isNodeCollapsed(
 					? getActivePathIds(index, state.sessionLeafId)
 					: state.focusedPathIds;
 
-			const isBranchFocused =
-				targetPath.has(nodeId) || isSubtreeFocused(nodeId, index, targetPath);
+			const isBranchFocused = targetPath.has(nodeId);
 
 			if (!isBranchFocused) {
 				return true;
@@ -282,24 +279,15 @@ function isSubtreeRevealed(
 	index: TreeIndex,
 	revealed: Set<string>,
 ): boolean {
-	const children = index.childrenById.get(id) ?? [];
-	for (const c of children) {
-		if (revealed.has(c) || isSubtreeRevealed(c, index, revealed)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-function isSubtreeFocused(
-	id: string,
-	index: TreeIndex,
-	focused: Set<string>,
-): boolean {
-	const children = index.childrenById.get(id) ?? [];
-	for (const c of children) {
-		if (focused.has(c) || isSubtreeFocused(c, index, focused)) {
-			return true;
+	if (revealed.size === 0) return false;
+	const stack: string[] = [id];
+	while (stack.length > 0) {
+		const cur = stack.pop();
+		if (!cur) break;
+		const children = index.childrenById.get(cur) ?? [];
+		for (const c of children) {
+			if (revealed.has(c)) return true;
+			stack.push(c);
 		}
 	}
 	return false;
@@ -327,12 +315,25 @@ export function buildDisplayProjection(
 ): DisplayNode[] {
 	const nodes: DisplayNode[] = [];
 
-	function processNode(
-		id: string,
-		nearestVisibleParentId: string | null,
-	): void {
+	interface ProcessFrame {
+		id: string;
+		nearestVisibleParentId: string | null;
+	}
+
+	const stack: ProcessFrame[] = [];
+
+	// Push roots in reverse order
+	for (let i = index.rootIds.length - 1; i >= 0; i--) {
+		stack.push({ id: index.rootIds[i], nearestVisibleParentId: null });
+	}
+
+	while (stack.length > 0) {
+		const frame = stack.pop();
+		if (!frame) break;
+		const { id, nearestVisibleParentId } = frame;
+
 		const entry = index.entryById.get(id);
-		if (!entry) return;
+		if (!entry) continue;
 
 		const isTemporary = state.temporaryRevealedIds.has(id);
 		const visible = isNodeVisible(
@@ -375,25 +376,23 @@ export function buildDisplayProjection(
 			nodes.push(node);
 
 			if (collapsed) {
-				// Stop descending into children because this node is collapsed!
-				return;
+				continue;
 			}
 
-			// If this node is a fork and children might be collapsed as sibling branches
+			// To preserve exact preorder child processing:
 			for (const childId of children) {
 				const isChildBranchCollapsed =
 					isFork && isNodeCollapsed(childId, index, state);
 
 				if (isChildBranchCollapsed) {
-					// Render virtual collapsed branch row!
 					const childEntry = index.entryById.get(childId);
 					const childSummary = childEntry
 						? extractSummary(childEntry).summaryText
 						: "(branch)";
 					const descCount = countSubtreeDescendants(childId, index) + 1;
 					const forkCount = countSubtreeForks(childId, index);
-
 					const virtualId = `virtual:branch:${childId}`;
+
 					nodes.push({
 						id: virtualId,
 						realId: null,
@@ -417,21 +416,22 @@ export function buildDisplayProjection(
 						virtualDescendantCount: descCount,
 						virtualForkCount: forkCount,
 					});
-				} else {
-					processNode(childId, id);
+				}
+			}
+
+			for (let i = children.length - 1; i >= 0; i--) {
+				const childId = children[i];
+				const isChildBranchCollapsed =
+					isFork && isNodeCollapsed(childId, index, state);
+				if (!isChildBranchCollapsed) {
+					stack.push({ id: childId, nearestVisibleParentId: id });
 				}
 			}
 		} else {
-			// Hidden node (e.g. assistant or filtered out)
-			// Pass the nearestVisibleParentId down to its children!
-			for (const childId of children) {
-				processNode(childId, nearestVisibleParentId);
+			for (let i = children.length - 1; i >= 0; i--) {
+				stack.push({ id: children[i], nearestVisibleParentId });
 			}
 		}
-	}
-
-	for (const rootId of index.rootIds) {
-		processNode(rootId, null);
 	}
 
 	return nodes;

@@ -1,7 +1,7 @@
 # Enhanced Session Tree Explorer
 
 **Spec ID:** 0008
-**Status:** Ready for ticket execution; implementation not started
+**Status:** Implemented
 **Date:** 2026-11-09
 **Endpoint:** Spec -> ticket set; no implementation or separate implementation-plan stage
 **Tickets:** [0005 Enhanced Session Tree Explorer](../ticket/0005-enhanced-session-tree-explorer/README.md)
