@@ -15,6 +15,7 @@ export interface SessionMessage {
 	sections?: Record<string, string | null>;
 	toolsAdded?: unknown[];
 	toolsRemoved?: unknown[];
+	usage?: { input?: number; output?: number; totalTokens?: number };
 }
 
 export interface RawSessionEntry {
@@ -131,6 +132,16 @@ export interface ExplorerState {
 	previewNodeId: string | null;
 }
 
+export interface ContextMetrics {
+	entryId: string;
+	tokens: number | null;
+	contextWindow: number | null;
+	percentage: number | null;
+	modelId?: string;
+	source: "active-context" | "projection-estimate" | "unknown";
+	estimated: boolean;
+}
+
 export interface DisplayNode {
 	id: string;
 	realId: string | null;
@@ -158,6 +169,7 @@ export interface DisplayNode {
 	anchorEntryId?: string;
 	virtualDescendantCount?: number;
 	virtualForkCount?: number;
+	contextMetrics?: ContextMetrics;
 }
 
 export interface ActionContext {

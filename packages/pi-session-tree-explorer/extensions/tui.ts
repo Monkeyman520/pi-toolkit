@@ -1,5 +1,11 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { createActionRegistry, getDefaultKeybindings } from "./actions.ts";
+import {
+	type ActiveModelInfo,
+	ContextMetricsCache,
+	computeContextMetrics,
+	formatContextMetricsBadge,
+} from "./context-metrics.ts";
 import { buildDisplayProjection } from "./display.ts";
 import { KeyResolver } from "./keymap.ts";
 import {
@@ -11,6 +17,7 @@ import {
 import type {
 	ActionContext,
 	ActionDefinition,
+	ContextMetrics,
 	DisplayNode,
 	ExplorerResult,
 	ExplorerState,
@@ -40,6 +47,13 @@ export class SessionTreeComponent {
 	private cachedVersion = -1;
 
 	private searchDocs: SearchDocument[] | null = null;
+	private contextCache = new ContextMetricsCache(512);
+	private activeModel?: ActiveModelInfo;
+	private activeUsage?: {
+		tokens: number | null;
+		contextWindow: number;
+		percent: number | null;
+	};
 	private onSetLabel?: (
 		id: string,
 		label: string | undefined,
@@ -52,6 +66,12 @@ export class SessionTreeComponent {
 
 	constructor(
 		options: SessionTreeComponentOptions & {
+			activeModel?: ActiveModelInfo;
+			activeUsage?: {
+				tokens: number | null;
+				contextWindow: number;
+				percent: number | null;
+			};
 			onSetLabel?: (
 				id: string,
 				label: string | undefined,
@@ -66,6 +86,8 @@ export class SessionTreeComponent {
 		this.state = options.state;
 		this.registry = options.registry ?? createActionRegistry();
 		this.pageSize = options.pageSize ?? 16;
+		this.activeModel = options.activeModel;
+		this.activeUsage = options.activeUsage;
 		this.onSetLabel = options.onSetLabel;
 		this.onRefresh = options.onRefresh;
 		this.onNotify = options.onNotify;
@@ -122,6 +144,39 @@ export class SessionTreeComponent {
 	public invalidate(): void {
 		this.cachedVisibleNodes = null;
 		this.tui.requestRender();
+	}
+
+	public getMetricsForEntry(entryId: string): ContextMetrics | undefined {
+		if (entryId.startsWith("virtual:branch:")) {
+			return undefined;
+		}
+
+		const cached = this.contextCache.get(
+			this.state.sessionId,
+			this.state.version,
+			entryId,
+			this.activeModel?.id,
+		);
+		if (cached) return cached;
+
+		const rawEntries = Array.from(this.index.entryById.values());
+		const metrics = computeContextMetrics({
+			entryId,
+			rawEntries,
+			index: this.index,
+			sessionLeafId: this.state.sessionLeafId,
+			activeUsage: this.activeUsage,
+			activeModel: this.activeModel,
+		});
+
+		this.contextCache.set(
+			this.state.sessionId,
+			this.state.version,
+			entryId,
+			metrics,
+			this.activeModel?.id,
+		);
+		return metrics;
 	}
 
 	public getVisibleNodes(): DisplayNode[] {
@@ -313,13 +368,29 @@ export class SessionTreeComponent {
 			const depthStr = `D${node.turnDepth}`;
 			const labelTag = node.label ? ` [${node.label}]` : "";
 
+			let contextSuffix = "";
+			const metrics = this.getMetricsForEntry(node.id);
+			node.contextMetrics = metrics;
+
+			if (safeWidth >= 120) {
+				const contextBadge = formatContextMetricsBadge(metrics);
+				const modelTag = metrics?.modelId
+					? ` [${metrics.modelId.slice(0, 16)}]`
+					: "";
+				contextSuffix = `  ${depthStr}  ${contextBadge}${modelTag}`;
+			} else if (safeWidth >= 80) {
+				const contextBadge = formatContextMetricsBadge(metrics);
+				contextSuffix = `  ${depthStr}  ${contextBadge}`;
+			} else {
+				contextSuffix = `  ${depthStr}`;
+			}
+
 			const prefix = `${selPrefix}${indent}${marker} `;
-			const suffix = `  ${depthStr}`;
 			const availableTextWidth = Math.max(
 				10,
 				safeWidth -
 					visibleWidth(prefix) -
-					visibleWidth(suffix) -
+					visibleWidth(contextSuffix) -
 					visibleWidth(labelTag) -
 					2,
 			);
@@ -327,7 +398,7 @@ export class SessionTreeComponent {
 				node.summaryText,
 				availableTextWidth,
 			);
-			const row = `${prefix}${truncatedText}${labelTag}${suffix}`;
+			const row = `${prefix}${truncatedText}${labelTag}${contextSuffix}`;
 			lines.push(truncateToWidth(row, safeWidth));
 		}
 
@@ -337,9 +408,14 @@ export class SessionTreeComponent {
 		const selectedNode = visibleNodes[Math.max(selectedIndex, 0)];
 		if (selectedNode) {
 			const detailLine1 = `Selected: ${selectedNode.summaryText}`;
+			const metrics =
+				selectedNode.contextMetrics ?? this.getMetricsForEntry(selectedNode.id);
+			const contextBadge = formatContextMetricsBadge(metrics);
+			const sourceLabel = metrics?.source ? ` (source: ${metrics.source})` : "";
+
 			const detailLine2 = selectedNode.isVirtualSummary
 				? `Virtual Branch Summary  Descendants: ${selectedNode.virtualDescendantCount ?? 0}  Forks: ${selectedNode.virtualForkCount ?? 0}`
-				: `ID: ${selectedNode.id}  RawDepth: ${selectedNode.rawDepth}  Turn: ${selectedNode.turnDepth}  BranchDepth: ${selectedNode.branchDepth}`;
+				: `ID: ${selectedNode.id}  Depth: D${selectedNode.turnDepth}  Branch: ${selectedNode.branchDepth}  Context: ${contextBadge}${sourceLabel}`;
 			lines.push(truncateToWidth(detailLine1, safeWidth));
 			lines.push(truncateToWidth(detailLine2, safeWidth));
 		} else {

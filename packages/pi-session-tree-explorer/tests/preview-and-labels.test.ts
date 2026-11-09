@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createActionRegistry } from "../extensions/actions.ts";
+import { setClipboardWriter } from "../extensions/clipboard.ts";
 import { buildDisplayProjection } from "../extensions/display.ts";
 import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
@@ -7,6 +8,14 @@ import { SessionTreeComponent } from "../extensions/tui.ts";
 import type { ActionContext, SessionEntry } from "../extensions/types.ts";
 
 describe("T0004: Preview, Clipboard Copy & Label Metadata", () => {
+	beforeEach(() => {
+		setClipboardWriter(() => ({ success: true }));
+	});
+
+	afterEach(() => {
+		setClipboardWriter(null);
+	});
+
 	function createFixture() {
 		const longText =
 			"Line 1: Detailed specification analysis\nLine 2: Architectural invariants\nLine 3: Implementation plan";

@@ -2,9 +2,9 @@
 
 An independently installable Pi coding agent extension providing an enhanced session tree explorer with fast navigation, branch discovery, and read-only tree inspection.
 
-## Current status (Tickets T0001, T0002, T0003, T0004 & T0005)
+## Current status (Tickets T0001, T0002, T0003, T0004, T0005 & T0006)
 
-This package delivers **T0001 (Read-only Tree Explorer foundation)**, **T0002 (Vim Navigation, Folding & Filter Projections)**, **T0003 (Layered Configuration & Settings Panel)**, **T0004 (Full-Text Search, Preview & Label Metadata)**, and **T0005 (Safe Native Navigate & Fork Session Operations)**:
+This package delivers **T0001 (Read-only Tree Explorer foundation)**, **T0002 (Vim Navigation, Folding & Filter Projections)**, **T0003 (Layered Configuration & Settings Panel)**, **T0004 (Full-Text Search, Preview & Label Metadata)**, **T0005 (Safe Native Navigate & Fork Session Operations)**, and **T0006 (Honest Context Metrics & Bounded LRU Cache)**:
 - Independent package setup under `packages/pi-session-tree-explorer/` with isolated dependencies, TypeScript ESM, erasable syntax, and Pi 1.5.0 compatibility.
 - Core `TreeIndex` indexing all raw session entry types with original order, cycle protection, and safe handling of missing parents and multiple roots.
 - Exact raw depth, turn depth, and branch depth calculations matching the specification.
@@ -28,6 +28,13 @@ This package delivers **T0001 (Read-only Tree Explorer foundation)**, **T0002 (V
   - **Fork At (`f`):** Creates new independent session duplicating active path through selected entry (`position: "at"`) without restoring editor text.
   - **Fork Before (`F`):** For user messages only, omits selected user prompt from retained path and restores it into editor (`position: "before"`).
   - Neither fork auto-sends model request; optional confirmation dialog (`confirmFork`) is honored; original session remains completely intact.
+- **Honest Context Metrics & Bounded LRU Cache:**
+  - **Distinguishes Effective Context from Cumulative Tokens:** default metric is `Effective Context Tokens / Context Window` for continuing generation from each entry.
+  - **Provenance Guarantee:** Distinguishes `active-context` (from host `getContextUsage()`), `projection-estimate` (read-only historical ancestor projection), and `unknown` (`—`). Null is never coerced to zero.
+  - **Compaction & Edit Isolation:** Uses Pi's canonical `buildSessionProjection` to honor compactions, `firstKeptEntryId` boundaries, and branch-isolated context edits.
+  - **Historical Model Resolution:** Tracks historical model changes and assistant models along ancestor paths, avoiding borrowing the active model's window when models differ.
+  - **Bounded LRU Cache:** 512-entry capacity keyed by session, revision, entry, and model identity. Prioritizes selected node then viewport nodes without blocking TUI rendering.
+  - **Width-Adaptive Rendering:** >=120 columns shows depth, tokens/window percentage, and model; 80-119 columns shows depth and tokens/window percentage; <80 columns moves context metrics into the details panel.
 - **Conflict & Busy Safety:** Rejects operations safely with clear feedback during agent streaming, manual/automatic compaction, or concurrent navigation.
 - **Clean Replacement Lifecycle:** Discards old session references and caches upon replacement, binding cleanly to the fresh session context.
 - **Clipboard Integration:** Copy real Entry ID (`yi`) and node content (`yy`). Refuses virtual branch summaries with informative feedback.
@@ -37,7 +44,7 @@ This package delivers **T0001 (Read-only Tree Explorer foundation)**, **T0002 (V
 - **Interactive TUI Settings Panel & Autocompletion:** `/stree config` opens interactive `SettingsList` panel; autocompletion suggests subcommands, keys, and values.
 - **Installed-Only Panel Discovery:** Uses `pi.events` protocol (`pi-packages:ui:discover`) to announce and discover loaded collection plugin panels without hardcoded cross-package imports.
 
-_Note on full v1.0 scope:_ Historical Context estimates (T0006) and view state persistence (T0007) are scheduled in subsequent tickets.
+_Note on full v1.0 scope:_ Responsive view-state persistence across restarts (T0007) and final integrated validation (T0008) are scheduled in subsequent tickets.
 
 ## Compatibility and resources
 
@@ -148,7 +155,7 @@ npm run smoke
 
 - `npm run typecheck`: Runs `tsc --noEmit` (verifies erasable syntax with no emitted JavaScript).
 - `npm run check`: Runs Biome linter and formatter verification.
-- `npm test`: Runs Vitest unit test suite (12 test files, 76 tests passed) covering `TreeIndex`, 17 node actions, 13 branch actions, 11 fold actions, 8 filter actions, keymap parser, layered config, multi-token completions, search engine, preview overlay, clipboard, label metadata, and safe Navigate / Fork session operations.
+- `npm test`: Runs Vitest unit test suite (13 test files, 84 tests passed) covering `TreeIndex`, 17 node actions, 13 branch actions, 11 fold actions, 8 filter actions, keymap parser, layered config, multi-token completions, search engine, preview overlay, clipboard, label metadata, safe Navigate / Fork session operations, honest Context metrics, and LRU cache.
 - `npm run smoke`: Copies the package to an isolated temporary directory, runs offline dependency installation via `npm ci --omit=dev`, spawns real Pi RPC process, and verifies command registration, `/stree config`, `/stree config reload`, and non-TUI notifications.
 
 ## Permissions and risks
