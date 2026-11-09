@@ -96,6 +96,14 @@ export interface DisplayOptions {
 	layout: "normal" | "compact";
 }
 
+export interface SearchSnapshot {
+	searchQuery: string;
+	selectedEntryId: string | null;
+	temporaryRevealedIds: Set<string>;
+	manualExpandedIds: Set<string>;
+	manualCollapsedIds: Set<string>;
+}
+
 export interface ExplorerState {
 	sessionId: string;
 	selectedEntryId: string | null;
@@ -114,6 +122,13 @@ export interface ExplorerState {
 	manualExpandedIds: Set<string>;
 	manualCollapsedIds: Set<string>;
 	temporaryRevealedIds: Set<string>;
+
+	searchSnapshot?: SearchSnapshot;
+	searchScope: "all" | "focused-subtree";
+	searchRegex: boolean;
+	searchResults: Array<{ id: string; score: number }>;
+	searchResultIndex: number;
+	previewNodeId: string | null;
 }
 
 export interface DisplayNode {
@@ -152,6 +167,12 @@ export interface ActionContext {
 	close: () => void;
 	pageSize?: number;
 	reproject?: () => void;
+	setLabel?: (
+		entryId: string,
+		label: string | undefined,
+	) => Promise<void> | void;
+	refresh?: () => Promise<void> | void;
+	notify?: (message: string, type?: "info" | "warning" | "error") => void;
 }
 
 export interface ActionDefinition {

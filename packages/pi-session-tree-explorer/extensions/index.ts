@@ -22,6 +22,7 @@ import {
 } from "./ui.ts";
 
 export { createActionRegistry, getDefaultKeybindings } from "./actions.ts";
+export { copyToClipboard } from "./clipboard.ts";
 export { getStreeArgumentCompletions } from "./commands.ts";
 export { ConfigManager } from "./config.ts";
 export { getDefaultConfig, SessionTreeConfigSchema } from "./config-schema.ts";
@@ -34,6 +35,12 @@ export {
 } from "./display.ts";
 export { KeyResolver, validateKeymap } from "./keymap.ts";
 export * from "./navigation.ts";
+export {
+	buildSearchIndex,
+	executeSearch,
+	extractContentText,
+	extractFullText,
+} from "./search.ts";
 export { createInitialState } from "./state.ts";
 export { buildTreeIndex } from "./tree-index.ts";
 export { SessionTreeComponent } from "./tui.ts";
@@ -211,6 +218,18 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 						state,
 						registry,
 						keybindings: effectiveConfig.keybindings,
+						onSetLabel: (id, label) => {
+							pi.setLabel(id, label);
+						},
+						onRefresh: async () => {
+							const refreshed = (ctx.sessionManager.getEntries() ??
+								[]) as SessionEntry[];
+							const newIdx = buildTreeIndex(refreshed);
+							Object.assign(index, newIdx);
+						},
+						onNotify: (msg, type) => {
+							ctx.ui.notify(msg, type);
+						},
 					});
 				},
 			);

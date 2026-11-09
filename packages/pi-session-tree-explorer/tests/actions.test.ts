@@ -53,9 +53,33 @@ describe("Action Registry & Browsing Invariants", () => {
 			expect(registry.has(id), `Missing branch action: ${id}`).toBe(true);
 		}
 
-		expect(registry.has("session.close")).toBe(true);
+		const expectedSearchActions = [
+			"search.open",
+			"search.next",
+			"search.prev",
+			"search.clear",
+			"search.accept",
+			"search.toggleRegex",
+			"search.toggleScope",
+		];
+		for (const id of expectedSearchActions) {
+			expect(registry.has(id), `Missing search action: ${id}`).toBe(true);
+		}
+
+		const expectedSessionActions = [
+			"session.preview",
+			"session.copyId",
+			"session.copyContent",
+			"session.setLabel",
+			"session.refresh",
+			"session.close",
+		];
+		for (const id of expectedSessionActions) {
+			expect(registry.has(id), `Missing session action: ${id}`).toBe(true);
+		}
+
 		expect(registry.has("view.reloadConfig")).toBe(true);
-		expect(registry.size).toBe(53);
+		expect(registry.size).toBe(65);
 	});
 
 	it("executes actions updating ExplorerState in memory without mutating session entries", () => {

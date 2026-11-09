@@ -2,6 +2,12 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { createActionRegistry, getDefaultKeybindings } from "./actions.ts";
 import { buildDisplayProjection } from "./display.ts";
 import { KeyResolver } from "./keymap.ts";
+import {
+	buildSearchIndex,
+	executeSearch,
+	extractContentText,
+	type SearchDocument,
+} from "./search.ts";
 import type {
 	ActionContext,
 	ActionDefinition,
@@ -33,19 +39,84 @@ export class SessionTreeComponent {
 	private cachedVisibleNodes: DisplayNode[] | null = null;
 	private cachedVersion = -1;
 
-	constructor(options: SessionTreeComponentOptions) {
+	private searchDocs: SearchDocument[] | null = null;
+	private onSetLabel?: (
+		id: string,
+		label: string | undefined,
+	) => Promise<void> | void;
+	private onRefresh?: () => Promise<void> | void;
+	private onNotify?: (
+		message: string,
+		type?: "info" | "warning" | "error",
+	) => void;
+
+	constructor(
+		options: SessionTreeComponentOptions & {
+			onSetLabel?: (
+				id: string,
+				label: string | undefined,
+			) => Promise<void> | void;
+			onRefresh?: () => Promise<void> | void;
+			onNotify?: (message: string, type?: "info" | "warning" | "error") => void;
+		},
+	) {
 		this.tui = options.tui;
 		this.done = options.done;
 		this.index = options.index;
 		this.state = options.state;
 		this.registry = options.registry ?? createActionRegistry();
 		this.pageSize = options.pageSize ?? 16;
+		this.onSetLabel = options.onSetLabel;
+		this.onRefresh = options.onRefresh;
+		this.onNotify = options.onNotify;
 
 		const bindings = options.keybindings ?? getDefaultKeybindings();
 		this.keyResolver = new KeyResolver({
 			bindings,
 			vimMode: this.state.vimMode,
 		});
+	}
+
+	private getSearchDocs(): SearchDocument[] {
+		if (!this.searchDocs) {
+			this.searchDocs = buildSearchIndex(this.index);
+		}
+		return this.searchDocs;
+	}
+
+	public runSearch(query: string): void {
+		const docs = this.getSearchDocs();
+		const results = executeSearch(
+			query,
+			docs,
+			{
+				mode: this.state.searchRegex ? "regex" : "fuzzy",
+				scope: this.state.searchScope,
+				caseSensitive: false,
+				maxResults: 100,
+				focusedBranchId: this.state.focusedBranchId,
+			},
+			this.index,
+		);
+
+		this.state.searchResults = results.map((r) => ({
+			id: r.document.id,
+			score: r.score,
+		}));
+
+		if (this.state.searchResults.length > 0) {
+			this.state.searchResultIndex = 0;
+			const targetId = this.state.searchResults[0].id;
+			let cur: string | null = targetId;
+			while (cur) {
+				this.state.temporaryRevealedIds.add(cur);
+				cur = this.index.parentById.get(cur) ?? null;
+			}
+			this.state.selectedEntryId = targetId;
+		} else {
+			this.state.searchResultIndex = -1;
+		}
+		this.invalidate();
 	}
 
 	public invalidate(): void {
@@ -68,7 +139,44 @@ export class SessionTreeComponent {
 		const lines: string[] = [];
 		const safeWidth = Math.max(40, width);
 
-		// 1. Help View Overlay
+		// 1. Preview View Overlay
+		if (this.state.mode === "preview") {
+			const targetId = this.state.previewNodeId ?? this.state.selectedEntryId;
+			const entry = targetId ? this.index.entryById.get(targetId) : undefined;
+
+			lines.push(
+				truncateToWidth(
+					`SESSION TREE EXPLORER - PREVIEW [ID: ${targetId ?? "none"}]`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+
+			if (!entry) {
+				lines.push(`Virtual branch summary or missing node: ${targetId ?? ""}`);
+			} else {
+				lines.push(
+					`Type: ${entry.type}  Role: ${entry.message?.role ?? "n/a"}  Timestamp: ${entry.timestamp}`,
+				);
+				if (entry.label) lines.push(`Label: ${entry.label}`);
+				if (entry.message?.model) lines.push(`Model: ${entry.message.model}`);
+				if (entry.message?.toolName)
+					lines.push(`Tool: ${entry.message.toolName}`);
+				lines.push("─".repeat(safeWidth));
+				lines.push("Full Content:");
+
+				const fullText = extractContentText(entry);
+				for (const paragraph of fullText.split("\n")) {
+					lines.push(truncateToWidth(paragraph || " ", safeWidth));
+				}
+			}
+
+			lines.push("─".repeat(safeWidth));
+			lines.push("Press 'p', 'q', or 'Esc' to exit preview.");
+			return lines;
+		}
+
+		// 2. Help View Overlay
 		if (this.state.mode === "help") {
 			lines.push(
 				truncateToWidth("SESSION TREE EXPLORER - SHORTCUT HELP", safeWidth),
@@ -133,6 +241,27 @@ export class SessionTreeComponent {
 			),
 		);
 		lines.push("─".repeat(safeWidth));
+
+		// Search Bar row
+		if (this.state.mode === "search") {
+			const searchStatus = `[${this.state.searchResults.length} matches, scope: ${this.state.searchScope}]`;
+			lines.push(
+				truncateToWidth(
+					`/ ${this.state.searchQuery}█ ${searchStatus}`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+		} else if (this.state.searchQuery) {
+			const searchStatus = `[${this.state.searchResults.length} matches, scope: ${this.state.searchScope} - Esc clears]`;
+			lines.push(
+				truncateToWidth(
+					`/ ${this.state.searchQuery} ${searchStatus}`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+		}
 
 		// 3. Tree Content Viewport
 		if (this.index.entryById.size === 0) {
@@ -242,6 +371,9 @@ export class SessionTreeComponent {
 				this.cachedVisibleNodes = null;
 				this.cachedVersion = -1;
 			},
+			setLabel: this.onSetLabel,
+			refresh: this.onRefresh,
+			notify: this.onNotify,
 		};
 
 		if (!action.enabled || action.enabled(this.state, this.index)) {

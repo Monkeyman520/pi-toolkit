@@ -22,6 +22,11 @@ export function createInitialState(
 		manualExpandedIds: new Set<string>(),
 		manualCollapsedIds: new Set<string>(),
 		temporaryRevealedIds: new Set<string>(),
+		searchScope: "all",
+		searchRegex: false,
+		searchResults: [],
+		searchResultIndex: -1,
+		previewNodeId: null,
 		...override,
 	};
 }

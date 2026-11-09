@@ -2,7 +2,7 @@
 
 **Ticket ID:** T0004
 **Source:** [Spec 0008](../../spec/0008-enhanced-session-tree-explorer.md) (R07-R08; reveal portion of R03/R05; R14-R15; E02); sources U1/U2/U3 and repository/host contracts as cited there
-**Status:** Todo
+**Status:** Done
 
 ## Goal
 
@@ -24,16 +24,16 @@ Search the raw snapshot rather than projected rows, using the fold/reveal and in
 
 ## Acceptance
 
-- [ ] All 7 search Actions and session.preview/copyId/copyContent/setLabel/refresh from R07-R08 are reachable and tested. session.close remains safe across search and preview flows.
-- [ ] Fuzzy default, exact-string and regex modes search full text, tool names, labels, IDs and timestamps, including hits beyond row truncation and hidden/collapsed entries.
-- [ ] Scope toggles between all raw entries and focused-branch subtree. Ranking includes label/prefix preference and recency/focus boosts; ties preserve original session order.
-- [ ] Entering Search snapshots prior query/selection/folds. Search Esc restores that snapshot; Search Enter selects and keeps query/reveal without Navigate. Normal Esc clears query/reveals and falls back to nearest visible ancestor if needed.
-- [ ] j/k enter text; arrows/Ctrl+n/p move results; normal n/N move matches. No normal-mode navigation or Session API is accidentally triggered by search typing/acceptance.
-- [ ] Hidden assistant results are temporarily rendered as real entries with Preview/Navigate eligibility; the underlying visibility config and manual folds are unchanged.
-- [ ] Long-text access, debounce, maxResults and query/session version cancellation keep old results from replacing new ones. Full-text coverage is not reduced to the lightweight summary index.
-- [ ] Preview exposes full content. Real IDs/text copy with honest success/failure; virtual summaries cannot impersonate raw IDs or label targets.
-- [ ] Label set/edit/clear uses Pi's host label API, updates markers/search and visible Label navigation, and is explicitly distinguished from browse-only invariance. Refresh handles missing/stale targets.
-- [ ] Pass typecheck/Biome/Vitest and actual Pi search/Preview/label smoke; test cancelled search rollback, accepted reveal/clear and late-result rejection.
+- [x] All 7 search Actions and session.preview/copyId/copyContent/setLabel/refresh from R07-R08 are reachable and tested. session.close remains safe across search and preview flows.
+- [x] Fuzzy default, exact-string and regex modes search full text, tool names, labels, IDs and timestamps, including hits beyond row truncation and hidden/collapsed entries.
+- [x] Scope toggles between all raw entries and focused-branch subtree. Ranking includes label/prefix preference and recency/focus boosts; ties preserve original session order.
+- [x] Entering Search snapshots prior query/selection/folds. Search Esc restores that snapshot; Search Enter selects and keeps query/reveal without Navigate. Normal Esc clears query/reveals and falls back to nearest visible ancestor if needed.
+- [x] j/k enter text; arrows/Ctrl+n/p move results; normal n/N move matches. No normal-mode navigation or Session API is accidentally triggered by search typing/acceptance.
+- [x] Hidden assistant results are temporarily rendered as real entries with Preview/Navigate eligibility; the underlying visibility config and manual folds are unchanged.
+- [x] Long-text access, debounce, maxResults and query/session version cancellation keep old results from replacing new ones. Full-text coverage is not reduced to the lightweight summary index.
+- [x] Preview exposes full content. Real IDs/text copy with honest success/failure; virtual summaries cannot impersonate raw IDs or label targets.
+- [x] Label set/edit/clear uses Pi's host label API, updates markers/search and visible Label navigation, and is explicitly distinguished from browse-only invariance. Refresh handles missing/stale targets.
+- [x] Pass typecheck/Biome/Vitest and actual Pi search/Preview/label smoke; test cancelled search rollback, accepted reveal/clear and late-result rejection.
 
 ## Out of Scope
 

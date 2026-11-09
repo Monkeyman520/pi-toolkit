@@ -1,3 +1,4 @@
+import { copyToClipboard } from "./clipboard.ts";
 import { defaultDisplayOptions, defaultFoldOptions } from "./display.ts";
 import {
 	findNearestBranch,
@@ -32,7 +33,13 @@ import {
 	navNodePrevUser,
 	navNodeRoot,
 } from "./navigation.ts";
-import type { ActionContext, ActionDefinition } from "./types.ts";
+import { extractFullText } from "./search.ts";
+import type {
+	ActionContext,
+	ActionDefinition,
+	ExplorerState,
+	TreeIndex,
+} from "./types.ts";
 
 function updateSelection(
 	ctx: ActionContext,
@@ -127,13 +134,40 @@ export function getDefaultKeybindings(): Record<string, string[]> {
 		"filter.labeledOnly": [],
 		"filter.reset": [],
 
+		// Search actions
+		"search.open": ["/"],
+		"search.next": ["n"],
+		"search.prev": ["N"],
+		"search.clear": ["esc"],
+		"search.accept": ["enter"],
+		"search.toggleRegex": [],
+		"search.toggleScope": [],
+
 		// View actions
 		"view.toggleVim": [],
 		"view.help": ["?"],
+		"view.reloadConfig": [],
 
 		// Session actions
+		"session.preview": ["p"],
+		"session.copyId": ["yi"],
+		"session.copyContent": ["yy"],
+		"session.setLabel": ["m"],
+		"session.refresh": ["r"],
 		"session.close": ["q", "esc"],
 	};
+}
+
+function revealPathToRoot(
+	nodeId: string,
+	index: TreeIndex,
+	state: ExplorerState,
+) {
+	let cur: string | null = nodeId;
+	while (cur) {
+		state.temporaryRevealedIds.add(cur);
+		cur = index.parentById.get(cur) ?? null;
+	}
 }
 
 export function createActionRegistry(): Map<string, ActionDefinition> {
@@ -867,15 +901,296 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	});
 
 	// Session Close Action
+
+	// 7 Search Actions
+	register({
+		id: "search.open",
+		description: "Open search mode",
+		defaultKeys: ["/"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			ctx.state.searchSnapshot = {
+				searchQuery: ctx.state.searchQuery,
+				selectedEntryId: ctx.state.selectedEntryId,
+				temporaryRevealedIds: new Set(ctx.state.temporaryRevealedIds),
+				manualExpandedIds: new Set(ctx.state.manualExpandedIds),
+				manualCollapsedIds: new Set(ctx.state.manualCollapsedIds),
+			};
+			ctx.state.mode = "search";
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "search.next",
+		description: "Next search match",
+		defaultKeys: ["n"],
+		modes: ["normal", "search"],
+		execute: (ctx) => {
+			if (ctx.state.searchResults.length === 0) return;
+			const nextIdx =
+				(ctx.state.searchResultIndex + 1) % ctx.state.searchResults.length;
+			ctx.state.searchResultIndex = nextIdx;
+			const targetId = ctx.state.searchResults[nextIdx].id;
+			revealPathToRoot(targetId, ctx.index, ctx.state);
+			ctx.state.selectedEntryId = targetId;
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "search.prev",
+		description: "Previous search match",
+		defaultKeys: ["N"],
+		modes: ["normal", "search"],
+		execute: (ctx) => {
+			if (ctx.state.searchResults.length === 0) return;
+			const prevIdx =
+				(ctx.state.searchResultIndex - 1 + ctx.state.searchResults.length) %
+				ctx.state.searchResults.length;
+			ctx.state.searchResultIndex = prevIdx;
+			const targetId = ctx.state.searchResults[prevIdx].id;
+			revealPathToRoot(targetId, ctx.index, ctx.state);
+			ctx.state.selectedEntryId = targetId;
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "search.clear",
+		description: "Clear search query and temporary reveals",
+		defaultKeys: ["esc"],
+		modes: ["normal", "search"],
+		execute: (ctx) => {
+			if (ctx.state.mode === "search") {
+				// Cancel search: restore pre-search snapshot
+				if (ctx.state.searchSnapshot) {
+					ctx.state.searchQuery = ctx.state.searchSnapshot.searchQuery;
+					ctx.state.selectedEntryId = ctx.state.searchSnapshot.selectedEntryId;
+					ctx.state.temporaryRevealedIds = new Set(
+						ctx.state.searchSnapshot.temporaryRevealedIds,
+					);
+					ctx.state.manualExpandedIds = new Set(
+						ctx.state.searchSnapshot.manualExpandedIds,
+					);
+					ctx.state.manualCollapsedIds = new Set(
+						ctx.state.searchSnapshot.manualCollapsedIds,
+					);
+					ctx.state.searchSnapshot = undefined;
+				}
+				ctx.state.mode = "normal";
+			} else {
+				// Normal mode Esc: clear query and temporary reveals
+				ctx.state.searchQuery = "";
+				ctx.state.temporaryRevealedIds.clear();
+
+				// If current selection became hidden, fall back to nearest visible ancestor
+				ctx.reproject?.();
+				const current = ctx.state.selectedEntryId;
+				if (current && !ctx.visibleNodes.some((n) => n.id === current)) {
+					let ancestor = ctx.index.parentById.get(current);
+					while (ancestor) {
+						if (ctx.visibleNodes.some((n) => n.id === ancestor)) {
+							ctx.state.selectedEntryId = ancestor;
+							break;
+						}
+						ancestor = ctx.index.parentById.get(ancestor) ?? null;
+					}
+					if (
+						!ctx.state.selectedEntryId ||
+						!ctx.visibleNodes.some((n) => n.id === ctx.state.selectedEntryId)
+					) {
+						ctx.state.selectedEntryId = ctx.visibleNodes[0]?.id ?? null;
+					}
+				}
+			}
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "search.accept",
+		description:
+			"Select highlighted match and exit search mode without navigating",
+		defaultKeys: ["enter"],
+		modes: ["search"],
+		execute: (ctx) => {
+			if (
+				ctx.state.searchResults.length > 0 &&
+				ctx.state.searchResultIndex >= 0
+			) {
+				const match = ctx.state.searchResults[ctx.state.searchResultIndex];
+				if (match) {
+					revealPathToRoot(match.id, ctx.index, ctx.state);
+					ctx.state.selectedEntryId = match.id;
+				}
+			}
+			ctx.state.mode = "normal";
+			ctx.state.searchSnapshot = undefined; // Accepted
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "search.toggleRegex",
+		description: "Toggle regex search mode",
+		defaultKeys: [],
+		modes: ["normal", "search"],
+		execute: (ctx) => {
+			ctx.state.searchRegex = !ctx.state.searchRegex;
+			ctx.state.version++;
+		},
+	});
+
+	register({
+		id: "search.toggleScope",
+		description: "Toggle search scope between all entries and focused subtree",
+		defaultKeys: [],
+		modes: ["normal", "search"],
+		execute: (ctx) => {
+			ctx.state.searchScope =
+				ctx.state.searchScope === "all" ? "focused-subtree" : "all";
+			ctx.state.version++;
+		},
+	});
+
+	// Session Inspection & Metadata Actions (Spec R08)
+	register({
+		id: "session.preview",
+		description: "Preview complete node content",
+		defaultKeys: ["p"],
+		modes: ["normal", "preview"],
+		execute: (ctx) => {
+			if (ctx.state.mode === "preview") {
+				ctx.state.mode = "normal";
+				ctx.state.previewNodeId = null;
+			} else {
+				ctx.state.previewNodeId = ctx.state.selectedEntryId;
+				ctx.state.mode = "preview";
+			}
+			ctx.state.version++;
+		},
+	});
+
+	register({
+		id: "session.copyId",
+		description: "Copy Entry ID to clipboard",
+		defaultKeys: ["yi"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			const sel = ctx.state.selectedEntryId;
+			if (!sel || sel.startsWith("virtual:branch:")) {
+				ctx.notify?.("Cannot copy virtual branch summary ID", "warning");
+				return;
+			}
+			const res = copyToClipboard(sel);
+			if (res.success) {
+				ctx.notify?.(`Copied Entry ID: ${sel}`, "info");
+			} else {
+				ctx.notify?.(
+					`Clipboard copy failed: ${res.error ?? "unknown error"}`,
+					"warning",
+				);
+			}
+		},
+	});
+
+	register({
+		id: "session.copyContent",
+		description: "Copy node text content to clipboard",
+		defaultKeys: ["yy"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			const sel = ctx.state.selectedEntryId;
+			if (!sel || sel.startsWith("virtual:branch:")) {
+				ctx.notify?.("Cannot copy virtual branch summary content", "warning");
+				return;
+			}
+			const entry = ctx.index.entryById.get(sel);
+			if (!entry) return;
+
+			const fullText = extractFullText(entry);
+			const res = copyToClipboard(fullText);
+			if (res.success) {
+				ctx.notify?.("Copied node content to clipboard", "info");
+			} else {
+				ctx.notify?.(
+					`Clipboard copy failed: ${res.error ?? "unknown error"}`,
+					"warning",
+				);
+			}
+		},
+	});
+
+	register({
+		id: "session.setLabel",
+		description: "Set or clear entry bookmark label",
+		defaultKeys: ["m"],
+		modes: ["normal"],
+		execute: async (ctx) => {
+			const sel = ctx.state.selectedEntryId;
+			if (!sel || sel.startsWith("virtual:branch:")) {
+				ctx.notify?.("Cannot label virtual branch summary", "warning");
+				return;
+			}
+			const entry = ctx.index.entryById.get(sel);
+			if (!entry) return;
+
+			// Toggle or edit label
+			const currentLabel = entry.label;
+			const nextLabel = currentLabel ? undefined : "bookmark";
+			entry.label = nextLabel;
+			await ctx.setLabel?.(sel, nextLabel);
+			ctx.state.version++;
+			ctx.reproject?.();
+			ctx.notify?.(
+				nextLabel
+					? `Labeled '${nextLabel}' on ${sel}`
+					: `Cleared label on ${sel}`,
+				"info",
+			);
+		},
+	});
+
+	register({
+		id: "session.refresh",
+		description: "Refresh session entries from host",
+		defaultKeys: ["r"],
+		modes: ["normal"],
+		execute: async (ctx) => {
+			await ctx.refresh?.();
+			ctx.state.version++;
+			ctx.reproject?.();
+			ctx.notify?.("Refreshed session tree.", "info");
+		},
+	});
+
 	register({
 		id: "session.close",
 		description: "Close without session change",
 		defaultKeys: ["q", "esc"],
 		modes: ["normal", "search", "preview", "help"],
 		execute: (ctx) => {
+			if (ctx.state.mode === "preview") {
+				ctx.state.mode = "normal";
+				ctx.state.previewNodeId = null;
+				ctx.state.version++;
+				return;
+			}
 			if (ctx.state.mode === "help") {
 				ctx.state.mode = "normal";
 				ctx.state.version++;
+				return;
+			}
+			if (ctx.state.mode === "search") {
+				// Cancel search via search.clear
+				const action = createActionRegistry().get("search.clear");
+				action?.execute(ctx);
 				return;
 			}
 			ctx.close();
