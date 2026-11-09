@@ -855,6 +855,17 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		},
 	});
 
+	register({
+		id: "view.reloadConfig",
+		description: "Reload configuration from disk safely",
+		defaultKeys: [],
+		modes: ["normal"],
+		execute: async (ctx) => {
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
 	// Session Close Action
 	register({
 		id: "session.close",

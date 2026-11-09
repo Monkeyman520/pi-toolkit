@@ -54,7 +54,8 @@ describe("Action Registry & Browsing Invariants", () => {
 		}
 
 		expect(registry.has("session.close")).toBe(true);
-		expect(registry.size).toBe(52);
+		expect(registry.has("view.reloadConfig")).toBe(true);
+		expect(registry.size).toBe(53);
 	});
 
 	it("executes actions updating ExplorerState in memory without mutating session entries", () => {

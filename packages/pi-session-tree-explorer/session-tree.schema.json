@@ -1,0 +1,271 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "SessionTreeConfig",
+	"description": "Configuration schema for Pi Enhanced Session Tree Explorer",
+	"type": "object",
+	"additionalProperties": false,
+	"properties": {
+		"$schema": {
+			"type": "string"
+		},
+		"vimMode": {
+			"type": "boolean",
+			"default": true
+		},
+		"navigation": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"initialFocus": {
+					"type": "string",
+					"enum": ["active", "root"],
+					"default": "active"
+				},
+				"branchNavigationScope": {
+					"type": "string",
+					"enum": ["nearest-fork"],
+					"default": "nearest-fork"
+				},
+				"branchWrap": {
+					"type": "boolean",
+					"default": false
+				},
+				"focusFollowsSelection": {
+					"type": "string",
+					"enum": ["branch-actions", "always", "never"],
+					"default": "branch-actions"
+				},
+				"autoRevealTarget": {
+					"type": "boolean",
+					"default": true
+				},
+				"skipHiddenNodes": {
+					"type": "boolean",
+					"default": true
+				}
+			}
+		},
+		"display": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"showAssistantNodes": {
+					"type": "boolean",
+					"default": false
+				},
+				"showToolNodes": {
+					"type": "boolean",
+					"default": false
+				},
+				"showThinkingNodes": {
+					"type": "boolean",
+					"default": false
+				},
+				"showMetadataNodes": {
+					"type": "boolean",
+					"default": false
+				},
+				"showCompactionNodes": {
+					"type": "boolean",
+					"default": true
+				},
+				"depthMode": {
+					"type": "string",
+					"enum": ["raw", "turn", "branch"],
+					"default": "turn"
+				},
+				"showDepth": {
+					"type": "boolean",
+					"default": true
+				},
+				"maxMessageLength": {
+					"type": "integer",
+					"minimum": 10,
+					"maximum": 500,
+					"default": 80
+				},
+				"showNodeId": {
+					"type": "boolean",
+					"default": false
+				},
+				"showTimestamps": {
+					"type": "boolean",
+					"default": false
+				},
+				"layout": {
+					"type": "string",
+					"enum": ["normal", "compact"],
+					"default": "normal"
+				}
+			}
+		},
+		"fold": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"mode": {
+					"type": "string",
+					"enum": [
+						"all",
+						"focused-only",
+						"active-only",
+						"depth-limited",
+						"manual"
+					],
+					"default": "focused-only"
+				},
+				"collapseInactiveBranches": {
+					"type": "boolean",
+					"default": true
+				},
+				"collapseLinearPaths": {
+					"type": "boolean",
+					"default": false
+				},
+				"rememberManualOverrides": {
+					"type": "boolean",
+					"default": true
+				},
+				"maxExpandDepth": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 100,
+					"default": 0
+				}
+			}
+		},
+		"search": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"mode": {
+					"type": "string",
+					"enum": ["fuzzy", "exact", "regex"],
+					"default": "fuzzy"
+				},
+				"scope": {
+					"type": "string",
+					"enum": ["all", "focused-subtree"],
+					"default": "all"
+				},
+				"includeHiddenNodes": {
+					"type": "boolean",
+					"default": true
+				},
+				"autoExpandMatches": {
+					"type": "boolean",
+					"default": true
+				},
+				"preserveFoldState": {
+					"type": "boolean",
+					"default": true
+				},
+				"caseSensitive": {
+					"type": "boolean",
+					"default": false
+				},
+				"maxResults": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 1000,
+					"default": 100
+				}
+			}
+		},
+		"context": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"default": true
+				},
+				"showTokens": {
+					"type": "boolean",
+					"default": true
+				},
+				"showPercentage": {
+					"type": "boolean",
+					"default": true
+				},
+				"showModel": {
+					"type": "boolean",
+					"default": false
+				},
+				"estimateHistorical": {
+					"type": "boolean",
+					"default": true
+				},
+				"showEstimateMarker": {
+					"type": "boolean",
+					"default": true
+				},
+				"lazyEvaluation": {
+					"type": "boolean",
+					"default": true
+				},
+				"cacheSize": {
+					"type": "integer",
+					"minimum": 16,
+					"maximum": 10000,
+					"default": 512
+				}
+			}
+		},
+		"session": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"forkPosition": {
+					"type": "string",
+					"enum": ["at", "before"],
+					"default": "at"
+				},
+				"navigateSummarize": {
+					"type": "boolean",
+					"default": false
+				},
+				"confirmFork": {
+					"type": "boolean",
+					"default": false
+				},
+				"busyBehavior": {
+					"type": "string",
+					"enum": ["reject", "wait"],
+					"default": "reject"
+				}
+			}
+		},
+		"performance": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"virtualRendering": {
+					"type": "boolean",
+					"default": true
+				},
+				"renderOverscan": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 200,
+					"default": 20
+				},
+				"searchDebounceMs": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 5000,
+					"default": 40
+				}
+			}
+		},
+		"keybindings": {
+			"type": "object",
+			"additionalProperties": {
+				"type": "array",
+				"items": {
+					"type": "string"
+				}
+			}
+		}
+	}
+}

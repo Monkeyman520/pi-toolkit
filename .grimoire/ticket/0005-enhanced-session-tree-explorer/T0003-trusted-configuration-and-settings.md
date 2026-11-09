@@ -2,7 +2,7 @@
 
 **Ticket ID:** T0003
 **Source:** [Spec 0008](../../spec/0008-enhanced-session-tree-explorer.md) (R01, R13; configuration portion of R06/R11; R15; E06); sources U1/U2/U3 and repository/host contracts as cited there
-**Status:** Todo
+**Status:** Done
 
 ## Goal
 
@@ -24,16 +24,16 @@ Implement the settled built-in/global/trusted-project/runtime precedence and who
 
 ## Acceptance
 
-- [ ] Extension-owned global session-tree.json and trusted-project .pi/session-tree.json are resolved through the host agent-directory/trust APIs, not treated as built-in Pi files.
-- [ ] All R13 configuration fields/defaults and Action binding arrays have TypeBox/schema coverage and exact field-path diagnostics; examples validate against the same contract.
-- [ ] Layers merge objects field by field and replace arrays, with runtime highest precedence. Tests distinguish whole-action-array replacement from appending default keys.
-- [ ] Malformed startup layers are wholly ignored with useful diagnostics while other valid layers survive; a failed reload retains the last valid effective configuration without partial changes.
-- [ ] Untrusted project configuration is not loaded. Config contains data only and cannot inject callbacks or code; reload cannot turn unsafe session actions into valid operations.
-- [ ] /stree follows /<extension> <action> [other-args]; each command/alias provides full-argument, multi-token completions for available subcommands and context-appropriate arguments.
-- [ ] /stree config opens an interactive settings panel in TUI mode, exposes live state and persists changes. Explorer provides a settings entry; non-TUI mode returns text rather than opening custom UI.
-- [ ] Installed-only panel discovery uses pi.events, does not hardcode siblings and keeps instances/lifecycle independent. A library dependency, if selected, is explicitly deliverable outside the checkout.
-- [ ] view.reloadConfig uses the same validated transaction and safety rules. Runtime overrides and temporary search data are not accidentally persisted as global defaults.
-- [ ] Pass typecheck/Biome/Vitest and actual Pi usage of command completions/settings/reload, documenting which host/UI observations were really performed.
+- [x] Extension-owned global session-tree.json and trusted-project .pi/session-tree.json are resolved through the host agent-directory/trust APIs, not treated as built-in Pi files.
+- [x] All R13 configuration fields/defaults and Action binding arrays have TypeBox/schema coverage and exact field-path diagnostics; examples validate against the same contract.
+- [x] Layers merge objects field by field and replace arrays, with runtime highest precedence. Tests distinguish whole-action-array replacement from appending default keys.
+- [x] Malformed startup layers are wholly ignored with useful diagnostics while other valid layers survive; a failed reload retains the last valid effective configuration without partial changes.
+- [x] Untrusted project configuration is not loaded. Config contains data only and cannot inject callbacks or code; reload cannot turn unsafe session actions into valid operations.
+- [x] /stree follows /<extension> <action> [other-args]; each command/alias provides full-argument, multi-token completions for available subcommands and context-appropriate arguments.
+- [x] /stree config opens an interactive settings panel in TUI mode, exposes live state and persists changes. Explorer provides a settings entry; non-TUI mode returns text rather than opening custom UI.
+- [x] Installed-only panel discovery uses pi.events, does not hardcode siblings and keeps instances/lifecycle independent. A library dependency, if selected, is explicitly deliverable outside the checkout.
+- [x] view.reloadConfig uses the same validated transaction and safety rules. Runtime overrides and temporary search data are not accidentally persisted as global defaults.
+- [x] Pass typecheck/Biome/Vitest and actual Pi usage of command completions/settings/reload, documenting which host/UI observations were really performed.
 
 ## Out of Scope
 

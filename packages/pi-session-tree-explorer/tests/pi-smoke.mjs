@@ -151,6 +151,38 @@ try {
 		"/stree notification in non-TUI mode",
 	);
 
+	// Test /stree config in non-TUI mode
+	const configStart = events.length;
+	await command("prompt", { message: "/stree config" });
+	await until(
+		() =>
+			events
+				.slice(configStart)
+				.some(
+					(e) =>
+						e.type === "extension_ui_request" &&
+						e.method === "notify" &&
+						String(e.message).includes("Session Tree Configuration:"),
+				),
+		"/stree config notification in non-TUI mode",
+	);
+
+	// Test /stree config reload
+	const reloadStart = events.length;
+	await command("prompt", { message: "/stree config reload" });
+	await until(
+		() =>
+			events
+				.slice(reloadStart)
+				.some(
+					(e) =>
+						e.type === "extension_ui_request" &&
+						e.method === "notify" &&
+						String(e.message).includes("reloaded successfully"),
+				),
+		"/stree config reload notification",
+	);
+
 	assert.ok(!stderr.includes("Failed to load extension"), stderr);
 	child.stdin.end();
 	await Promise.race([
