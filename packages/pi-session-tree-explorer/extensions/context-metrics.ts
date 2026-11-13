@@ -1,4 +1,7 @@
-import { buildSessionProjection } from "@earendil-works/pi-coding-agent";
+import {
+	buildSessionProjection,
+	estimateTokens,
+} from "@earendil-works/pi-coding-agent";
 import type { ContextMetrics, SessionEntry, TreeIndex } from "./types.ts";
 
 export interface ActiveModelInfo {
@@ -31,14 +34,19 @@ export function resolveContextWindow(
 		return activeModel?.contextWindow ?? null;
 	}
 
-	if (activeModel && activeModel.id === modelId && activeModel.contextWindow) {
+	if (
+		activeModel &&
+		activeModel.id === modelId &&
+		(!_provider || activeModel.provider === _provider) &&
+		activeModel.contextWindow
+	) {
 		return activeModel.contextWindow;
 	}
 
 	// Normalized lookup
 	const normalized = modelId.toLowerCase().trim();
 	for (const [key, win] of Object.entries(KNOWN_CONTEXT_WINDOWS)) {
-		if (normalized.includes(key) || key.includes(normalized)) {
+		if (normalized === key || normalized.startsWith(`${key}-`)) {
 			return win;
 		}
 	}
@@ -48,50 +56,12 @@ export function resolveContextWindow(
 
 export function estimateMessageTokens(message: unknown): number {
 	if (!message || typeof message !== "object") return 0;
-
-	const msg = message as {
-		role?: string;
-		content?: unknown;
-		usage?: { input?: number; output?: number; totalTokens?: number };
-	};
-
-	// Use recorded usage if available
-	if (msg.usage?.totalTokens && msg.usage.totalTokens > 0) {
-		return msg.usage.totalTokens;
-	}
-
-	let charCount = 0;
-	const content = msg.content;
-	if (typeof content === "string") {
-		charCount += content.length;
-	} else if (Array.isArray(content)) {
-		for (const block of content) {
-			if (typeof block === "string") {
-				charCount += block.length;
-			} else if (block && typeof block === "object") {
-				if (
-					"text" in block &&
-					typeof (block as { text: unknown }).text === "string"
-				) {
-					charCount += (block as { text: string }).text.length;
-				}
-				if (
-					"name" in block &&
-					typeof (block as { name: unknown }).name === "string"
-				) {
-					charCount += (block as { name: string }).name.length;
-				}
-				if ("input" in block) {
-					charCount += JSON.stringify(
-						(block as { input: unknown }).input,
-					).length;
-				}
-			}
-		}
-	}
-
-	// Approximate token estimation: ~3.8 chars per token
-	return Math.max(1, Math.ceil(charCount / 3.8));
+	const msg = message as { role?: string; content?: unknown };
+	const normalized =
+		msg.role === "assistant" && typeof msg.content === "string"
+			? { ...msg, content: [{ type: "text", text: msg.content }] }
+			: msg;
+	return estimateTokens(normalized as Parameters<typeof estimateTokens>[0]);
 }
 
 export function estimateContextTokens(projectionMessages: unknown[]): number {
@@ -169,9 +139,23 @@ export function computeContextMetrics(
 
 	// 2. Historical Node: pure read-only projection
 	try {
+		if (!index.entryById.has(entryId))
+			throw new Error("Missing context target");
+		// Use bounded, normalized topology without altering any host/raw entry.
+		const normalized = new Map(
+			rawEntries.map((entry) => [
+				entry.id,
+				{ ...entry, parentId: index.parentById.get(entry.id) ?? null },
+			]),
+		);
+		if (!normalized.has(entryId)) throw new Error("Missing snapshot entry");
+		const safeEntries = [...normalized.values()] as unknown as Parameters<
+			typeof buildSessionProjection
+		>[0];
 		const projection = buildSessionProjection(
-			rawEntries as unknown as Parameters<typeof buildSessionProjection>[0],
+			safeEntries,
 			entryId,
+			new Map(safeEntries.map((entry) => [entry.id, entry])),
 		);
 		const tokens = estimateContextTokens(projection.messages);
 
@@ -180,14 +164,11 @@ export function computeContextMetrics(
 			index,
 			projection.model,
 		);
-		const historicalModelId = historicalModel?.modelId || activeModel?.id;
-		const historicalProvider =
-			historicalModel?.provider || activeModel?.provider;
-		const contextWindow = resolveContextWindow(
-			historicalModelId,
-			historicalProvider,
-			activeModel,
-		);
+		const historicalModelId = historicalModel?.modelId;
+		const historicalProvider = historicalModel?.provider;
+		const contextWindow = historicalModelId
+			? resolveContextWindow(historicalModelId, historicalProvider, activeModel)
+			: null;
 
 		const percentage =
 			tokens !== null && contextWindow !== null && contextWindow > 0

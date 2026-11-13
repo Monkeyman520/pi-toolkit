@@ -36,7 +36,10 @@ export function defaultFoldOptions(): FoldOptions {
 	};
 }
 
-export function extractSummary(entry: SessionEntry): {
+export function extractSummary(
+	entry: SessionEntry,
+	showThinking = false,
+): {
 	summaryText: string;
 	role?: string;
 } {
@@ -61,6 +64,15 @@ export function extractSummary(entry: SessionEntry): {
 			}
 		}
 
+		if (showThinking && Array.isArray(content))
+			for (const block of content)
+				if (
+					block &&
+					typeof block === "object" &&
+					"thinking" in block &&
+					typeof block.thinking === "string"
+				)
+					text += ` ${block.thinking}`;
 		const clean = text.replace(/\s+/g, " ").trim();
 		if (role === "user") {
 			return { summaryText: clean || "(empty prompt)", role };
@@ -151,6 +163,7 @@ export function isNodeVisible(
 		entry.type === "model_change" ||
 		entry.type === "thinking_level_change" ||
 		entry.type === "usage" ||
+		entry.type === "label" ||
 		entry.type === "session_info" ||
 		entry.type === "custom"
 	) {
@@ -172,7 +185,7 @@ export function isNodeVisible(
 	}
 
 	if (display.labeledOnly) {
-		if (!entry.label) return false;
+		if (!index.displayLabelsById.has(entry.id)) return false;
 	}
 
 	return true;
@@ -312,127 +325,247 @@ function getActivePathIds(
 export function buildDisplayProjection(
 	index: TreeIndex,
 	state: ExplorerState,
+	summaryFor: typeof extractSummary = extractSummary,
 ): DisplayNode[] {
 	const nodes: DisplayNode[] = [];
-
-	interface ProcessFrame {
+	const activePath = getActivePathIds(index, state.sessionLeafId);
+	const revealedAncestors = new Set<string>();
+	for (const id of state.temporaryRevealedIds) {
+		let cur: string | null = id;
+		while (cur && !revealedAncestors.has(cur)) {
+			revealedAncestors.add(cur);
+			cur = index.parentById.get(cur) ?? null;
+		}
+	}
+	const collapsed = (id: string) => {
+		if (revealedAncestors.has(id)) return false;
+		if (state.manualCollapsedIds.has(id)) return true;
+		if (state.manualExpandedIds.has(id)) return false;
+		const mode = state.foldOptions.mode;
+		if (mode === "depth-limited")
+			return (
+				(index.rawDepthById.get(id) ?? 0) >= state.foldOptions.maxExpandDepth
+			);
+		if (
+			(mode === "focused-only" || mode === "active-only") &&
+			state.foldOptions.collapseInactiveBranches
+		) {
+			const parent = index.parentById.get(id);
+			return (
+				!!parent &&
+				(index.childrenById.get(parent)?.length ?? 0) > 1 &&
+				!(mode === "active-only" ? activePath : state.focusedPathIds).has(id)
+			);
+		}
+		return false;
+	};
+	const stack: Array<{
 		id: string;
-		nearestVisibleParentId: string | null;
-	}
-
-	const stack: ProcessFrame[] = [];
-
-	// Push roots in reverse order
-	for (let i = index.rootIds.length - 1; i >= 0; i--) {
-		stack.push({ id: index.rootIds[i], nearestVisibleParentId: null });
-	}
-
-	while (stack.length > 0) {
+		parent: string | null;
+		asSummary: boolean;
+	}> = [];
+	for (let i = index.rootIds.length - 1; i >= 0; i--)
+		stack.push({ id: index.rootIds[i], parent: null, asSummary: false });
+	while (stack.length) {
 		const frame = stack.pop();
 		if (!frame) break;
-		const { id, nearestVisibleParentId } = frame;
-
+		const { id, parent } = frame;
 		const entry = index.entryById.get(id);
 		if (!entry) continue;
-
-		const isTemporary = state.temporaryRevealedIds.has(id);
+		if (state.foldOptions.collapseLinearPaths) {
+			const eligible = (candidate: string) => {
+				const item = index.entryById.get(candidate);
+				return (
+					!!item &&
+					index.parentById.get(candidate) != null &&
+					(index.childrenById.get(candidate)?.length ?? 0) === 1 &&
+					!index.displayLabelsById.has(candidate) &&
+					candidate !== state.selectedEntryId &&
+					candidate !== state.sessionLeafId &&
+					!state.manualExpandedIds.has(candidate) &&
+					!revealedAncestors.has(candidate) &&
+					!collapsed(candidate) &&
+					isNodeVisible(item, index, state.displayOptions, false)
+				);
+			};
+			const span: string[] = [];
+			let next: string = id;
+			while (eligible(next)) {
+				span.push(next);
+				next = (index.childrenById.get(next) ?? [])[0];
+			}
+			if (span.length >= 2) {
+				const virtualId = `virtual:linear:${id}`;
+				nodes.push({
+					id: virtualId,
+					realId: null,
+					isVirtual: true,
+					isVirtualSummary: true,
+					anchorEntryId: id,
+					compressedEntryIds: span,
+					kind: "compressed_path",
+					summaryText: `▸ Linear path [${span.length} entries]`,
+					timestamp: entry.timestamp,
+					rawDepth: index.rawDepthById.get(id) ?? 0,
+					turnDepth: index.turnDepthById.get(id) ?? 0,
+					branchDepth: index.branchDepthById.get(id) ?? 0,
+					hasChildren: true,
+					isLeaf: false,
+					isFork: false,
+					isCurrentLeaf: false,
+					isSelected: state.selectedEntryId === virtualId,
+					visibleParentId: parent,
+					isCollapsed: true,
+					isExpanded: false,
+					virtualDescendantCount: span.length,
+					virtualForkCount: 0,
+				});
+				stack.push({ id: next, parent: virtualId, asSummary: false });
+				continue;
+			}
+		}
+		const children = index.childrenById.get(id) ?? [];
 		const visible = isNodeVisible(
 			entry,
 			index,
 			state.displayOptions,
-			isTemporary,
+			state.temporaryRevealedIds.has(id),
 		);
-
-		const children = index.childrenById.get(id) ?? [];
-		const isFork = children.length > 1;
-		const isLeaf = children.length === 0;
-		const isCurrentLeaf = id === state.sessionLeafId;
-		const isSelected = id === state.selectedEntryId;
-		const collapsed = isNodeCollapsed(id, index, state);
-
-		if (visible) {
-			const { summaryText, role } = extractSummary(entry);
-			const node: DisplayNode = {
-				id,
-				realId: id,
-				isVirtual: false,
-				kind: entry.type,
-				role,
-				summaryText,
+		const folded = collapsed(id);
+		const summary = folded && (frame.asSummary || !visible);
+		const summaryId = `virtual:branch:${id}`;
+		const { summaryText, role } = summaryFor(
+			entry,
+			state.displayOptions.showThinkingNodes,
+		);
+		if (summary || visible) {
+			const count = summary
+				? countSubtreeDescendants(id, index) + 1
+				: undefined;
+			const forks = summary ? countSubtreeForks(id, index) : undefined;
+			nodes.push({
+				id: summary ? summaryId : id,
+				realId: summary ? null : id,
+				isVirtual: summary,
+				isVirtualSummary: summary,
+				anchorEntryId: summary ? id : undefined,
+				kind: summary ? "collapsed_branch" : entry.type,
+				role: summary ? undefined : role,
+				summaryText: summary
+					? `▸ ${summaryText} [${count} nodes${forks ? `, ${forks} forks` : ""}]`
+					: summaryText,
 				timestamp: entry.timestamp,
 				rawDepth: index.rawDepthById.get(id) ?? 0,
 				turnDepth: index.turnDepthById.get(id) ?? 0,
 				branchDepth: index.branchDepthById.get(id) ?? 0,
-				hasChildren: children.length > 0,
-				isLeaf,
-				isFork,
-				isCurrentLeaf,
-				isSelected,
-				label: typeof entry.label === "string" ? entry.label : undefined,
-				visibleParentId: nearestVisibleParentId,
-				isCollapsed: collapsed,
-				isExpanded: !collapsed,
-			};
-			nodes.push(node);
+				hasChildren: !summary && children.length > 0,
+				isLeaf: !summary && children.length === 0,
+				isFork: !summary && children.length > 1,
+				isCurrentLeaf: !summary && id === state.sessionLeafId,
+				isSelected: (summary ? summaryId : id) === state.selectedEntryId,
+				label: index.displayLabelsById.get(id),
+				visibleParentId: parent,
+				isCollapsed: folded,
+				isExpanded: !folded,
+				virtualDescendantCount: count,
+				virtualForkCount: forks,
+			});
+			if (folded) continue;
+		}
+		for (let i = children.length - 1; i >= 0; i--)
+			stack.push({
+				id: children[i],
+				parent: visible ? id : parent,
+				asSummary: children.length > 1,
+			});
+	}
+	return nodes;
+}
 
-			if (collapsed) {
-				continue;
-			}
-
-			// To preserve exact preorder child processing:
-			for (const childId of children) {
-				const isChildBranchCollapsed =
-					isFork && isNodeCollapsed(childId, index, state);
-
-				if (isChildBranchCollapsed) {
-					const childEntry = index.entryById.get(childId);
-					const childSummary = childEntry
-						? extractSummary(childEntry).summaryText
-						: "(branch)";
-					const descCount = countSubtreeDescendants(childId, index) + 1;
-					const forkCount = countSubtreeForks(childId, index);
-					const virtualId = `virtual:branch:${childId}`;
-
-					nodes.push({
-						id: virtualId,
-						realId: null,
-						isVirtual: true,
-						isVirtualSummary: true,
-						anchorEntryId: childId,
-						kind: "collapsed_branch",
-						summaryText: `▸ ${childSummary} [${descCount} nodes${forkCount > 0 ? `, ${forkCount} forks` : ""}]`,
-						timestamp: childEntry?.timestamp ?? entry.timestamp,
-						rawDepth: index.rawDepthById.get(childId) ?? 0,
-						turnDepth: index.turnDepthById.get(childId) ?? 0,
-						branchDepth: index.branchDepthById.get(childId) ?? 0,
-						hasChildren: false,
-						isLeaf: false,
-						isFork: false,
-						isCurrentLeaf: false,
-						isSelected: virtualId === state.selectedEntryId,
-						visibleParentId: id,
-						isCollapsed: true,
-						isExpanded: false,
-						virtualDescendantCount: descCount,
-						virtualForkCount: forkCount,
-					});
-				}
-			}
-
-			for (let i = children.length - 1; i >= 0; i--) {
-				const childId = children[i];
-				const isChildBranchCollapsed =
-					isFork && isNodeCollapsed(childId, index, state);
-				if (!isChildBranchCollapsed) {
-					stack.push({ id: childId, nearestVisibleParentId: id });
-				}
-			}
-		} else {
-			for (let i = children.length - 1; i >= 0; i--) {
-				stack.push({ id: children[i], nearestVisibleParentId });
-			}
+/** Resolve only IDs present in the raw index or explicit projected anchors. */
+export function rawTargetForSelection(
+	id: string | null,
+	nodes: DisplayNode[],
+	index: TreeIndex,
+): string | null {
+	if (!id) return null;
+	const node = nodes.find((n) => n.id === id);
+	if (node?.isVirtual)
+		return node.anchorEntryId && index.entryById.has(node.anchorEntryId)
+			? node.anchorEntryId
+			: null;
+	return index.entryById.has(id) ? id : null;
+}
+export function reconcileSelection(
+	index: TreeIndex,
+	state: ExplorerState,
+	nodes: DisplayNode[],
+): void {
+	if (nodes.some((n) => n.id === state.selectedEntryId)) return;
+	let cur = state.selectedEntryId
+		? index.parentById.get(state.selectedEntryId)
+		: null;
+	while (cur) {
+		if (nodes.some((n) => n.id === cur)) {
+			state.selectedEntryId = cur;
+			return;
+		}
+		cur = index.parentById.get(cur) ?? null;
+	}
+	state.selectedEntryId = nodes[0]?.id ?? null;
+}
+/** Keep a hidden raw choice inside its subtree before falling back to ancestry. */
+export function resolveDisplayTarget(
+	id: string | null,
+	index: TreeIndex,
+	nodes: DisplayNode[],
+): string | null {
+	if (id && nodes.some((n) => n.id === id)) return id;
+	if (id && index.entryById.has(id)) {
+		const rows = new Map(nodes.map((n) => [n.id, n]));
+		const anchors = new Map(
+			nodes.flatMap((n) =>
+				n.isVirtual
+					? (n.compressedEntryIds ?? [n.anchorEntryId])
+							.filter((id): id is string => !!id)
+							.map((id) => [id, n.id] as const)
+					: [],
+			),
+		);
+		const stack = [id];
+		while (stack.length) {
+			const current = stack.pop();
+			if (!current) break;
+			if (rows.has(current)) return current;
+			const summary = anchors.get(current);
+			if (summary) return summary;
+			const children = index.childrenById.get(current) ?? [];
+			for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
+		}
+		let current = index.parentById.get(id);
+		while (current) {
+			if (rows.has(current)) return current;
+			const summary = anchors.get(current);
+			if (summary) return summary;
+			current = index.parentById.get(current) ?? null;
 		}
 	}
-
-	return nodes;
+	return nodes[0]?.id ?? null;
+}
+/** Expand precisely the real IDs owned by the selected projected summary. */
+export function expandDisplaySelection(
+	id: string,
+	nodes: DisplayNode[],
+	index: TreeIndex,
+	state: ExplorerState,
+): string | null {
+	const target = rawTargetForSelection(id, nodes, index);
+	if (!target) return null;
+	const span = nodes.find((n) => n.id === id)?.compressedEntryIds ?? [target];
+	for (const realId of span)
+		if (index.entryById.has(realId)) {
+			state.manualExpandedIds.add(realId);
+			state.manualCollapsedIds.delete(realId);
+		}
+	return target;
 }

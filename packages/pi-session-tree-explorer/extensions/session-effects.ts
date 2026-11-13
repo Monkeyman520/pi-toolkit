@@ -7,135 +7,121 @@ export interface SessionEffectResult {
 	cancelled?: boolean;
 	error?: string;
 }
-
 export interface ExecuteSessionIntentOptions {
 	intent: ExplorerResult;
+	expectedSessionId?: string;
 	ctx: ExtensionCommandContext;
 	config: SessionTreeConfig;
 	onNotify?: (message: string, type?: "info" | "warning" | "error") => void;
 	onReplacementCleanup?: () => void;
 }
-
-/**
- * Execute session mutation intents (Navigate, Fork At, Fork Before)
- * safely outside the custom TUI lifecycle.
- */
+/** Called only after custom UI completion. The host remains authoritative after every preflight. */
 export async function executeSessionIntent(
 	options: ExecuteSessionIntentOptions,
 ): Promise<SessionEffectResult> {
 	const { intent, ctx, config, onNotify, onReplacementCleanup } = options;
-
-	if (intent.type === "close") {
-		return { success: true };
-	}
-
+	if (intent.type === "close") return { success: true };
+	const reject = (
+		message: string,
+		type: "warning" | "error" = "warning",
+	): SessionEffectResult => {
+		onNotify?.(message, type);
+		return { success: false, error: message };
+	};
+	const cancelled = (message: string): SessionEffectResult => {
+		onNotify?.(message, "info");
+		return { success: false, cancelled: true };
+	};
 	const entryId = intent.entryId;
-
-	// 1. Guard against virtual branch summary IDs
-	if (!entryId || entryId.startsWith("virtual:branch:")) {
-		const msg =
-			intent.type === "navigate"
-				? "Cannot navigate to virtual branch summary. Expand branch first."
-				: "Cannot fork from virtual branch summary. Expand branch first.";
-		onNotify?.(msg, "warning");
-		return { success: false, error: msg };
-	}
-
-	// 2. Revalidate target in current session
-	const targetEntry = ctx.sessionManager.getEntry(entryId);
-	if (!targetEntry) {
-		const msg = `Target entry '${entryId}' no longer exists in current session.`;
-		onNotify?.(msg, "warning");
-		return { success: false, error: msg };
-	}
-
-	// 3. Preflight agent busy check
-	if (!ctx.isIdle()) {
-		const msg =
-			"Wait for the current response or compaction to finish before modifying the session.";
-		onNotify?.(msg, "warning");
-		return { success: false, error: msg };
-	}
-
-	// 4. Execute Navigate
-	if (intent.type === "navigate") {
-		try {
-			const summarize =
-				intent.summarize ?? config.session.navigateSummarize ?? false;
-			const res = await ctx.navigateTree(entryId, { summarize });
-
-			if (res?.cancelled) {
-				onNotify?.("Navigation was cancelled by an extension.", "info");
-				return { success: false, cancelled: true };
-			}
-
+	if (!entryId || entryId.startsWith("virtual:"))
+		return reject(
+			"Cannot navigate or fork a virtual summary. Expand it first.",
+		);
+	const validateTarget = (): string | undefined => {
+		if (
+			options.expectedSessionId &&
+			ctx.sessionManager.getSessionId() !== options.expectedSessionId
+		)
+			return "Session changed while the Explorer was open; reopen before modifying history.";
+		const entry = ctx.sessionManager.getEntry(entryId);
+		if (!entry)
+			return `Target entry '${entryId}' no longer exists in current session.`;
+		if (
+			intent.type === "fork" &&
+			intent.position === "before" &&
+			!(
+				(entry.type === "message" && entry.message?.role === "user") ||
+				entry.type === "custom_message"
+			)
+		)
+			return "Fork Before is only available for user messages. Use 'f' to fork at this entry.";
+		return undefined;
+	};
+	try {
+		const initialError = validateTarget();
+		if (initialError) return reject(initialError);
+		if (!ctx.isIdle()) {
+			if (config.session.busyBehavior !== "wait")
+				return reject(
+					"Wait for the current response or compaction to finish before modifying the session.",
+				);
+			if (
+				!(await ctx.ui.confirm(
+					"Wait for session?",
+					"Wait for the running response, then revalidate this session operation?",
+				))
+			)
+				return cancelled("Waiting was cancelled.");
+			onNotify?.(
+				"Waiting for the current response to finish before revalidating the session operation.",
+				"info",
+			);
+			await ctx.waitForIdle();
+		}
+		const readyError = validateTarget();
+		if (readyError) return reject(readyError);
+		if (!ctx.isIdle())
+			return reject(
+				"Session remains busy; retry after the response or compaction finishes.",
+			);
+		if (intent.type === "navigate") {
+			const result = await ctx.navigateTree(entryId, {
+				summarize: intent.summarize ?? config.session.navigateSummarize,
+			});
+			if (result?.cancelled)
+				return cancelled("Navigation was cancelled by an extension.");
 			onNotify?.(`Navigated session tree to ${entryId}.`, "info");
 			return { success: true };
-		} catch (err) {
-			const errorMsg = `Navigation failed: ${(err as Error).message}`;
-			onNotify?.(errorMsg, "error");
-			return { success: false, error: errorMsg };
 		}
-	}
-
-	// 5. Execute Fork At or Fork Before
-	if (intent.type === "fork") {
-		const position = intent.position;
-
-		// Validate user message requirement for Fork Before
-		if (position === "before") {
-			const isUser =
-				(targetEntry.type === "message" &&
-					targetEntry.message?.role === "user") ||
-				targetEntry.type === "custom_message";
-
-			if (!isUser) {
-				const msg =
-					"Fork Before is only available for user messages. Use 'f' to fork at this entry.";
-				onNotify?.(msg, "warning");
-				return { success: false, error: msg };
-			}
-		}
-
-		// Optional user confirmation
-		if (config.session.confirmFork) {
-			const confirmed = await ctx.ui.confirm(
+		if (
+			config.session.confirmFork &&
+			!(await ctx.ui.confirm(
 				"Confirm Fork",
-				`Create a new independent session forking ${position} '${entryId}'?`,
-			);
-			if (!confirmed) {
-				onNotify?.("Fork was cancelled.", "info");
-				return { success: false, cancelled: true };
-			}
-		}
-
-		try {
-			const res = await ctx.fork(entryId, {
-				position,
-				withSession: async (replacementCtx) => {
-					// Clean up old session references
-					onReplacementCleanup?.();
-
-					const posLabel = position === "before" ? "before" : "at";
-					replacementCtx.ui.notify(
-						`Created and switched to independent forked session (${posLabel} ${entryId}).`,
-						"info",
-					);
-				},
-			});
-
-			if (res?.cancelled) {
-				onNotify?.("Fork was cancelled by an extension.", "info");
-				return { success: false, cancelled: true };
-			}
-
-			return { success: true };
-		} catch (err) {
-			const errorMsg = `Fork failed: ${(err as Error).message}`;
-			onNotify?.(errorMsg, "error");
-			return { success: false, error: errorMsg };
-		}
+				`Create an independent session forking ${intent.position} '${entryId}'?`,
+			))
+		)
+			return cancelled("Fork was cancelled.");
+		const finalError = validateTarget();
+		if (finalError) return reject(finalError);
+		if (!ctx.isIdle())
+			return reject("Session or safety state changed during confirmation.");
+		const result = await ctx.fork(entryId, {
+			position: intent.position,
+			withSession: async (replacementCtx) => {
+				onReplacementCleanup?.();
+				replacementCtx.ui.notify(
+					`Created and switched to independent forked session (${intent.position} ${entryId}).`,
+					"info",
+				);
+			},
+		});
+		return result?.cancelled
+			? cancelled("Fork was cancelled by an extension.")
+			: { success: true };
+	} catch (error) {
+		return reject(
+			`${intent.type === "navigate" ? "Navigation" : "Fork"} failed: ${error instanceof Error ? error.message : String(error)}`,
+			"error",
+		);
 	}
-
-	return { success: true };
 }

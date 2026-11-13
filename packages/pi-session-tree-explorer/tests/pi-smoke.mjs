@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 const root = await mkdtemp(join(tmpdir(), "pi-session-tree-smoke-"));
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,12 +54,77 @@ try {
 		"utf8",
 	);
 
+	const seed = SessionManager.create(projectDir, join(root, "fixtures"));
+	const first = seed.appendMessage({
+		role: "user",
+		content: "first prompt",
+		timestamp: Date.now(),
+	});
+	const assistant = () => ({
+		role: "assistant",
+		content: [{ type: "text", text: "offline answer" }],
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "claude-sonnet-4-5",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp: Date.now(),
+	});
+	const a1 = seed.appendMessage(assistant());
+	const second = seed.appendMessage({
+		role: "user",
+		content: "second prompt",
+		timestamp: Date.now(),
+	});
+	const a2 = seed.appendMessage(assistant());
+	const originalFile = seed.getSessionFile();
+	const probe = join(root, "host-probe.ts");
+	await writeFile(
+		probe,
+		`
+import assert from "node:assert/strict";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { executeSessionIntent } from ${JSON.stringify(pathToFileURL(join(isolated, "extensions", "session-effects.ts")).href)};
+import { getDefaultConfig } from ${JSON.stringify(pathToFileURL(join(isolated, "extensions", "config-schema.ts")).href)};
+export default function(pi:ExtensionAPI){
+ pi.registerCommand("stree-host-probe",{description:"offline test fixture",handler:async(args,ctx)=>{
+  const config=getDefaultConfig();
+  if(args==="navigate"){
+   const result=await executeSessionIntent({ctx,config,intent:{type:"navigate",entryId:${JSON.stringify(second)}},expectedSessionId:ctx.sessionManager.getSessionId()});
+   assert.equal(result.success,true);assert.equal(ctx.sessionManager.getLeafId(),${JSON.stringify(a1)});
+   ctx.ui.notify("HOSTPASS navigate","info");return;
+  }
+  const beforeId=ctx.sessionManager.getSessionId(),beforeFile=ctx.sessionManager.getSessionFile();
+  let cleaned=false,observed=false;
+  const position=args==="at"?"at":"before";
+  const observedCtx={...ctx,fork:(id,opts)=>ctx.fork(id,{...opts,withSession:async fresh=>{
+   observed=true;
+   assert.notEqual(fresh.sessionManager.getSessionId(),beforeId);
+   assert.notEqual(fresh.sessionManager.getSessionFile(),beforeFile);
+   assert.ok(fresh.sessionManager.getEntry(${JSON.stringify(first)}));
+   assert.equal(!!fresh.sessionManager.getEntry(${JSON.stringify(a2)}),position==="at");
+   assert.equal(!!fresh.sessionManager.getEntry(${JSON.stringify(second)}),position==="at");
+   await opts?.withSession?.(fresh);
+  }})};
+  const result=await executeSessionIntent({ctx:observedCtx,config,intent:{type:"fork",entryId:position==="at"?${JSON.stringify(a2)}:${JSON.stringify(second)},position},expectedSessionId:beforeId,onReplacementCleanup:()=>{cleaned=true;}});
+  assert.equal(result.success,true);assert.equal(observed,true);assert.equal(cleaned,true);
+  // No old context is used after replacement; the outer RPC client observes completion.
+ }});
+}`,
+		"utf8",
+	);
+
 	const events = [];
 	let stdout = "";
 	let stderr = "";
-	const piBinary =
-		process.env.PI_BINARY ??
-		"C:/Users/Administrator/AppData/Local/mise/installs/pi/1.5.0/pi.exe";
+	const piBinary = process.env.PI_BINARY ?? "pi";
 
 	child = spawn(
 		piBinary,
@@ -74,6 +140,10 @@ try {
 			"--offline",
 			"-e",
 			isolated,
+			"-e",
+			probe,
+			"--session",
+			originalFile,
 		],
 		{
 			cwd: projectDir,
@@ -183,6 +253,47 @@ try {
 		"/stree config reload notification",
 	);
 
+	const baselineSession = await readFile(originalFile, "utf8");
+	const navStart = events.length;
+	await command("prompt", { message: "/stree-host-probe navigate" });
+	await until(
+		() =>
+			events
+				.slice(navStart)
+				.some(
+					(e) => e.method === "notify" && e.message === "HOSTPASS navigate",
+				),
+		"native Navigate",
+	);
+	// Pi 1.5.0 RPC command actions omit TUI editor restoration; physical TUI evidence is separate.
+	for (const position of ["at", "before"]) {
+		const start = events.length;
+		await command("prompt", { message: `/stree-host-probe ${position}` });
+		await until(
+			() =>
+				events
+					.slice(start)
+					.some(
+						(e) =>
+							e.method === "notify" &&
+							String(e.message).includes("Created and switched to independent"),
+					),
+			`native Fork ${position}`,
+		);
+		// Pi 1.5.0 RPC command actions omit TUI editor restoration; physical TUI evidence is separate.
+	}
+	assert.equal(
+		await readFile(originalFile, "utf8"),
+		baselineSession,
+		"native operations preserve original history bytes",
+	);
+	assert.ok(
+		!events.some(
+			(e) => e.type === "message_start" && e.message?.role === "assistant",
+		),
+		"no model turn is auto-sent",
+	);
+
 	assert.ok(!stderr.includes("Failed to load extension"), stderr);
 	child.stdin.end();
 	await Promise.race([
@@ -193,7 +304,7 @@ try {
 	]);
 
 	console.log(
-		"PASS: Pi standalone smoke - isolated dependencies and /stree registration verified",
+		"PASS: isolated Pi RPC, commands, native Navigate/Fork At/Before, replacement identity and original file preservation (not TUI editor evidence)",
 	);
 } finally {
 	if (child?.exitCode === null) child.kill("SIGKILL");

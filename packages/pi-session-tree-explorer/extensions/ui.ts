@@ -25,6 +25,7 @@ export async function openSessionTreeSettingsPanel(params: {
 }): Promise<void> {
 	const { ctx, events, configManager, onConfigChanged } = params;
 	const config = configManager.getConfig();
+	let pending: Promise<unknown> = Promise.resolve();
 
 	// Installed-only discovery over pi.events per ADR 0004/0005
 	const loadedPanels = discoverLoadedPanels(events);
@@ -106,9 +107,12 @@ export async function openSessionTreeSettingsPanel(params: {
 				if (newValue === "true") parsedVal = true;
 				else if (newValue === "false") parsedVal = false;
 
-				void configManager.updateSetting(id, parsedVal).then(() => {
-					onConfigChanged?.();
-				});
+				pending = configManager
+					.updateSetting(id, parsedVal)
+					.then(() => {
+						onConfigChanged?.();
+					})
+					.catch((error) => ctx.ui.notify(String(error), "error"));
 			},
 			onCancel: () => done(undefined),
 			renderHeader: (_width: number) => [
@@ -118,6 +122,7 @@ export async function openSessionTreeSettingsPanel(params: {
 		});
 		return component;
 	});
+	await pending;
 }
 
 export { DISCOVER_EVENT, isDiscoverPayload, type PluginUiDescriptor };

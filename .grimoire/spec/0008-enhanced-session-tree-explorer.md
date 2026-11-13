@@ -1,7 +1,7 @@
 # Enhanced Session Tree Explorer
 
 **Spec ID:** 0008
-**Status:** Implemented
+**Status:** In Progress
 **Date:** 2026-11-09
 **Endpoint:** Spec -> ticket set; no implementation or separate implementation-plan stage
 **Tickets:** [0005 Enhanced Session Tree Explorer](../ticket/0005-enhanced-session-tree-explorer/README.md)
@@ -11,12 +11,13 @@
 - **U1:** The user's supplied "Enhanced Session Tree Explorer", version 1.0, sections 1-20, in the refinement conversation. This document preserves its requirements in English; the illustrative UI numbers and reference file layout are not measured results or mandatory file-per-module boundaries.
 - **U2:** The user's first clarification: full v1.0 is the final acceptance scope; P0/P1/P2 determine delivery order, not feature removal. In Search mode, j/k enter text, arrows and Ctrl+n/p select results. The authorized endpoint is C: English Spec -> Ticket Set.
 - **U3:** The user's subsequent "adopt" accepts all four clarification groups: search cancellation/acceptance/clearing, traversal order/search scopes, intersecting filters, and configuration failure/merge/trust behavior. The settled contract is reproduced below.
+- **U4:** In the remediation conversation, the user approved amending this specification and continuing implementation: preserve fixed f/F, visible-only node navigation and reversible fold semantics; reject conflicting non-default settings with diagnostics; compress linear paths into expandable virtual summaries; support busyBehavior=wait only with explicit confirmation and visible waiting after the Explorer closes. This approval supersedes conflicting configuration value domains, not the remaining v1.0 outcomes.
 - **R1:** [Package development reference](../../packages/README.md), [project context](../CONTEXT.md), [ADR 0001](../adr/0001-independently-installable-pi-packages.md), [ADR 0002](../adr/0002-typescript-esm-plugin-development-stack.md).
 - **R2:** [ADR 0004](../adr/0004-unified-command-grammar-and-dynamic-tui-configuration.md) and [ADR 0005](../adr/0005-versioned-plugin-support-library.md). ADR 0005 supersedes only ADR 0004's blanket shared-code restriction.
 - **H1:** Installed Pi 1.5.0 package metadata and its bundled docs/extensions.md, docs/session-format.md, docs/security.md; matching local 1.5.0 public declarations in pi-coding-agent's dist/core/extensions/types.d.ts, dist/core/session-manager.d.ts and dist/index.d.ts. Host implementation inspection confirms Navigate's user/custom-message editor-restoration behavior. These are documentation/type/source evidence, not Explorer runtime evidence.
 - Official reference entry points: [extensions](https://pi.dev/docs/latest/extensions), [packages](https://pi.dev/docs/latest/packages), [session format](https://pi.dev/docs/latest/session-format), [security](https://pi.dev/docs/latest/security). Online latest may differ; the installed supported version's contracts prevail.
 
-U2/U3 resolve the conflicts in U1. Repository constraints remain binding. Do not treat the "Implementation Ready" label in U1 as a claim that code, performance, platform behavior, or host loading has been verified.
+U2/U3 resolve the initial conflicts in U1; U4 settles the remediation configuration conflicts described below. Repository constraints remain binding. Completion labels and illustrative output do not establish runtime acceptance.
 
 ## Intent and scope
 
@@ -213,7 +214,7 @@ TUI returns an intent (close, navigate(entryId), fork(entryId, position)). After
 - Fork Before uses position="before" only for suitable user-message targets; omit the selected user prompt from the retained path and restore it for editing. Fork is not another branch in the original session. U1's test term "Fork After" means inclusive Fork At, not a third API position.
 - Do not auto-send a model request after a fork. Honor configured confirmation. Browse/close/cancel cannot silently fork or navigate.
 - During responses, compaction or other navigation/mutation conflicts, browsing remains usable where the host permits it; unsafe session actions reject with a useful message by default. Host API rejection remains authoritative even after an idle check.
-- Waiting, if provided, must be explicitly accepted and visibly indicated; never silently waitForIdle while blocking the Explorer. No queue/wait feature is required merely by the default reject policy.
+- busyBehavior=reject remains the default. With busyBehavior=wait, after the custom Explorer closes, obtain explicit confirmation, visibly notify the user before awaiting the supported host waitForIdle API, and revalidate session identity, target eligibility and safety afterward. Decline, wait/confirmation failure, session replacement or a still-busy host produces an honest cancellation/error without mutation. Fork confirmation, when enabled, remains a separate gate. Never silently wait or block the open Explorer. [U4]
 - On successful replacement discard old sessionManager, Pi/context references, listeners/tasks/caches and bind to the fresh session lifecycle. A withSession callback uses only its replacement ctx; captured old objects are not safe.
 - Handle missing entries (notify/refresh), ineligible targets, busy rejection, extension cancellation and API exceptions separately. Cancellation/failure retains the original session/leaf as guaranteed by the host; never claim success before confirmation. User content in the editor is not automatically submitted.
 
@@ -281,6 +282,14 @@ Layers: built-in defaults -> global agent-directory session-tree.json -> trusted
 | session | forkPosition=at; navigateSummarize=false; confirmFork=false; busyBehavior=reject |
 | performance | virtualRendering=true; renderOverscan=20; searchDebounceMs=40 |
 | keybindings | Defaults in R04-R09, with per-action array overrides |
+
+### Settled configuration value domains and compression [U4]
+
+- session.forkPosition accepts only "at"; the explicit Fork At (f) and Fork Before (F) Actions remain distinct. A configured "before" default is rejected, not silently substituted or used to change f.
+- navigation.skipHiddenNodes and search.preserveFoldState accept only true. False values conflict with visible-row node navigation and reversible search folds and must produce field-specific validation diagnostics. Startup ignores such an invalid layer wholly; edits/reload preserve the previous safe configuration.
+- fold.collapseLinearPaths=true replaces eligible intermediate rows in an unbranched path with an expandable virtual structural summary, not merely indentation changes. Retain real topology/IDs/depths and explicit raw target identity. A summary has an explicit raw anchor; Enter/expand exposes its real rows and never navigates or forks implicitly. Labels, active/selected entries, raw fork boundaries and search reveal paths must remain inspectable rather than being irretrievably hidden. The exact minimum chain length and presentation are reversible implementation details.
+- These narrowed domains must agree across TypeBox, the published JSON schema, commands/completions, settings and documentation. They are an explicit U4 compatibility clarification, not nominally accepted no-op options.
+- Verify rejected values through actual config update/reload, compressed summary expansion through input/projection, and wait confirmation/decline/failure/replacement through the post-UI host-operation boundary.
 
 maxExpandDepth=0 has no limiting effect while the default focused-only policy is active; it is not a claim that the default Explorer must hide its whole focused path. branchNavigationScope has the settled nearest-fork behavior; speculative global-branch traversal is excluded below. Values/settings must not override safety invariants: hiding an estimate marker cannot misrepresent an estimate as exact; disabling lazy evaluation cannot make rendering await all context work; binding changes cannot enable session actions while unsafe.
 

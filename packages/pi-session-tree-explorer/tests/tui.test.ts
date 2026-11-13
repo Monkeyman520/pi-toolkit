@@ -23,7 +23,7 @@ describe("SessionTreeComponent TUI", () => {
 		const lines = comp.render(80);
 		expect(lines.length).toBeGreaterThan(0);
 		expect(lines.some((l) => l.includes("(empty session tree)"))).toBe(true);
-		expect(lines.some((l) => l.includes("Press 'q' to close"))).toBe(true);
+		expect(lines.some((l) => l.includes("q Close"))).toBe(true);
 
 		// Test exit on 'q'
 		comp.handleInput("q");
@@ -157,8 +157,8 @@ describe("SessionTreeComponent TUI", () => {
 		comp.handleInput("p");
 		expect(state.selectedEntryId).toBe("asst1");
 
-		// Close via Escape
-		comp.handleInput("");
+		// Close via q; normal Escape clears search.
+		comp.handleInput("q");
 		expect(closeResult).toEqual({ type: "close" });
 	});
 	it("toggles and renders help overlay without modifying tree index", () => {

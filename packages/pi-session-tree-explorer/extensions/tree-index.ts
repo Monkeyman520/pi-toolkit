@@ -5,8 +5,12 @@ import type { SessionEntry, TreeIndex } from "./types.ts";
  * Guarantees O(N) indexing, deterministic session order preservation,
  * and safe cycle/missing-parent handling.
  */
-export function buildTreeIndex(entries: SessionEntry[]): TreeIndex {
+export function buildTreeIndex(
+	entries: readonly SessionEntry[],
+	labels?: ReadonlyMap<string, string>,
+): TreeIndex {
 	const entryById = new Map<string, SessionEntry>();
+	const displayLabelsById = new Map<string, string>();
 	const parentById = new Map<string, string | null>();
 	const childrenById = new Map<string, string[]>();
 	const rootIds: string[] = [];
@@ -15,11 +19,18 @@ export function buildTreeIndex(entries: SessionEntry[]): TreeIndex {
 	for (const entry of entries) {
 		if (!entry || typeof entry.id !== "string") continue;
 		entryById.set(entry.id, entry);
+		const label = labels
+			? labels.get(entry.id)
+			: entry.type === "label"
+				? undefined
+				: entry.label;
+		if (label) displayLabelsById.set(entry.id, label);
+		else displayLabelsById.delete(entry.id);
 		childrenById.set(entry.id, []);
 	}
 
 	// 2. Build parent-child relationships with missing parent resolution
-	for (const entry of entries) {
+	for (const entry of entryById.values()) {
 		if (!entry || typeof entry.id !== "string") continue;
 		const id = entry.id;
 		const parentId = typeof entry.parentId === "string" ? entry.parentId : null;
@@ -157,6 +168,7 @@ export function buildTreeIndex(entries: SessionEntry[]): TreeIndex {
 
 	return {
 		entryById,
+		displayLabelsById,
 		parentById,
 		childrenById,
 		rootIds,

@@ -166,18 +166,19 @@ describe("T0004: Preview, Clipboard Copy & Label Metadata", () => {
 
 		// 1. Clear existing label on node1
 		state.selectedEntryId = "node1";
-		expect(index.entryById.get("node1")?.label).toBe("existing-label");
+		expect(index.displayLabelsById.get("node1")).toBe("existing-label");
 
 		await registry.get("session.setLabel")?.execute(ctx);
 		expect(hostLabeledId).toBe("node1");
 		expect(hostLabelVal).toBeUndefined();
-		expect(index.entryById.get("node1")?.label).toBeUndefined();
+		expect(index.displayLabelsById.get("node1")).toBeUndefined();
 
 		// 2. Set new label on node1
 		await registry.get("session.setLabel")?.execute(ctx);
 		expect(hostLabeledId).toBe("node1");
 		expect(hostLabelVal).toBe("bookmark");
-		expect(index.entryById.get("node1")?.label).toBe("bookmark");
+		expect(index.entryById.get("node1")?.label).toBe("existing-label");
+		expect(index.displayLabelsById.get("node1")).toBe("bookmark");
 
 		// 3. Virtual summary cannot be labeled
 		state.selectedEntryId = "virtual:branch:x";

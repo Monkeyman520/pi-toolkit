@@ -1,5 +1,10 @@
 import { copyToClipboard } from "./clipboard.ts";
-import { defaultDisplayOptions, defaultFoldOptions } from "./display.ts";
+import {
+	defaultDisplayOptions,
+	defaultFoldOptions,
+	expandDisplaySelection,
+	rawTargetForSelection,
+} from "./display.ts";
 import {
 	findNearestBranch,
 	navBranchActive,
@@ -33,7 +38,8 @@ import {
 	navNodePrevUser,
 	navNodeRoot,
 } from "./navigation.ts";
-import { extractFullText } from "./search.ts";
+import { extractContentText } from "./search.ts";
+import { transitionSearch } from "./search-state.ts";
 import type {
 	ActionContext,
 	ActionDefinition,
@@ -46,7 +52,19 @@ function updateSelection(
 	targetId: string | null,
 	updateFocus = false,
 ) {
-	if (!targetId || targetId === ctx.state.selectedEntryId) return;
+	if (!targetId) return;
+	const explicitRawJump =
+		updateFocus ||
+		ctx.actionId?.startsWith("branch.") ||
+		ctx.actionId === "node.current" ||
+		ctx.actionId === "node.root";
+	if (
+		explicitRawJump &&
+		ctx.navigationOptions?.autoRevealTarget !== false &&
+		!ctx.visibleNodes.some((n) => n.id === targetId) &&
+		ctx.index.entryById.has(targetId)
+	)
+		revealPathToRoot(targetId, ctx.index, ctx.state);
 	ctx.state.selectedEntryId = targetId;
 
 	// Keep recent leaf updated if the selected node is a leaf
@@ -56,114 +74,43 @@ function updateSelection(
 			const p = ctx.index.parentById.get(current);
 			if (p && (ctx.index.childrenById.get(p)?.length ?? 0) > 1) {
 				ctx.state.recentLeafByBranch.set(current, targetId);
-				break;
 			}
 			current = p ?? "";
 		}
 	}
 
-	if (updateFocus) {
-		ctx.state.focusedBranchId = targetId;
-		// Recompute focused path IDs up to root
-		ctx.state.focusedPathIds.clear();
-		let cur: string | null = targetId;
-		while (cur) {
-			ctx.state.focusedPathIds.add(cur);
-			cur = ctx.index.parentById.get(cur) ?? null;
+	const focusPolicy =
+		ctx.navigationOptions?.focusFollowsSelection ?? "branch-actions";
+	if (
+		focusPolicy === "always" ||
+		(focusPolicy === "branch-actions" &&
+			(updateFocus || ctx.actionId?.startsWith("branch.")))
+	) {
+		const focusTarget = rawTargetForSelection(
+			targetId,
+			ctx.visibleNodes,
+			ctx.index,
+		);
+		if (focusTarget) {
+			ctx.state.focusedBranchId = focusTarget;
+			ctx.state.focusedPathIds.clear();
+			let cur: string | null = focusTarget;
+			while (cur) {
+				ctx.state.focusedPathIds.add(cur);
+				cur = ctx.index.parentById.get(cur) ?? null;
+			}
 		}
 	}
 	ctx.state.version++;
 }
 
 export function getDefaultKeybindings(): Record<string, string[]> {
-	return {
-		// Node actions
-		"node.next": ["j", "down"],
-		"node.prev": ["k", "up"],
-		"node.parent": ["H"],
-		"node.firstChild": ["L"],
-		"node.lastChild": ["gL"],
-		"node.nextSibling": ["]s"],
-		"node.prevSibling": ["[s"],
-		"node.firstSibling": ["gs"],
-		"node.root": ["gg"],
-		"node.last": ["G"],
-		"node.current": ["tab"],
-		"node.pageDown": ["ctrl+d"],
-		"node.pageUp": ["ctrl+u"],
-		"node.nextLabel": ["]m"],
-		"node.prevLabel": ["[m"],
-		"node.nextUser": ["]u"],
-		"node.prevUser": ["[u"],
-
-		// Branch actions
-		"branch.next": ["]b"],
-		"branch.prev": ["[b"],
-		"branch.parent": ["gp"],
-		"branch.root": ["gb"],
-		"branch.leaf": ["ge"],
-		"branch.first": ["g["],
-		"branch.last": ["g]"],
-		"branch.nextFork": ["]f"],
-		"branch.prevFork": ["[f"],
-		"branch.active": ["ga"],
-		"branch.nextLeaf": ["]l"],
-		"branch.prevLeaf": ["[l"],
-		"branch.cycle": [],
-
-		// Fold actions
-		"fold.toggle": ["space"],
-		"fold.expand": ["l"],
-		"fold.collapse": ["h"],
-		"fold.expandAll": ["zR"],
-		"fold.collapseAll": ["zM"],
-		"fold.activeOnly": ["za"],
-		"fold.focusedOnly": ["zs"],
-		"fold.collapseSiblings": ["zc"],
-		"fold.increaseDepth": ["z+"],
-		"fold.decreaseDepth": ["z-"],
-		"fold.restoreDefault": ["zr"],
-
-		// Filter actions
-		"filter.toggleAssistant": [],
-		"filter.toggleTools": [],
-		"filter.toggleThinking": [],
-		"filter.toggleMetadata": [],
-		"filter.userOnly": [],
-		"filter.branchOnly": [],
-		"filter.labeledOnly": [],
-		"filter.reset": [],
-
-		// Search actions
-		"search.open": ["/"],
-		"search.next": ["n"],
-		"search.prev": ["N"],
-		"search.clear": ["esc"],
-		"search.accept": ["enter"],
-		"search.toggleRegex": [],
-		"search.toggleScope": [],
-
-		// View actions
-		"view.toggleDetails": ["d"],
-		"view.toggleContext": ["c"],
-		"view.cycleDepthMode": ["D"],
-		"view.cycleLayout": ["C"],
-		"view.help": ["?"],
-		"view.toggleVim": [],
-		"view.reloadConfig": [],
-		"view.reset": [],
-
-		// Session actions
-		"session.navigate": ["enter"],
-		"session.fork": ["f"],
-		"session.forkBefore": ["F"],
-		"session.preview": ["p"],
-		"session.copyId": ["yi"],
-		"session.copyContent": ["yy"],
-		"session.setLabel": ["m"],
-		"session.refresh": ["r"],
-		"session.close": ["q", "esc"],
-	};
+	return Object.fromEntries(
+		[...createActionRegistry().values()].map((action) => [
+			action.id,
+			[...action.defaultKeys],
+		]),
+	);
 }
 
 function revealPathToRoot(
@@ -211,7 +158,7 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	register({
 		id: "node.parent",
 		description: "Nearest logical visible parent",
-		defaultKeys: ["H"],
+		defaultKeys: ["H", "left"],
 		modes: ["normal"],
 		execute: (ctx) => {
 			const target = navNodeParent(
@@ -226,7 +173,7 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	register({
 		id: "node.firstChild",
 		description: "First logical child",
-		defaultKeys: ["L"],
+		defaultKeys: ["L", "right"],
 		modes: ["normal"],
 		execute: (ctx) => {
 			const target = navNodeFirstChild(
@@ -305,7 +252,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		modes: ["normal"],
 		execute: (ctx) => {
 			const target = navNodeRoot(
-				ctx.state.selectedEntryId,
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
 				ctx.visibleNodes,
 				ctx.index,
 			);
@@ -428,7 +379,15 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["]b"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchNext(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchNext(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+				ctx.navigationOptions?.branchWrap,
+			);
 			updateSelection(ctx, target, true);
 		},
 	});
@@ -439,7 +398,15 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["[b"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchPrev(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchPrev(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+				ctx.navigationOptions?.branchWrap,
+			);
 			updateSelection(ctx, target, true);
 		},
 	});
@@ -450,7 +417,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["gp"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchParent(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchParent(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target);
 		},
 	});
@@ -461,7 +435,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["gb"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchRoot(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchRoot(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target, true);
 		},
 	});
@@ -473,7 +454,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		modes: ["normal"],
 		execute: (ctx) => {
 			const target = navBranchLeaf(
-				ctx.state.selectedEntryId,
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
 				ctx.index,
 				ctx.state,
 			);
@@ -487,7 +472,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["g["],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchFirst(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchFirst(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target, true);
 		},
 	});
@@ -498,7 +490,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["g]"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchLast(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchLast(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target, true);
 		},
 	});
@@ -509,7 +508,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["]f"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchNextFork(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchNextFork(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target);
 		},
 	});
@@ -520,7 +526,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["[f"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchPrevFork(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchPrevFork(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target);
 		},
 	});
@@ -542,7 +555,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["]l"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchNextLeaf(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchNextLeaf(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target);
 		},
 	});
@@ -553,7 +573,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["[l"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchPrevLeaf(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchPrevLeaf(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target);
 		},
 	});
@@ -564,24 +591,36 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const target = navBranchCycle(ctx.state.selectedEntryId, ctx.index);
+			const target = navBranchCycle(
+				rawTargetForSelection(
+					ctx.state.selectedEntryId,
+					ctx.visibleNodes,
+					ctx.index,
+				),
+				ctx.index,
+			);
 			updateSelection(ctx, target, true);
 		},
 	});
-
 	// 11 Fold Actions
 	register({
 		id: "fold.toggle",
 		description: "Toggle selected subtree",
-		defaultKeys: ["space", "enter"],
+		defaultKeys: ["space"],
 		modes: ["normal"],
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
 			if (!sel) return;
 
 			// Virtual summary expand
-			if (sel.startsWith("virtual:branch:")) {
-				const anchorId = sel.replace("virtual:branch:", "");
+			if (ctx.visibleNodes.find((n) => n.id === sel)?.isVirtual) {
+				const anchorId = expandDisplaySelection(
+					sel,
+					ctx.visibleNodes,
+					ctx.index,
+					ctx.state,
+				);
+				if (!anchorId) return;
 				ctx.state.manualExpandedIds.add(anchorId);
 				ctx.state.manualCollapsedIds.delete(anchorId);
 				updateSelection(ctx, anchorId);
@@ -611,9 +650,13 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
 			if (!sel) return;
-			const target = sel.startsWith("virtual:branch:")
-				? sel.replace("virtual:branch:", "")
-				: sel;
+			const target = expandDisplaySelection(
+				sel,
+				ctx.visibleNodes,
+				ctx.index,
+				ctx.state,
+			);
+			if (!target) return;
 			ctx.state.manualCollapsedIds.delete(target);
 			ctx.state.manualExpandedIds.add(target);
 			if (target !== sel) {
@@ -712,7 +755,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["zc"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			const sel = ctx.state.selectedEntryId;
+			const sel = rawTargetForSelection(
+				ctx.state.selectedEntryId,
+				ctx.visibleNodes,
+				ctx.index,
+			);
 			if (!sel) return;
 			const branch = findNearestBranch(sel, ctx.index);
 			if (!branch) return;
@@ -765,7 +812,9 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		execute: (ctx) => {
 			ctx.state.manualCollapsedIds.clear();
 			ctx.state.manualExpandedIds.clear();
-			ctx.state.foldOptions = defaultFoldOptions();
+			ctx.state.foldOptions = {
+				...(ctx.defaults?.fold ?? defaultFoldOptions()),
+			};
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -868,7 +917,9 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions = defaultDisplayOptions();
+			ctx.state.displayOptions = {
+				...(ctx.defaults?.display ?? defaultDisplayOptions()),
+			};
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -931,8 +982,10 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.depthMode = "turn";
-			ctx.state.displayOptions.layout = "normal";
+			ctx.state.displayOptions.depthMode =
+				ctx.defaults?.display.depthMode ?? "turn";
+			ctx.state.displayOptions.layout =
+				ctx.defaults?.display.layout ?? "normal";
 			ctx.state.showDetails = true;
 			ctx.state.showContext = true;
 			ctx.state.version++;
@@ -962,12 +1015,37 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		},
 	});
 
+	for (const [id, keys, move] of [
+		["view.scrollUp", ["up"], "up"],
+		["view.scrollDown", ["down"], "down"],
+		["view.pageUp", ["pageup", "ctrl+u"], "pageUp"],
+		["view.pageDown", ["pagedown", "ctrl+d"], "pageDown"],
+		["view.firstLine", ["home"], "first"],
+		["view.lastLine", ["end"], "last"],
+	] as const)
+		register({
+			id,
+			description: `Scroll inspection: ${move}`,
+			defaultKeys: [...keys],
+			modes: ["help", "preview"],
+			execute: (ctx) => ctx.scrollInspection?.(move),
+		});
+	register({
+		id: "view.settings",
+		description: "Open Explorer settings",
+		defaultKeys: ["s"],
+		modes: ["help"],
+		execute: async (ctx) => {
+			await ctx.openSettings?.();
+		},
+	});
 	register({
 		id: "view.reloadConfig",
 		description: "Reload configuration from disk safely",
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: async (ctx) => {
+			await ctx.reloadConfig?.();
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -975,162 +1053,60 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 
 	// Session Close Action
 
-	// 7 Search Actions
-	register({
-		id: "search.open",
-		description: "Open search mode",
-		defaultKeys: ["/"],
-		modes: ["normal"],
-		execute: (ctx) => {
-			ctx.state.searchSnapshot = {
-				searchQuery: ctx.state.searchQuery,
-				selectedEntryId: ctx.state.selectedEntryId,
-				temporaryRevealedIds: new Set(ctx.state.temporaryRevealedIds),
-				manualExpandedIds: new Set(ctx.state.manualExpandedIds),
-				manualCollapsedIds: new Set(ctx.state.manualCollapsedIds),
-			};
-			ctx.state.mode = "search";
-			ctx.state.version++;
-			ctx.reproject?.();
+	// Search transitions live with the query lifecycle, not the view or key parser.
+	for (const action of [
+		{
+			id: "search.open",
+			description: "Open search mode",
+			defaultKeys: ["/"],
+			modes: ["normal"],
 		},
-	});
-
-	register({
-		id: "search.next",
-		description: "Next search match",
-		defaultKeys: ["n"],
-		modes: ["normal", "search"],
-		execute: (ctx) => {
-			if (ctx.state.searchResults.length === 0) return;
-			const nextIdx =
-				(ctx.state.searchResultIndex + 1) % ctx.state.searchResults.length;
-			ctx.state.searchResultIndex = nextIdx;
-			const targetId = ctx.state.searchResults[nextIdx].id;
-			revealPathToRoot(targetId, ctx.index, ctx.state);
-			ctx.state.selectedEntryId = targetId;
-			ctx.state.version++;
-			ctx.reproject?.();
+		{
+			id: "search.next",
+			description: "Next search match",
+			defaultKeys: ["n"],
+			modes: ["normal", "search"],
+			modeKeys: { search: ["down", "ctrl+n"] },
 		},
-	});
-
-	register({
-		id: "search.prev",
-		description: "Previous search match",
-		defaultKeys: ["N"],
-		modes: ["normal", "search"],
-		execute: (ctx) => {
-			if (ctx.state.searchResults.length === 0) return;
-			const prevIdx =
-				(ctx.state.searchResultIndex - 1 + ctx.state.searchResults.length) %
-				ctx.state.searchResults.length;
-			ctx.state.searchResultIndex = prevIdx;
-			const targetId = ctx.state.searchResults[prevIdx].id;
-			revealPathToRoot(targetId, ctx.index, ctx.state);
-			ctx.state.selectedEntryId = targetId;
-			ctx.state.version++;
-			ctx.reproject?.();
+		{
+			id: "search.prev",
+			description: "Previous search match",
+			defaultKeys: ["N"],
+			modes: ["normal", "search"],
+			modeKeys: { search: ["up", "ctrl+p"] },
 		},
-	});
-
-	register({
-		id: "search.clear",
-		description: "Clear search query and temporary reveals",
-		defaultKeys: ["esc"],
-		modes: ["normal", "search"],
-		execute: (ctx) => {
-			if (ctx.state.mode === "search") {
-				// Cancel search: restore pre-search snapshot
-				if (ctx.state.searchSnapshot) {
-					ctx.state.searchQuery = ctx.state.searchSnapshot.searchQuery;
-					ctx.state.selectedEntryId = ctx.state.searchSnapshot.selectedEntryId;
-					ctx.state.temporaryRevealedIds = new Set(
-						ctx.state.searchSnapshot.temporaryRevealedIds,
-					);
-					ctx.state.manualExpandedIds = new Set(
-						ctx.state.searchSnapshot.manualExpandedIds,
-					);
-					ctx.state.manualCollapsedIds = new Set(
-						ctx.state.searchSnapshot.manualCollapsedIds,
-					);
-					ctx.state.searchSnapshot = undefined;
-				}
-				ctx.state.mode = "normal";
-			} else {
-				// Normal mode Esc: clear query and temporary reveals
-				ctx.state.searchQuery = "";
-				ctx.state.temporaryRevealedIds.clear();
-
-				// If current selection became hidden, fall back to nearest visible ancestor
-				ctx.reproject?.();
-				const current = ctx.state.selectedEntryId;
-				if (current && !ctx.visibleNodes.some((n) => n.id === current)) {
-					let ancestor = ctx.index.parentById.get(current);
-					while (ancestor) {
-						if (ctx.visibleNodes.some((n) => n.id === ancestor)) {
-							ctx.state.selectedEntryId = ancestor;
-							break;
-						}
-						ancestor = ctx.index.parentById.get(ancestor) ?? null;
-					}
-					if (
-						!ctx.state.selectedEntryId ||
-						!ctx.visibleNodes.some((n) => n.id === ctx.state.selectedEntryId)
-					) {
-						ctx.state.selectedEntryId = ctx.visibleNodes[0]?.id ?? null;
-					}
-				}
-			}
-			ctx.state.version++;
-			ctx.reproject?.();
+		{
+			id: "search.clear",
+			description: "Clear search query and temporary reveals",
+			defaultKeys: ["esc"],
+			modes: ["normal", "search"],
 		},
-	});
-
-	register({
-		id: "search.accept",
-		description:
-			"Select highlighted match and exit search mode without navigating",
-		defaultKeys: ["enter"],
-		modes: ["search"],
-		execute: (ctx) => {
-			if (
-				ctx.state.searchResults.length > 0 &&
-				ctx.state.searchResultIndex >= 0
-			) {
-				const match = ctx.state.searchResults[ctx.state.searchResultIndex];
-				if (match) {
-					revealPathToRoot(match.id, ctx.index, ctx.state);
-					ctx.state.selectedEntryId = match.id;
-				}
-			}
-			ctx.state.mode = "normal";
-			ctx.state.searchSnapshot = undefined; // Accepted
-			ctx.state.version++;
-			ctx.reproject?.();
+		{
+			id: "search.accept",
+			description: "Accept result without Navigate",
+			defaultKeys: ["enter"],
+			modes: ["search"],
 		},
-	});
-
-	register({
-		id: "search.toggleRegex",
-		description: "Toggle regex search mode",
-		defaultKeys: [],
-		modes: ["normal", "search"],
-		execute: (ctx) => {
-			ctx.state.searchRegex = !ctx.state.searchRegex;
-			ctx.state.version++;
+		{
+			id: "search.toggleRegex",
+			description: "Toggle regex search",
+			defaultKeys: [],
+			modes: ["normal", "search"],
 		},
-	});
-
-	register({
-		id: "search.toggleScope",
-		description: "Toggle search scope between all entries and focused subtree",
-		defaultKeys: [],
-		modes: ["normal", "search"],
-		execute: (ctx) => {
-			ctx.state.searchScope =
-				ctx.state.searchScope === "all" ? "focused-subtree" : "all";
-			ctx.state.version++;
+		{
+			id: "search.toggleScope",
+			description: "Toggle all/focused-subtree search",
+			defaultKeys: [],
+			modes: ["normal", "search"],
 		},
-	});
+	] satisfies Array<Omit<ActionDefinition, "execute">>)
+		register({
+			...action,
+			execute: (ctx) => {
+				if (ctx.searchAction) ctx.searchAction(action.id);
+				else transitionSearch(ctx, action.id);
+			},
+		});
 
 	// Session Inspection & Metadata Actions (Spec R08)
 	register({
@@ -1141,13 +1117,26 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
 			if (!sel) return;
-			if (sel.startsWith("virtual:branch:")) {
-				const anchorId = sel.replace("virtual:branch:", "");
+			if (ctx.visibleNodes.find((n) => n.id === sel)?.isVirtual) {
+				const anchorId = expandDisplaySelection(
+					sel,
+					ctx.visibleNodes,
+					ctx.index,
+					ctx.state,
+				);
+				if (!anchorId) return;
 				ctx.state.manualExpandedIds.add(anchorId);
 				ctx.state.manualCollapsedIds.delete(anchorId);
 				updateSelection(ctx, anchorId);
 				ctx.state.version++;
 				ctx.reproject?.();
+				return;
+			}
+			if (rawTargetForSelection(sel, ctx.visibleNodes, ctx.index) !== sel) {
+				ctx.notify?.(
+					"Target is no longer available; refresh the tree.",
+					"warning",
+				);
 				return;
 			}
 			ctx.navigate?.(sel);
@@ -1161,7 +1150,10 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		modes: ["normal"],
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
-			if (!sel || sel.startsWith("virtual:branch:")) {
+			if (
+				!sel ||
+				rawTargetForSelection(sel, ctx.visibleNodes, ctx.index) !== sel
+			) {
 				ctx.notify?.(
 					"Cannot fork from virtual branch summary. Expand branch first.",
 					"warning",
@@ -1179,7 +1171,10 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		modes: ["normal"],
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
-			if (!sel || sel.startsWith("virtual:branch:")) {
+			if (
+				!sel ||
+				rawTargetForSelection(sel, ctx.visibleNodes, ctx.index) !== sel
+			) {
 				ctx.notify?.(
 					"Cannot fork from virtual branch summary. Expand branch first.",
 					"warning",
@@ -1214,7 +1209,10 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		modes: ["normal"],
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
-			if (!sel || sel.startsWith("virtual:branch:")) {
+			if (
+				!sel ||
+				rawTargetForSelection(sel, ctx.visibleNodes, ctx.index) !== sel
+			) {
 				ctx.notify?.("Cannot copy virtual branch summary ID", "warning");
 				return;
 			}
@@ -1237,14 +1235,17 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		modes: ["normal"],
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
-			if (!sel || sel.startsWith("virtual:branch:")) {
+			if (
+				!sel ||
+				rawTargetForSelection(sel, ctx.visibleNodes, ctx.index) !== sel
+			) {
 				ctx.notify?.("Cannot copy virtual branch summary content", "warning");
 				return;
 			}
 			const entry = ctx.index.entryById.get(sel);
 			if (!entry) return;
 
-			const fullText = extractFullText(entry);
+			const fullText = extractContentText(entry);
 			const res = copyToClipboard(fullText);
 			if (res.success) {
 				ctx.notify?.("Copied node content to clipboard", "info");
@@ -1264,7 +1265,10 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		modes: ["normal"],
 		execute: async (ctx) => {
 			const sel = ctx.state.selectedEntryId;
-			if (!sel || sel.startsWith("virtual:branch:")) {
+			if (
+				!sel ||
+				rawTargetForSelection(sel, ctx.visibleNodes, ctx.index) !== sel
+			) {
 				ctx.notify?.("Cannot label virtual branch summary", "warning");
 				return;
 			}
@@ -1272,10 +1276,21 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 			if (!entry) return;
 
 			// Toggle or edit label
-			const currentLabel = entry.label;
-			const nextLabel = currentLabel ? undefined : "bookmark";
-			entry.label = nextLabel;
-			await ctx.setLabel?.(sel, nextLabel);
+			const currentLabel = ctx.index.displayLabelsById.get(sel);
+			const edit = ctx.editLabel
+				? await ctx.editLabel(sel, currentLabel)
+				: { label: currentLabel ? undefined : "bookmark" };
+			if (edit === null || (ctx.isCurrent && !ctx.isCurrent())) return;
+			const nextLabel = edit.label;
+			if (!ctx.setLabel) {
+				ctx.notify?.("Host label API unavailable", "warning");
+				return;
+			}
+			await ctx.setLabel(sel, nextLabel);
+			if (ctx.isCurrent && !ctx.isCurrent()) return;
+			if (ctx.refresh) await ctx.refresh();
+			else if (nextLabel) ctx.index.displayLabelsById.set(sel, nextLabel);
+			else ctx.index.displayLabelsById.delete(sel);
 			ctx.state.version++;
 			ctx.reproject?.();
 			ctx.notify?.(
@@ -1294,6 +1309,7 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		modes: ["normal"],
 		execute: async (ctx) => {
 			await ctx.refresh?.();
+			if (ctx.isCurrent && !ctx.isCurrent()) return;
 			ctx.state.version++;
 			ctx.reproject?.();
 			ctx.notify?.("Refreshed session tree.", "info");
@@ -1303,7 +1319,8 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	register({
 		id: "session.close",
 		description: "Close without session change",
-		defaultKeys: ["q", "esc"],
+		defaultKeys: ["q"],
+		modeKeys: { preview: ["q", "esc"], help: ["q", "esc"], search: [] },
 		modes: ["normal", "search", "preview", "help"],
 		execute: (ctx) => {
 			if (ctx.state.mode === "preview") {

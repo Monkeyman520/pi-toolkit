@@ -23,10 +23,10 @@ import {
 } from "./commands.ts";
 import { ConfigManager } from "./config.ts";
 import { defaultDisplayOptions } from "./display.ts";
+import { captureSessionSnapshot } from "./session-snapshot.ts";
 import { createInitialState } from "./state.ts";
-import { buildTreeIndex } from "./tree-index.ts";
 import { SessionTreeComponent } from "./tui.ts";
-import type { ExplorerResult, ExplorerState, SessionEntry } from "./types.ts";
+import type { ExplorerResult, ExplorerState } from "./types.ts";
 import {
 	DISCOVER_EVENT,
 	isDiscoverPayload,
@@ -62,6 +62,16 @@ export { openSessionTreeSettingsPanel, SELF_PLUGIN_ID } from "./ui.ts";
 
 export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 	const configManager = new ConfigManager();
+	let activeExplorer: SessionTreeComponent | undefined;
+	let mutationPending = false;
+	const disposeActive = () => {
+		activeExplorer?.dispose();
+		activeExplorer = undefined;
+	};
+	pi.on("session_shutdown", () => {
+		activeExplorer?.dispose();
+		activeExplorer = undefined;
+	});
 
 	// Installed-only dynamic discovery over pi.events per ADR 0004/0005
 	pi.events.on(DISCOVER_EVENT, (payload: unknown) => {
@@ -75,6 +85,10 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 					return `Vim: ${cfg.vimMode ? "on" : "off"} | Fold: ${cfg.fold.mode} | Depth: ${cfg.display.depthMode}`;
 				},
 				open: async (ctx) => {
+					await configManager.ensureLoaded({
+						cwd: ctx.cwd,
+						isProjectTrusted: ctx.isProjectTrusted?.() ?? false,
+					});
 					await openSessionTreeSettingsPanel({
 						ctx,
 						events: pi.events,
@@ -95,11 +109,16 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 			ctx: ExtensionCommandContext,
 		): Promise<void> => {
 			// Ensure configuration layers are loaded
-			await configManager.loadLayers({
+			const loaded = await configManager.ensureLoaded({
 				cwd: ctx.cwd,
-				isProjectTrusted: ctx.isProjectTrusted?.() ?? true,
+				isProjectTrusted: ctx.isProjectTrusted?.() ?? false,
 			});
 
+			for (const diagnostic of loaded.diagnostics)
+				ctx.ui.notify(
+					`${diagnostic.layer}: ${diagnostic.message} ${(diagnostic.details ?? []).join("; ")}`,
+					"warning",
+				);
 			const trimmed = args.trim();
 
 			// 1. Help subcommand
@@ -183,12 +202,21 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 				return;
 			}
 
-			const rawEntries = (ctx.sessionManager.getEntries() ??
-				[]) as SessionEntry[];
-			const currentLeafId = ctx.sessionManager.getLeafId() ?? null;
-			const sessionId = ctx.sessionManager.getSessionId() ?? "ephemeral";
-
-			const index = buildTreeIndex(rawEntries);
+			if (activeExplorer || mutationPending) {
+				ctx.ui.notify(
+					"Session Tree Explorer or a session operation is already open.",
+					"warning",
+				);
+				return;
+			}
+			const effectiveConfig = configManager.getConfig();
+			let snapshot = captureSessionSnapshot(ctx.sessionManager, 1, {
+				activeModel: ctx.model,
+				activeUsage: ctx.getContextUsage() ?? undefined,
+			});
+			const currentLeafId = snapshot.leafId;
+			const sessionId = snapshot.sessionId;
+			const index = snapshot.index;
 
 			// Compute focused path IDs (from active leaf up to root)
 			const focusedPathIds = new Set<string>();
@@ -199,13 +227,13 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 			}
 
 			const initialSelection =
-				currentLeafId && index.entryById.has(currentLeafId)
-					? currentLeafId
-					: index.preorderIds.length > 0
-						? index.preorderIds[0]
-						: null;
-
-			const effectiveConfig = configManager.getConfig();
+				effectiveConfig.navigation.initialFocus === "root"
+					? (index.rootIds[0] ?? null)
+					: currentLeafId && index.entryById.has(currentLeafId)
+						? currentLeafId
+						: index.preorderIds.length > 0
+							? index.preorderIds[0]
+							: null;
 
 			const state: ExplorerState = createInitialState(sessionId, {
 				selectedEntryId: initialSelection,
@@ -241,6 +269,12 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 				}
 				if (savedViewState.focusedBranchId) {
 					state.focusedBranchId = savedViewState.focusedBranchId;
+					state.focusedPathIds.clear();
+					let focal: string | null = state.focusedBranchId;
+					while (focal) {
+						state.focusedPathIds.add(focal);
+						focal = index.parentById.get(focal) ?? null;
+					}
 				}
 				if (savedViewState.manualExpandedIds) {
 					state.manualExpandedIds = savedViewState.manualExpandedIds;
@@ -252,47 +286,84 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 
 			const registry = createActionRegistry();
 
-			const result = await ctx.ui.custom<ExplorerResult>(
-				(tui, theme, _kb, done) => {
-					return new SessionTreeComponent({
-						tui,
-						theme,
-						done,
-						index,
-						state,
-						registry,
-						keybindings: effectiveConfig.keybindings,
-						onSetLabel: (id, label) => {
-							pi.setLabel(id, label);
-						},
-						onRefresh: async () => {
-							const refreshed = (ctx.sessionManager.getEntries() ??
-								[]) as SessionEntry[];
-							const newIdx = buildTreeIndex(refreshed);
-							Object.assign(index, newIdx);
-						},
-						onNotify: (msg, type) => {
-							ctx.ui.notify(msg, type);
-						},
+			let result: ExplorerResult | undefined;
+			try {
+				result = await ctx.ui.custom<ExplorerResult>(
+					(tui, theme, _kb, done) => {
+						activeExplorer = new SessionTreeComponent({
+							tui,
+							theme,
+							done,
+							index,
+							state,
+							registry,
+							keybindings: effectiveConfig.keybindings,
+							config: effectiveConfig,
+							activeModel: ctx.model,
+							activeUsage: ctx.getContextUsage() ?? undefined,
+							onReloadConfig: async () => {
+								const result = await configManager.reload();
+								if (!result.success) throw new Error(result.error);
+								return result.config;
+							},
+							onOpenSettings: async () => {
+								await openSessionTreeSettingsPanel({
+									ctx,
+									events: pi.events,
+									configManager,
+								});
+								return configManager.getConfig();
+							},
+							onEditLabel: async (_id, current) => {
+								const label = await ctx.ui.input(
+									"Entry label (empty clears)",
+									current ?? "",
+								);
+								return label === undefined
+									? null
+									: { label: label || undefined };
+							},
+							onSetLabel: (id, label) => {
+								if (ctx.sessionManager.getSessionId() !== snapshot.sessionId)
+									throw new Error("Session changed");
+								pi.setLabel(id, label);
+							},
+							onRefresh: async () => {
+								snapshot = captureSessionSnapshot(
+									ctx.sessionManager,
+									snapshot.revision + 1,
+									{
+										activeModel: ctx.model,
+										activeUsage: ctx.getContextUsage() ?? undefined,
+									},
+								);
+								return snapshot;
+							},
+							onNotify: (msg, type) => {
+								ctx.ui.notify(msg, type);
+							},
+						});
+						return activeExplorer;
+					},
+				);
+			} finally {
+				disposeActive();
+			}
+			mutationPending = true;
+			try {
+				if (state.sessionId === sessionId)
+					await saveViewState(agentDir, sessionId, state);
+				if (result && result.type !== "close")
+					await executeSessionIntent({
+						intent: result,
+						ctx,
+						config: configManager.getConfig(),
+						expectedSessionId: sessionId,
+						onNotify: (msg, type) => ctx.ui.notify(msg, type),
+						onReplacementCleanup: disposeActive,
 					});
-				},
-			);
-
-			// Persist view state outside Session JSONL
-			await saveViewState(agentDir, sessionId, state);
-
-			if (result && result.type !== "close") {
-				await executeSessionIntent({
-					intent: result,
-					ctx,
-					config: effectiveConfig,
-					onNotify: (msg, type) => {
-						ctx.ui.notify(msg, type);
-					},
-					onReplacementCleanup: () => {
-						// Clean up cached index or references upon session replacement
-					},
-				});
+			} finally {
+				mutationPending = false;
 			}
 		},
 	});

@@ -22,7 +22,7 @@ export const CONFIGURABLE_KEYS: Record<
 		values: ["branch-actions", "always", "never"],
 	},
 	"navigation.autoRevealTarget": { type: "boolean" },
-	"navigation.skipHiddenNodes": { type: "boolean" },
+	"navigation.skipHiddenNodes": { type: "boolean", values: ["true"] },
 	"display.showAssistantNodes": { type: "boolean" },
 	"display.showToolNodes": { type: "boolean" },
 	"display.showThinkingNodes": { type: "boolean" },
@@ -49,7 +49,7 @@ export const CONFIGURABLE_KEYS: Record<
 	"search.scope": { type: "enum", values: ["all", "focused-subtree"] },
 	"search.includeHiddenNodes": { type: "boolean" },
 	"search.autoExpandMatches": { type: "boolean" },
-	"search.preserveFoldState": { type: "boolean" },
+	"search.preserveFoldState": { type: "boolean", values: ["true"] },
 	"search.caseSensitive": { type: "boolean" },
 	"search.maxResults": { type: "number", values: ["50", "100", "200", "500"] },
 	"context.enabled": { type: "boolean" },
@@ -63,7 +63,7 @@ export const CONFIGURABLE_KEYS: Record<
 		type: "number",
 		values: ["256", "512", "1024", "2048"],
 	},
-	"session.forkPosition": { type: "enum", values: ["at", "before"] },
+	"session.forkPosition": { type: "enum", values: ["at"] },
 	"session.navigateSummarize": { type: "boolean" },
 	"session.confirmFork": { type: "boolean" },
 	"session.busyBehavior": { type: "enum", values: ["reject", "wait"] },
@@ -137,7 +137,7 @@ export function getStreeArgumentCompletions(
 
 			let allowedValues: string[] = [];
 			if (meta.type === "boolean") {
-				allowedValues = ["true", "false", "on", "off"];
+				allowedValues = meta.values ?? ["true", "false", "on", "off"];
 			} else if (meta.values) {
 				allowedValues = meta.values;
 			}

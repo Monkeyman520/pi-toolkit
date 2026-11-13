@@ -86,13 +86,14 @@ describe("Action Registry & Browsing Invariants", () => {
 			"view.help",
 			"view.toggleVim",
 			"view.reloadConfig",
+			"view.settings",
 			"view.reset",
 		];
 		for (const id of expectedViewActions) {
 			expect(registry.has(id), `Missing view action: ${id}`).toBe(true);
 		}
 
-		expect(registry.size).toBe(73);
+		expect(registry.size).toBe(80);
 	});
 
 	it("executes actions updating ExplorerState in memory without mutating session entries", () => {

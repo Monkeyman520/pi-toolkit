@@ -17,7 +17,7 @@ export const NavigationConfigSchema = Type.Object(
 			]),
 		),
 		autoRevealTarget: Type.Optional(Type.Boolean()),
-		skipHiddenNodes: Type.Optional(Type.Boolean()),
+		skipHiddenNodes: Type.Optional(Type.Literal(true)),
 	},
 	{ additionalProperties: false },
 );
@@ -82,7 +82,7 @@ export const SearchConfigSchema = Type.Object(
 		),
 		includeHiddenNodes: Type.Optional(Type.Boolean()),
 		autoExpandMatches: Type.Optional(Type.Boolean()),
-		preserveFoldState: Type.Optional(Type.Boolean()),
+		preserveFoldState: Type.Optional(Type.Literal(true)),
 		caseSensitive: Type.Optional(Type.Boolean()),
 		maxResults: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
 	},
@@ -105,9 +105,7 @@ export const ContextConfigSchema = Type.Object(
 
 export const SessionConfigSchema = Type.Object(
 	{
-		forkPosition: Type.Optional(
-			Type.Union([Type.Literal("at"), Type.Literal("before")]),
-		),
+		forkPosition: Type.Optional(Type.Literal("at")),
 		navigateSummarize: Type.Optional(Type.Boolean()),
 		confirmFork: Type.Optional(Type.Boolean()),
 		busyBehavior: Type.Optional(
@@ -156,7 +154,7 @@ export interface SessionTreeConfig {
 		branchWrap: boolean;
 		focusFollowsSelection: "branch-actions" | "always" | "never";
 		autoRevealTarget: boolean;
-		skipHiddenNodes: boolean;
+		skipHiddenNodes: true;
 	};
 	display: {
 		showAssistantNodes: boolean;
@@ -183,7 +181,7 @@ export interface SessionTreeConfig {
 		scope: "all" | "focused-subtree";
 		includeHiddenNodes: boolean;
 		autoExpandMatches: boolean;
-		preserveFoldState: boolean;
+		preserveFoldState: true;
 		caseSensitive: boolean;
 		maxResults: number;
 	};
@@ -198,7 +196,7 @@ export interface SessionTreeConfig {
 		cacheSize: number;
 	};
 	session: {
-		forkPosition: "at" | "before";
+		forkPosition: "at";
 		navigateSummarize: boolean;
 		confirmFork: boolean;
 		busyBehavior: "reject" | "wait";

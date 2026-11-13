@@ -1,257 +1,292 @@
-import { Key, matchesKey } from "@earendil-works/pi-tui";
-import type { InputMode, KeymapDiagnostic } from "./types.ts";
+import { Key, matchesKey, parseKey } from "@earendil-works/pi-tui";
+import { createActionRegistry } from "./actions.ts";
+import type { ActionDefinition, InputMode, KeymapDiagnostic } from "./types.ts";
 
 export interface KeyBindingMap {
 	[actionId: string]: string[];
 }
-
+const namedKeys = new Set([
+	"up",
+	"down",
+	"left",
+	"right",
+	"home",
+	"end",
+	"pageup",
+	"pagedown",
+	"insert",
+	"delete",
+	"clear",
+	"backspace",
+	"enter",
+	"escape",
+	"space",
+	"tab",
+]);
 export function normalizeKey(key: string): string {
-	const k = key.toLowerCase().trim();
-	if (k === "<space>" || k === "space") return " ";
-	if (k === "<enter>" || k === "enter" || k === "return") return "\r";
-	if (k === "<esc>" || k === "esc" || k === "escape") return "\u001b";
-	if (k === "<tab>" || k === "tab") return "\t";
-	if (k === "<up>" || k === "up") return "up";
-	if (k === "<down>" || k === "down") return "down";
-	if (k === "<left>" || k === "left") return "left";
-	if (k === "<right>" || k === "right") return "right";
-	return key;
+	const k = key.toLowerCase().trim().replace(/^<|>$/g, "");
+	const aliases: Record<string, string> = {
+		space: " ",
+		enter: "\r",
+		return: "\r",
+		esc: "\u001b",
+		escape: "\u001b",
+		tab: "\t",
+	};
+	const modified = k.match(/^((?:(?:ctrl|alt|shift|super)\+)+)(.+)$/);
+	if (modified) {
+		const modifiers = modified[1].slice(0, -1).split("+").sort();
+		const base =
+			({ return: "enter", esc: "escape" } as Record<string, string>)[
+				modified[2]
+			] ?? modified[2];
+		if (
+			modifiers.length === 1 &&
+			modifiers[0] === "shift" &&
+			/^[a-z]$/.test(base)
+		)
+			return base.toUpperCase();
+		return `${modifiers.join("+")}+${base}`;
+	}
+	return (
+		aliases[k] ?? (namedKeys.has(k) || /^f(?:[1-9]|1[0-2])$/.test(k) ? k : key)
+	);
 }
-
+function validModifier(key: string): boolean {
+	const match = normalizeKey(key).match(
+		/^((?:(?:ctrl|alt|shift|super)[+])+)(.+)$/,
+	);
+	if (!match) return false;
+	const modifiers = match[1].slice(0, -1).split("+"),
+		base = match[2];
+	return (
+		new Set(modifiers).size === modifiers.length &&
+		(namedKeys.has(base) ||
+			/^f(?:[1-9]|1[0-2])$/.test(base) ||
+			/^[\x21-\x7e]$/.test(base))
+	);
+}
 export function matchRawInput(data: string): string {
-	if (matchesKey(data, Key.up)) return "up";
-	if (matchesKey(data, Key.down)) return "down";
-	if (matchesKey(data, Key.left)) return "left";
-	if (matchesKey(data, Key.right)) return "right";
+	for (const name of ["up", "down", "left", "right"] as const)
+		if (matchesKey(data, Key[name])) return name;
 	if (matchesKey(data, Key.escape)) return "\u001b";
-	if (matchesKey(data, Key.tab) || data === "\t") return "\t";
-	if (data === "\r" || data === "\n") return "\r";
-	if (data === "\u0004") return "ctrl+d";
-	if (data === "\u0015") return "ctrl+u";
-	if (data === "\u000e") return "ctrl+n";
-	if (data === "\u0010") return "ctrl+p";
-	return data;
+	if (matchesKey(data, Key.tab)) return "\t";
+	if (data === "\n" || data === "\r") return "\r";
+	const controls: Record<string, string> = {
+		"\u0004": "ctrl+d",
+		"\u0015": "ctrl+u",
+		"\u000e": "ctrl+n",
+		"\u0010": "ctrl+p",
+	};
+	return (
+		controls[data] ??
+		(data.length !== 1 || data.charCodeAt(0) < 32
+			? parseKey(data)
+			: undefined) ??
+		data
+	);
 }
-
-/**
- * Validate keymap bindings, detecting duplicates and conflicting prefixes.
- */
+function tokens(key: string): string[] {
+	const normalized = normalizeKey(key);
+	if (
+		normalized.length === 1 ||
+		namedKeys.has(normalized) ||
+		/^f(?:[1-9]|1[0-2])$/.test(normalized) ||
+		validModifier(normalized)
+	)
+		return [normalized];
+	return [...normalized];
+}
+function keysFor(
+	action: ActionDefinition | undefined,
+	keys: string[],
+	mode: InputMode,
+): string[] {
+	if (action && !action.modes.includes(mode)) return [];
+	const isDefault =
+		action && JSON.stringify(keys) === JSON.stringify(action.defaultKeys);
+	return (isDefault ? action.modeKeys?.[mode] : undefined) ?? keys;
+}
 export function validateKeymap(
 	bindings: Record<string, string[]>,
+	registry = createActionRegistry(),
 ): KeymapDiagnostic[] {
 	const diagnostics: KeymapDiagnostic[] = [];
-	const keyToAction = new Map<string, string>();
-	const allKeys: string[] = [];
-
-	for (const [actionId, keys] of Object.entries(bindings)) {
-		if (!Array.isArray(keys)) {
+	for (const [id, keys] of Object.entries(bindings)) {
+		if (!registry.has(id))
 			diagnostics.push({
 				type: "invalid",
-				message: `Action ${actionId} keys must be an array of strings`,
+				actionId: id,
 				keys: [],
-				actionId,
+				message: `Unknown Action '${id}'`,
 			});
-			continue;
-		}
-
-		for (const key of keys) {
-			if (typeof key !== "string" || key.length === 0) {
-				diagnostics.push({
-					type: "invalid",
-					message: `Empty or invalid key for action ${actionId}`,
-					keys: [String(key)],
-					actionId,
-				});
-				continue;
-			}
-
-			const norm = normalizeKey(key);
-			const existing = keyToAction.get(norm);
-			if (existing) {
-				diagnostics.push({
-					type: "duplicate",
-					message: `Key '${key}' is duplicated between ${existing} and ${actionId}`,
-					keys: [key],
-					actionId,
-				});
-			} else {
-				keyToAction.set(norm, actionId);
-				allKeys.push(norm);
-			}
+		if (
+			!Array.isArray(keys) ||
+			keys.some(
+				(k) =>
+					typeof k !== "string" ||
+					!k.length ||
+					(/\s/.test(k) && k !== " ") ||
+					(k.length > 1 && !/^(<.*>|[A-Za-z+[\]{}?/!~^|_0-9-]+)$/.test(k)),
+			)
+		) {
+			diagnostics.push({
+				type: "invalid",
+				actionId: id,
+				keys: [],
+				message: `Invalid keys for '${id}'`,
+			});
 		}
 	}
-
-	// Check prefix conflicts (e.g. 'g' vs 'gg')
-	for (const key1 of allKeys) {
-		for (const key2 of allKeys) {
-			if (key1 !== key2 && key2.startsWith(key1)) {
-				diagnostics.push({
-					type: "conflict",
-					message: `Key '${key1}' for action ${keyToAction.get(key1)} is a prefix of '${key2}' for action ${keyToAction.get(key2)}`,
-					keys: [key1, key2],
-					actionId: keyToAction.get(key1),
-				});
+	for (const mode of ["normal", "search", "preview", "help"] as const) {
+		const assigned = new Map<string, string>();
+		for (const [id, keys] of Object.entries(bindings)) {
+			if (!Array.isArray(keys)) continue;
+			for (const key of keysFor(registry.get(id), keys, mode)) {
+				if (typeof key !== "string" || !key.length) continue;
+				if (
+					/^(ctrl|alt|shift|super)[+]/i.test(normalizeKey(key)) &&
+					!validModifier(key)
+				) {
+					diagnostics.push({
+						type: "invalid",
+						actionId: id,
+						keys: [key],
+						message: `Invalid modifier key '${key}'`,
+					});
+					continue;
+				}
+				const norm = tokens(key).join("\0");
+				const other = assigned.get(norm);
+				if (other)
+					diagnostics.push({
+						type: "duplicate",
+						actionId: id,
+						keys: [key],
+						message: `Key '${key}' conflicts between ${other} and ${id} in ${mode}`,
+					});
+				else assigned.set(norm, id);
 			}
 		}
+		for (const [a, id] of assigned)
+			for (const b of assigned.keys())
+				if (b.startsWith(`${a}\0`))
+					diagnostics.push({
+						type: "conflict",
+						actionId: id,
+						keys: [a, b],
+						message: `Ambiguous prefix '${a}' in ${mode}; waits for timeout`,
+					});
 	}
-
 	return diagnostics;
 }
-
 export interface KeyResolverOptions {
 	bindings: Record<string, string[]>;
 	vimMode: boolean;
 	timeoutMs?: number;
+	registry?: Map<string, ActionDefinition>;
 }
-
 export type KeyResolveResult =
 	| { type: "action"; actionId: string }
 	| { type: "prefix" }
 	| { type: "unmatched"; data: string }
 	| { type: "text"; text: string };
-
 export class KeyResolver {
 	private bindings: Record<string, string[]>;
 	private vimMode: boolean;
 	private timeoutMs: number;
-	private buffer = "";
+	private registry: Map<string, ActionDefinition>;
+	private mode: InputMode = "normal";
+	private buffer: string[] = [];
 	private timer: NodeJS.Timeout | null = null;
-	private actionByNormalizedKey = new Map<string, string>();
-	private prefixes = new Set<string>();
-
 	constructor(options: KeyResolverOptions) {
 		this.bindings = options.bindings;
 		this.vimMode = options.vimMode;
 		this.timeoutMs = options.timeoutMs ?? 800;
-		this.rebuildIndex();
+		this.registry = options.registry ?? createActionRegistry();
 	}
-
-	public setVimMode(vimMode: boolean) {
-		this.vimMode = vimMode;
+	public setVimMode(value: boolean) {
+		if (value !== this.vimMode) this.reset();
+		this.vimMode = value;
 	}
-
 	public setBindings(bindings: Record<string, string[]>) {
+		this.reset();
 		this.bindings = bindings;
-		this.rebuildIndex();
 	}
-
-	public getBindings(): Record<string, string[]> {
+	public keysForAction(id: string, mode: InputMode): string[] {
+		const action = this.registry.get(id);
+		return keysFor(action, this.bindings[id] ?? [], mode).filter(
+			(binding) =>
+				!(
+					!this.vimMode &&
+					mode === "normal" &&
+					action?.id.startsWith("node.") &&
+					/^[a-zA-Z[\]]/.test(binding) &&
+					!["up", "down", "left", "right", "tab"].includes(binding) &&
+					action.defaultKeys.includes(binding)
+				),
+		);
+	}
+	public getBindings() {
 		return this.bindings;
 	}
-
-	private rebuildIndex() {
-		this.actionByNormalizedKey.clear();
-		this.prefixes.clear();
-
-		for (const [actionId, keys] of Object.entries(this.bindings)) {
-			for (const k of keys) {
-				const norm = normalizeKey(k);
-				this.actionByNormalizedKey.set(norm, actionId);
-
-				for (let i = 1; i < norm.length; i++) {
-					this.prefixes.add(norm.slice(0, i));
-				}
-			}
-		}
-	}
-
 	public reset() {
-		this.buffer = "";
-		if (this.timer) {
-			clearTimeout(this.timer);
-			this.timer = null;
-		}
+		this.buffer = [];
+		if (this.timer) clearTimeout(this.timer);
+		this.timer = null;
 	}
-
+	public setMode(mode: InputMode) {
+		if (mode !== this.mode) this.reset();
+		this.mode = mode;
+	}
 	public handleInput(
 		raw: string,
 		mode: InputMode,
-		onTimeoutResolve?: (actionId: string) => void,
+		onTimeoutResolve?: (id: string) => void,
 	): KeyResolveResult {
-		const key = matchRawInput(raw);
-
-		// Special handling in Search Mode
-		if (mode === "search") {
-			if (key === "\u001b") {
-				return { type: "action", actionId: "search.clear" };
+		this.setMode(mode);
+		const key = normalizeKey(matchRawInput(raw)),
+			assigned = new Map<string, string>(),
+			prefixes = new Set<string>();
+		for (const id of Object.keys(this.bindings)) {
+			for (const binding of this.keysForAction(id, mode)) {
+				const sequence = tokens(binding),
+					norm = sequence.join("\0");
+				// Conflicting bindings never resolve to an arbitrary last writer.
+				assigned.set(norm, assigned.has(norm) ? "" : id);
+				for (let i = 1; i < sequence.length; i++)
+					prefixes.add(sequence.slice(0, i).join("\0"));
 			}
-			if (key === "\r") {
-				return { type: "action", actionId: "search.accept" };
-			}
-			if (key === "down" || key === "ctrl+n") {
-				return { type: "action", actionId: "search.next" };
-			}
-			if (key === "up" || key === "ctrl+p") {
-				return { type: "action", actionId: "search.prev" };
-			}
-			// Printable text including j/k
-			if (raw.length === 1 && raw >= " " && raw !== "\u001b") {
-				return { type: "text", text: raw };
-			}
-			if (raw === "\b" || raw === "\x7f" || raw === "\u0008") {
-				return { type: "text", text: "\b" };
-			}
-			return { type: "unmatched", data: raw };
 		}
-
-		// Non-Vim Mode: only arrow keys, Enter, Space, Escape, 'q', and '?' are enabled
-		if (!this.vimMode && mode === "normal") {
-			if (key === "down") return { type: "action", actionId: "node.next" };
-			if (key === "up") return { type: "action", actionId: "node.prev" };
-			if (key === "left") return { type: "action", actionId: "node.parent" };
-			if (key === "right")
-				return { type: "action", actionId: "node.firstChild" };
-			if (key === "\u001b" || key === "q")
-				return { type: "action", actionId: "session.close" };
-			if (key === "\r") return { type: "action", actionId: "fold.toggle" };
-			if (key === " ") return { type: "action", actionId: "fold.toggle" };
-			if (key === "?") return { type: "action", actionId: "view.help" };
-			return { type: "unmatched", data: raw };
+		let candidate = [...this.buffer, key].join("\0");
+		if (!assigned.has(candidate) && !prefixes.has(candidate)) {
+			this.reset();
+			candidate = key;
 		}
-
-		// Full sequence matching with buffer
-		const candidate = this.buffer + key;
-
-		// 1. If candidate is a prefix of longer sequences
-		if (this.prefixes.has(candidate)) {
-			// Check if candidate is ALSO a complete action (prefix-ambiguous)
-			const exactAction = this.actionByNormalizedKey.get(candidate);
-			this.buffer = candidate;
-
-			if (this.timer) {
-				clearTimeout(this.timer);
-			}
-
-			if (exactAction && onTimeoutResolve) {
-				// Ambiguous prefix: wait for next key or timeout
-				this.timer = setTimeout(() => {
-					this.reset();
-					onTimeoutResolve(exactAction);
-				}, this.timeoutMs);
-			} else {
-				// Incomplete prefix: wait for next key or timeout to reset
-				this.timer = setTimeout(() => {
-					this.reset();
-				}, this.timeoutMs);
-			}
-
+		if (prefixes.has(candidate)) {
+			this.reset();
+			this.buffer = candidate.split("\0");
+			const id = assigned.get(candidate);
+			this.timer = setTimeout(() => {
+				this.reset();
+				if (id && this.mode === mode) onTimeoutResolve?.(id);
+			}, this.timeoutMs);
 			return { type: "prefix" };
 		}
-
-		// 2. Exact match
-		const actionId = this.actionByNormalizedKey.get(candidate);
 		this.reset();
-
-		if (actionId) {
-			return { type: "action", actionId };
+		const id = assigned.get(candidate);
+		if (id) return { type: "action", actionId: id };
+		if (mode === "search") {
+			if (raw === "\b" || raw === "\x7f") return { type: "text", text: "\b" };
+			if (
+				raw.length > 0 &&
+				[...raw].every((character) => {
+					const code = character.charCodeAt(0);
+					return code >= 32 && (code < 127 || code > 159);
+				})
+			)
+				return { type: "text", text: raw };
 		}
-
-		// 3. Fallback: single key exact match
-		const singleAction = this.actionByNormalizedKey.get(key);
-		if (singleAction) {
-			return { type: "action", actionId: singleAction };
-		}
-
 		return { type: "unmatched", data: raw };
 	}
 }

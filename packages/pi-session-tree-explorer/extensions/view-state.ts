@@ -1,7 +1,37 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { Type } from "typebox";
+import { Check } from "typebox/value";
+import { DisplayConfigSchema } from "./config-schema.ts";
 import type { DisplayOptions, ExplorerState, TreeIndex } from "./types.ts";
+
+const ViewStateSchema = Type.Object(
+	{
+		version: Type.Literal(1),
+		sessionId: Type.String(),
+		focusedBranchId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+		displayOptions: Type.Optional(
+			Type.Object(
+				{
+					...DisplayConfigSchema.properties,
+					userOnly: Type.Optional(Type.Boolean()),
+					branchOnly: Type.Optional(Type.Boolean()),
+					labeledOnly: Type.Optional(Type.Boolean()),
+				},
+				{ additionalProperties: false },
+			),
+		),
+		showDetails: Type.Optional(Type.Boolean()),
+		showContext: Type.Optional(Type.Boolean()),
+		manualExpandedIds: Type.Optional(Type.Array(Type.String())),
+		manualCollapsedIds: Type.Optional(Type.Array(Type.String())),
+	},
+	{ additionalProperties: false },
+);
+export type LoadedViewState = Partial<Omit<ExplorerState, "displayOptions">> & {
+	displayOptions?: Partial<DisplayOptions>;
+};
 
 export interface SessionViewState {
 	version: number;
@@ -47,17 +77,7 @@ export async function saveViewState(
 		version: 1,
 		sessionId,
 		focusedBranchId: state.focusedBranchId,
-		displayOptions: {
-			showAssistantNodes: state.displayOptions.showAssistantNodes,
-			showToolNodes: state.displayOptions.showToolNodes,
-			showThinkingNodes: state.displayOptions.showThinkingNodes,
-			showMetadataNodes: state.displayOptions.showMetadataNodes,
-			userOnly: state.displayOptions.userOnly,
-			branchOnly: state.displayOptions.branchOnly,
-			labeledOnly: state.displayOptions.labeledOnly,
-			depthMode: state.displayOptions.depthMode,
-			layout: state.displayOptions.layout,
-		},
+		displayOptions: { ...state.displayOptions },
 		showDetails: state.showDetails,
 		showContext: state.showContext,
 		manualExpandedIds: Array.from(state.manualExpandedIds),
@@ -82,7 +102,7 @@ export async function loadViewState(
 	sessionId: string,
 	index: TreeIndex,
 	rememberManualOverrides = true,
-): Promise<Partial<ExplorerState> | null> {
+): Promise<LoadedViewState | null> {
 	if (!sessionId || sessionId === "ephemeral") {
 		return null;
 	}
@@ -91,9 +111,12 @@ export async function loadViewState(
 
 	try {
 		const text = await readFile(filePath, "utf8");
-		const data = JSON.parse(text) as SessionViewState;
+		const parsed: unknown = JSON.parse(text);
+		if (!Check(ViewStateSchema, parsed) || parsed.sessionId !== sessionId)
+			return null;
+		const data = parsed;
 
-		const overrides: Partial<ExplorerState> = {};
+		const overrides: LoadedViewState = {};
 
 		if (data.displayOptions) {
 			overrides.displayOptions = {

@@ -1,5 +1,4 @@
 import { extractSummary } from "./display.ts";
-import { findNearestBranch, findRootForNode } from "./navigation.ts";
 import type { SessionEntry, TreeIndex } from "./types.ts";
 
 export interface SearchDocument {
@@ -29,27 +28,28 @@ export interface SearchResult {
 	matches: string[];
 }
 
+function messageTextParts(content: unknown): string[] {
+	if (typeof content === "string") return [content];
+	if (!Array.isArray(content)) return [];
+	const parts: string[] = [];
+	for (const block of content) {
+		if (typeof block === "string") {
+			parts.push(block);
+			continue;
+		}
+		if (!block || typeof block !== "object") continue;
+		for (const key of ["text", "thinking", "name"])
+			if (key in block && typeof block[key] === "string")
+				parts.push(block[key]);
+		for (const key of ["arguments", "input"])
+			if (key in block && block[key] !== undefined)
+				parts.push(JSON.stringify(block[key]));
+	}
+	return parts;
+}
 export function extractContentText(entry: SessionEntry): string {
 	if (entry.type === "message" && entry.message) {
-		const content = entry.message.content;
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) {
-			return content
-				.map((b) => {
-					if (typeof b === "string") return b;
-					if (
-						b &&
-						typeof b === "object" &&
-						"text" in b &&
-						typeof (b as { text: unknown }).text === "string"
-					) {
-						return (b as { text: string }).text;
-					}
-					return "";
-				})
-				.filter(Boolean)
-				.join("\n");
-		}
+		return messageTextParts(entry.message.content).join("\n");
 	}
 	if (entry.type === "compaction" && entry.summary) return entry.summary;
 	if (entry.type === "branch_summary" && entry.summary) return entry.summary;
@@ -73,32 +73,7 @@ export function extractFullText(entry: SessionEntry): string {
 		if (msg.toolName) parts.push(msg.toolName);
 		if (msg.toolCallId) parts.push(msg.toolCallId);
 
-		const content = msg.content;
-		if (typeof content === "string") {
-			parts.push(content);
-		} else if (Array.isArray(content)) {
-			for (const block of content) {
-				if (typeof block === "string") {
-					parts.push(block);
-				} else if (block && typeof block === "object") {
-					if (
-						"text" in block &&
-						typeof (block as { text: unknown }).text === "string"
-					) {
-						parts.push((block as { text: string }).text);
-					}
-					if (
-						"name" in block &&
-						typeof (block as { name: unknown }).name === "string"
-					) {
-						parts.push((block as { name: string }).name);
-					}
-					if ("input" in block) {
-						parts.push(JSON.stringify((block as { input: unknown }).input));
-					}
-				}
-			}
-		}
+		parts.push(...messageTextParts(msg.content));
 	} else if (entry.type === "compaction") {
 		if (entry.summary) parts.push(entry.summary);
 		if (entry.firstKeptEntryId) parts.push(entry.firstKeptEntryId);
@@ -131,21 +106,28 @@ export function extractFullText(entry: SessionEntry): string {
 export function buildSearchIndex(index: TreeIndex): SearchDocument[] {
 	const documents: SearchDocument[] = [];
 	let order = 0;
+	const branchRoots = new Map<string, string>();
+	for (const id of index.preorderIds) {
+		const parent = index.parentById.get(id);
+		branchRoots.set(
+			id,
+			!parent || (index.childrenById.get(parent)?.length ?? 0) > 1
+				? id
+				: (branchRoots.get(parent) ?? id),
+		);
+	}
 
 	for (const [id, entry] of index.entryById.entries()) {
-		const fullText = extractFullText(entry);
+		const label = index.displayLabelsById.get(id);
+		const fullText = [extractFullText(entry), label].filter(Boolean).join(" ");
 		const { summaryText, role } = extractSummary(entry);
 
-		const branch = findNearestBranch(id, index);
-		const branchRootId = branch
-			? branch.branchRootId
-			: (findRootForNode(id, index) ?? id);
-
+		const branchRootId = branchRoots.get(id) ?? id;
 		documents.push({
 			id,
 			type: entry.type,
 			role,
-			label: typeof entry.label === "string" ? entry.label : undefined,
+			label,
 			timestamp: entry.timestamp,
 			summaryText,
 			fullText,
@@ -211,12 +193,13 @@ export function executeSearch(
 	let allowedDocIds: Set<string> | null = null;
 	if (options.scope === "focused-subtree" && options.focusedBranchId) {
 		allowedDocIds = new Set<string>();
-		function collect(nodeId: string) {
-			allowedDocIds?.add(nodeId);
-			const children = index.childrenById.get(nodeId) ?? [];
-			for (const c of children) collect(c);
+		const stack = [options.focusedBranchId];
+		while (stack.length) {
+			const id = stack.pop();
+			if (!id || allowedDocIds.has(id)) continue;
+			allowedDocIds.add(id);
+			for (const child of index.childrenById.get(id) ?? []) stack.push(child);
 		}
-		collect(options.focusedBranchId);
 	}
 
 	let regex: RegExp | null = null;

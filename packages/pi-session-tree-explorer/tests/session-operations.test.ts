@@ -59,15 +59,18 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 		const { index, state } = createFixture();
 
 		let returnedIntent: ExplorerResult | null = null;
-		const comp = new SessionTreeComponent({
-			tui: { requestRender: () => {} },
-			theme: {},
-			done: (res) => {
-				returnedIntent = res;
-			},
-			index,
-			state,
-		});
+		state.displayOptions.showAssistantNodes = true;
+		const newComponent = () =>
+			new SessionTreeComponent({
+				tui: { requestRender() {} },
+				theme: {},
+				done: (res) => {
+					returnedIntent = res;
+				},
+				index,
+				state,
+			});
+		let comp = newComponent();
 
 		// 1. Enter on real entry dispatches navigate intent
 		state.selectedEntryId = "asst1";
@@ -80,6 +83,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 
 		// 2. 'f' on real entry dispatches fork 'at' intent
 		returnedIntent = null;
+		comp = newComponent();
 		comp.handleInput("f");
 		expect(returnedIntent).toEqual({
 			type: "fork",
@@ -89,6 +93,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 
 		// 3. 'F' on real entry dispatches fork 'before' intent
 		returnedIntent = null;
+		comp = newComponent();
 		comp.handleInput("F");
 		expect(returnedIntent).toEqual({
 			type: "fork",
@@ -96,20 +101,45 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			position: "before",
 		});
 
-		// 4. On virtual branch summary, Enter expands branch instead of navigating!
+		// Real projected summaries, not fabricated strings, own an expansion target.
+		const virtualFixture = () => {
+			const virtualIndex = buildTreeIndex([
+				...index.entryById.values(),
+				{
+					id: "other",
+					parentId: "user1",
+					type: "message",
+					timestamp: "T5",
+					message: { role: "user", content: "other branch" },
+				},
+			]);
+			const virtualState = createInitialState("virtual", {
+				selectedEntryId: "virtual:branch:other",
+			});
+			return {
+				state: virtualState,
+				component: new SessionTreeComponent({
+					tui: { requestRender() {} },
+					theme: {},
+					done: (r) => {
+						returnedIntent = r;
+					},
+					index: virtualIndex,
+					state: virtualState,
+				}),
+			};
+		};
 		returnedIntent = null;
-		state.selectedEntryId = "virtual:branch:dummy";
-		comp.handleInput("\r");
-		expect(returnedIntent).toBeNull(); // Did not exit or navigate!
-		expect(state.manualExpandedIds.has("dummy")).toBe(true);
-
-		// 5. 'f' or 'F' on virtual branch summary refuses to fork
-		returnedIntent = null;
-		state.selectedEntryId = "virtual:branch:dummy";
-		comp.handleInput("f");
+		const expanded = virtualFixture();
+		expanded.component.handleInput("\r");
 		expect(returnedIntent).toBeNull();
-		comp.handleInput("F");
+		expect(expanded.state.manualExpandedIds.has("other")).toBe(true);
+		expanded.component.dispose();
+		const rejected = virtualFixture();
+		rejected.component.handleInput("f");
+		rejected.component.handleInput("F");
 		expect(returnedIntent).toBeNull();
+		rejected.component.dispose();
 	});
 
 	it("executes Navigate with summarize=false by default and preserves session file", async () => {

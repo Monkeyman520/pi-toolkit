@@ -432,10 +432,10 @@ describe("T0008: End-to-End Acceptance Scenarios (Spec E01 - E07)", () => {
 		expect(merged.navigation.initialFocus).toBe("active"); // Preserved!
 	});
 
-	// E07: Complete v1.0 Action inventory audit (all 73 actions)
-	it("Scenario E07: complete v1.0 Action inventory audit (all 73 actions verified)", () => {
+	// E07: Preserve all original Actions and catalog the existing settings shortcut.
+	it("Scenario E07: original Action inventory plus catalog-owned settings link", () => {
 		const registry = createActionRegistry();
-		expect(registry.size).toBe(73);
+		expect(registry.size).toBe(80);
 
 		// Count by domain
 		const domainCounts: Record<string, number> = {};
@@ -450,6 +450,6 @@ describe("T0008: End-to-End Acceptance Scenarios (Spec E01 - E07)", () => {
 		expect(domainCounts.filter).toBe(8);
 		expect(domainCounts.search).toBe(7);
 		expect(domainCounts.session).toBe(9);
-		expect(domainCounts.view).toBe(8);
+		expect(domainCounts.view).toBe(15);
 	});
 });

@@ -265,4 +265,11 @@ describe("buildTreeIndex", () => {
 		expect(index.rawDepthById.get("child")).toBe(1);
 		expect(index.preorderIds).toEqual(["orphan", "child"]);
 	});
+	it("indexes repeated IDs once without leaving duplicate topology edges", () => {
+		const root = { id: "r", parentId: null, type: "message", timestamp: "T0" };
+		const child = { id: "c", parentId: "r", type: "message", timestamp: "T1" };
+		const index = buildTreeIndex([root, child, { ...root }, { ...child }]);
+		expect(index.preorderIds).toEqual(["r", "c"]);
+		expect(index.childrenById.get("r")).toEqual(["c"]);
+	});
 });

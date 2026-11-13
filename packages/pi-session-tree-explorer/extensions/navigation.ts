@@ -137,12 +137,13 @@ function getVisibleParentId(
 	nodes: DisplayNode[],
 	index: TreeIndex,
 ): string | null {
-	let current = index.parentById.get(nodeId);
-	while (current) {
-		if (nodes.some((n) => n.id === current)) {
-			return current;
-		}
-		current = index.parentById.get(current) ?? null;
+	const node = nodes.find((n) => n.id === nodeId);
+	if (node) return node.visibleParentId;
+	let parent = index.parentById.get(nodeId);
+	const visible = new Set(nodes.map((n) => n.id));
+	while (parent) {
+		if (visible.has(parent)) return parent;
+		parent = index.parentById.get(parent) ?? null;
 	}
 	return null;
 }
@@ -186,24 +187,20 @@ export function navNodeParent(
 export function navNodeFirstChild(
 	selectedId: string | null,
 	nodes: DisplayNode[],
-	index: TreeIndex,
+	_index: TreeIndex,
 ): string | null {
 	if (!selectedId || nodes.length === 0) return selectedId;
-	const child = nodes.find(
-		(n) => getVisibleParentId(n.id, nodes, index) === selectedId,
-	);
+	const child = nodes.find((n) => n.visibleParentId === selectedId);
 	return child ? child.id : selectedId;
 }
 
 export function navNodeLastChild(
 	selectedId: string | null,
 	nodes: DisplayNode[],
-	index: TreeIndex,
+	_index: TreeIndex,
 ): string | null {
 	if (!selectedId || nodes.length === 0) return selectedId;
-	const children = nodes.filter(
-		(n) => getVisibleParentId(n.id, nodes, index) === selectedId,
-	);
+	const children = nodes.filter((n) => n.visibleParentId === selectedId);
 	return children.length > 0 ? children[children.length - 1].id : selectedId;
 }
 
@@ -214,9 +211,7 @@ export function navNodeNextSibling(
 ): string | null {
 	if (!selectedId || nodes.length === 0) return selectedId;
 	const p = getVisibleParentId(selectedId, nodes, index);
-	const siblings = nodes.filter(
-		(n) => getVisibleParentId(n.id, nodes, index) === p,
-	);
+	const siblings = nodes.filter((n) => n.visibleParentId === p);
 	const idx = siblings.findIndex((n) => n.id === selectedId);
 	if (idx !== -1 && idx < siblings.length - 1) {
 		return siblings[idx + 1].id;
@@ -231,9 +226,7 @@ export function navNodePrevSibling(
 ): string | null {
 	if (!selectedId || nodes.length === 0) return selectedId;
 	const p = getVisibleParentId(selectedId, nodes, index);
-	const siblings = nodes.filter(
-		(n) => getVisibleParentId(n.id, nodes, index) === p,
-	);
+	const siblings = nodes.filter((n) => n.visibleParentId === p);
 	const idx = siblings.findIndex((n) => n.id === selectedId);
 	if (idx > 0) {
 		return siblings[idx - 1].id;
@@ -248,9 +241,7 @@ export function navNodeFirstSibling(
 ): string | null {
 	if (!selectedId || nodes.length === 0) return selectedId;
 	const p = getVisibleParentId(selectedId, nodes, index);
-	const siblings = nodes.filter(
-		(n) => getVisibleParentId(n.id, nodes, index) === p,
-	);
+	const siblings = nodes.filter((n) => n.visibleParentId === p);
 	return siblings.length > 0 ? siblings[0].id : selectedId;
 }
 
@@ -380,25 +371,30 @@ export function navNodePrevUser(
 export function navBranchNext(
 	selectedId: string | null,
 	index: TreeIndex,
+	wrap = false,
 ): string | null {
 	if (!selectedId) return null;
 	const branch = findNearestBranch(selectedId, index);
 	if (!branch) return selectedId;
 
 	const nextBranchId = branch.siblingBranchIds[branch.currentIndex + 1];
-	return nextBranchId ?? selectedId;
+	return nextBranchId ?? (wrap ? branch.siblingBranchIds[0] : selectedId);
 }
 
 export function navBranchPrev(
 	selectedId: string | null,
 	index: TreeIndex,
+	wrap = false,
 ): string | null {
 	if (!selectedId) return null;
 	const branch = findNearestBranch(selectedId, index);
 	if (!branch) return selectedId;
 
 	const prevBranchId = branch.siblingBranchIds[branch.currentIndex - 1];
-	return prevBranchId ?? selectedId;
+	return (
+		prevBranchId ??
+		(wrap ? (branch.siblingBranchIds.at(-1) ?? selectedId) : selectedId)
+	);
 }
 
 export function navBranchParent(

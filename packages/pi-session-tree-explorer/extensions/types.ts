@@ -45,6 +45,8 @@ export type SessionEntry = RawSessionEntry;
 
 export interface TreeIndex {
 	entryById: Map<string, SessionEntry>;
+	/** Resolved bookmarks are annotations, never replacements for raw entry fields. */
+	displayLabelsById: Map<string, string>;
 	parentById: Map<string, string | null>;
 	childrenById: Map<string, string[]>;
 	rootIds: string[];
@@ -63,6 +65,13 @@ export interface BranchLocation {
 	currentIndex: number;
 }
 
+export type InspectionScroll =
+	| "up"
+	| "down"
+	| "pageUp"
+	| "pageDown"
+	| "first"
+	| "last";
 export type InputMode = "normal" | "search" | "preview" | "help";
 
 export type FoldMode =
@@ -98,6 +107,10 @@ export interface DisplayOptions {
 }
 
 export interface SearchSnapshot {
+	results?: Array<{ id: string; score: number }>;
+	resultIndex?: number;
+	regex?: boolean;
+	scope?: "all" | "focused-subtree";
 	searchQuery: string;
 	selectedEntryId: string | null;
 	temporaryRevealedIds: Set<string>;
@@ -146,6 +159,7 @@ export interface ContextMetrics {
 }
 
 export interface DisplayNode {
+	compressedEntryIds?: string[];
 	id: string;
 	realId: string | null;
 	isVirtual: boolean;
@@ -176,12 +190,30 @@ export interface DisplayNode {
 }
 
 export interface ActionContext {
+	actionId?: string;
+	navigationOptions?: {
+		branchWrap: boolean;
+		focusFollowsSelection: "always" | "never" | "branch-actions";
+		autoRevealTarget: boolean;
+		skipHiddenNodes: boolean;
+	};
+	defaults?: { display: DisplayOptions; fold: FoldOptions };
+	reloadConfig?: () => Promise<void>;
+	openSettings?: () => Promise<void>;
+	scrollInspection?: (move: InspectionScroll) => void;
+	editLabel?: (
+		entryId: string,
+		current: string | undefined,
+	) => Promise<{ label: string | undefined } | null>;
 	state: ExplorerState;
 	index: TreeIndex;
 	visibleNodes: DisplayNode[];
 	close: () => void;
 	pageSize?: number;
-	reproject?: () => void;
+	// biome-ignore lint/suspicious/noConfusingVoidType: legacy repaint callbacks return no projected rows.
+	reproject?: () => DisplayNode[] | void;
+	isCurrent?: () => boolean;
+	searchAction?: (id: string) => void;
 	setLabel?: (
 		entryId: string,
 		label: string | undefined,
@@ -196,6 +228,7 @@ export interface ActionDefinition {
 	id: string;
 	description: string;
 	defaultKeys: string[];
+	modeKeys?: Partial<Record<InputMode, string[]>>;
 	modes: InputMode[];
 	enabled?: (state: ExplorerState, index: TreeIndex) => boolean;
 	execute: (ctx: ActionContext) => void | Promise<void>;

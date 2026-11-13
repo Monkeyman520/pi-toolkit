@@ -41,6 +41,7 @@
 				},
 				"skipHiddenNodes": {
 					"type": "boolean",
+					"const": true,
 					"default": true
 				}
 			}
@@ -158,6 +159,7 @@
 				},
 				"preserveFoldState": {
 					"type": "boolean",
+					"const": true,
 					"default": true
 				},
 				"caseSensitive": {
@@ -218,7 +220,7 @@
 			"properties": {
 				"forkPosition": {
 					"type": "string",
-					"enum": ["at", "before"],
+					"enum": ["at"],
 					"default": "at"
 				},
 				"navigateSummarize": {

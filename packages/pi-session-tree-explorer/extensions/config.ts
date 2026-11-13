@@ -1,7 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { writeJsonConfig } from "pi-plugin-support/config";
+import { readJsonConfig, writeJsonConfig } from "pi-plugin-support/config";
 import { Check } from "typebox/value";
 import {
 	formatSchemaDiagnostics,
@@ -10,282 +9,255 @@ import {
 	type SessionTreeConfig,
 	SessionTreeConfigSchema,
 } from "./config-schema.ts";
+import { validateKeymap } from "./keymap.ts";
 
 export const CONFIG_FILE_NAME = "session-tree.json";
-const MAX_CONFIG_BYTES = 1024 * 1024; // 1MB
-
+const MAX_CONFIG_BYTES = 1024 * 1024;
 export interface ConfigDiagnostic {
 	layer: "global" | "project" | "runtime";
 	path?: string;
 	message: string;
 	details?: string[];
 }
-
+export interface LoadParams {
+	agentDir?: string;
+	cwd: string;
+	isProjectTrusted: boolean;
+	runtimeOverrides?: PartialSessionTreeConfig;
+}
 export function deepMergeConfig<T>(base: T, override: unknown): T {
 	if (
 		!base ||
 		typeof base !== "object" ||
 		!override ||
 		typeof override !== "object"
-	) {
-		return ((override !== undefined ? override : base) ?? {}) as T;
-	}
-
+	)
+		return (override === undefined ? base : override) as T;
 	const result: Record<string, unknown> = {
 		...(base as Record<string, unknown>),
 	};
-
-	for (const [key, val] of Object.entries(
-		override as Record<string, unknown>,
-	)) {
+	for (const [key, val] of Object.entries(override)) {
+		if (["__proto__", "constructor", "prototype"].includes(key))
+			throw new Error("Unsafe configuration key");
 		if (val === undefined) continue;
-
-		if (Array.isArray(val)) {
-			// Arrays replace wholesale per Spec R13
-			result[key] = [...val];
-		} else if (
-			val !== null &&
+		if (Array.isArray(val)) result[key] = [...val];
+		else if (
+			val &&
 			typeof val === "object" &&
-			result[key] !== null &&
+			result[key] &&
 			typeof result[key] === "object" &&
 			!Array.isArray(result[key])
-		) {
+		)
 			result[key] = deepMergeConfig(result[key], val);
-		} else {
-			result[key] = val;
-		}
+		else result[key] = val;
 	}
-
 	return result as T;
 }
-
+function validate(config: unknown): void {
+	if (!Check(SessionTreeConfigSchema, config))
+		throw new Error(
+			formatSchemaDiagnostics(config).join("; ") || "Invalid configuration",
+		);
+	const effective = deepMergeConfig(getDefaultConfig(), config);
+	const errors = validateKeymap(effective.keybindings).filter(
+		(d) => d.type !== "conflict",
+	);
+	if (errors.length) throw new Error(errors.map((d) => d.message).join("; "));
+}
 export class ConfigManager {
-	private currentConfig: SessionTreeConfig;
-	private lastValidConfig: SessionTreeConfig;
+	private currentConfig = getDefaultConfig();
+	private globalLayer: PartialSessionTreeConfig = {};
+	private projectLayer: PartialSessionTreeConfig = {};
+	private runtimeLayer: PartialSessionTreeConfig = {};
 	private diagnostics: ConfigDiagnostic[] = [];
-	private globalConfigPath: string;
-	private projectConfigPath: string;
-	private lastLoadedParams?: {
-		agentDir?: string;
-		cwd: string;
-		isProjectTrusted: boolean;
-		runtimeOverrides?: PartialSessionTreeConfig;
-	};
-
+	private globalConfigPath = "";
+	private projectConfigPath = "";
+	private lastLoadedParams?: LoadParams;
+	private queue: Promise<unknown> = Promise.resolve();
 	constructor(initial?: PartialSessionTreeConfig) {
-		this.currentConfig = getDefaultConfig();
 		if (initial) {
-			this.currentConfig = deepMergeConfig(
-				this.currentConfig,
-				initial as Record<string, unknown>,
-			);
+			validate(initial);
+			this.runtimeLayer = structuredClone(initial);
+			this.currentConfig = deepMergeConfig(this.currentConfig, initial);
 		}
-		this.lastValidConfig = JSON.parse(JSON.stringify(this.currentConfig));
-		this.globalConfigPath = "";
-		this.projectConfigPath = "";
 	}
-
+	private serialized<T>(work: () => Promise<T>): Promise<T> {
+		const result = this.queue.then(work);
+		this.queue = result.catch(() => {});
+		return result;
+	}
 	public getConfig(): SessionTreeConfig {
-		return this.currentConfig;
+		return structuredClone(this.currentConfig);
 	}
-
 	public getDiagnostics(): ConfigDiagnostic[] {
-		return [...this.diagnostics];
+		return structuredClone(this.diagnostics);
 	}
-
-	public getGlobalPath(): string {
+	public getGlobalPath() {
 		return this.globalConfigPath;
 	}
-
-	public getProjectPath(): string {
+	public getProjectPath() {
 		return this.projectConfigPath;
 	}
-
-	private async readLayer(
-		path: string,
-		layerName: "global" | "project",
-	): Promise<PartialSessionTreeConfig | null> {
-		try {
-			const text = await readFile(path, "utf8");
-			if (Buffer.byteLength(text) > MAX_CONFIG_BYTES) {
-				this.diagnostics.push({
-					layer: layerName,
-					path,
-					message: "Configuration file exceeds maximum size (1MB)",
-				});
-				return null;
-			}
-
-			let data: unknown;
-			try {
-				data = JSON.parse(text);
-			} catch (parseErr) {
-				this.diagnostics.push({
-					layer: layerName,
-					path,
-					message: `Malformed JSON syntax: ${(parseErr as Error).message}`,
-				});
-				return null;
-			}
-
-			if (typeof data !== "object" || data === null || Array.isArray(data)) {
-				this.diagnostics.push({
-					layer: layerName,
-					path,
-					message: "Configuration root must be an object",
-				});
-				return null;
-			}
-
-			if (!Check(SessionTreeConfigSchema, data)) {
-				const details = formatSchemaDiagnostics(data);
-				this.diagnostics.push({
-					layer: layerName,
-					path,
-					message: "Configuration validation failed against schema",
-					details,
-				});
-				return null;
-			}
-
-			return data as PartialSessionTreeConfig;
-		} catch (err) {
-			if (
-				err instanceof Error &&
-				"code" in err &&
-				(err as { code: string }).code === "ENOENT"
-			) {
-				// Missing file is normal
-				return null;
-			}
-			this.diagnostics.push({
-				layer: layerName,
+	private async candidate(params: LoadParams) {
+		const globalPath = join(params.agentDir ?? getAgentDir(), CONFIG_FILE_NAME),
+			projectPath = join(params.cwd, ".pi", CONFIG_FILE_NAME);
+		const diagnostics: ConfigDiagnostic[] = [];
+		let config = getDefaultConfig();
+		const read = async (
+			path: string,
+			layer: "global" | "project",
+		): Promise<PartialSessionTreeConfig> => {
+			const read = await readJsonConfig(
 				path,
-				message: `Failed to read file: ${(err as Error).message}`,
-			});
-			return null;
-		}
-	}
-
-	public async loadLayers(params: {
-		agentDir?: string;
-		cwd: string;
-		isProjectTrusted: boolean;
-		runtimeOverrides?: PartialSessionTreeConfig;
-	}): Promise<{ config: SessionTreeConfig; diagnostics: ConfigDiagnostic[] }> {
-		this.lastLoadedParams = params;
-		this.diagnostics = [];
-
-		const agentDir = params.agentDir ?? getAgentDir();
-		this.globalConfigPath = join(agentDir, CONFIG_FILE_NAME);
-		this.projectConfigPath = join(params.cwd, ".pi", CONFIG_FILE_NAME);
-
-		// 1. Built-in defaults
-		let merged = getDefaultConfig();
-
-		// 2. Global session-tree.json
-		const globalLayer = await this.readLayer(this.globalConfigPath, "global");
-		if (globalLayer) {
-			merged = deepMergeConfig(merged, globalLayer as Record<string, unknown>);
-		}
-
-		// 3. Project-level .pi/session-tree.json (only if project is trusted!)
-		if (params.isProjectTrusted) {
-			const projectLayer = await this.readLayer(
-				this.projectConfigPath,
-				"project",
+				SessionTreeConfigSchema,
+				MAX_CONFIG_BYTES,
 			);
-			if (projectLayer) {
-				merged = deepMergeConfig(
-					merged,
-					projectLayer as Record<string, unknown>,
-				);
+			if (read.kind === "missing") return {};
+			if (read.kind !== "valid") {
+				diagnostics.push({
+					layer,
+					path,
+					message: String(read.error),
+					details:
+						"text" in read && read.text
+							? (() => {
+									try {
+										return formatSchemaDiagnostics(JSON.parse(read.text));
+									} catch {
+										return [];
+									}
+								})()
+							: [],
+				});
+				return {};
 			}
+			try {
+				const candidate = deepMergeConfig(config, read.data);
+				validate(candidate);
+				config = candidate;
+				return read.data as PartialSessionTreeConfig;
+			} catch (error) {
+				diagnostics.push({ layer, path, message: String(error) });
+				return {};
+			}
+		};
+		const global = await read(globalPath, "global");
+		const project = params.isProjectTrusted
+			? await read(projectPath, "project")
+			: {};
+		let runtime: PartialSessionTreeConfig = structuredClone(
+			params.runtimeOverrides ?? {},
+		);
+		try {
+			const candidate = deepMergeConfig(config, runtime);
+			validate(candidate);
+			config = candidate;
+		} catch (error) {
+			diagnostics.push({ layer: "runtime", message: String(error) });
+			runtime = {};
 		}
-
-		// 4. Runtime overrides (highest precedence)
-		if (params.runtimeOverrides) {
-			merged = deepMergeConfig(
-				merged,
-				params.runtimeOverrides as Record<string, unknown>,
-			);
-		}
-
-		this.currentConfig = merged;
-		if (this.diagnostics.length === 0) {
-			this.lastValidConfig = JSON.parse(JSON.stringify(merged));
-		}
-
 		return {
-			config: this.currentConfig,
-			diagnostics: [...this.diagnostics],
+			config,
+			global,
+			project,
+			runtime,
+			diagnostics,
+			globalPath,
+			projectPath,
 		};
 	}
-
-	public async reload(): Promise<{
+	private publish(next: Awaited<ReturnType<ConfigManager["candidate"]>>) {
+		this.currentConfig = next.config;
+		this.globalLayer = next.global;
+		this.projectLayer = next.project;
+		this.runtimeLayer = next.runtime;
+		this.globalConfigPath = next.globalPath;
+		this.projectConfigPath = next.projectPath;
+		this.diagnostics = next.diagnostics;
+	}
+	public async ensureLoaded(params: LoadParams) {
+		if (
+			!this.lastLoadedParams ||
+			params.cwd !== this.lastLoadedParams.cwd ||
+			params.isProjectTrusted !== this.lastLoadedParams.isProjectTrusted ||
+			params.agentDir !== this.lastLoadedParams.agentDir
+		)
+			return this.loadLayers(params);
+		return { config: this.getConfig(), diagnostics: this.getDiagnostics() };
+	}
+	public loadLayers(
+		params: LoadParams,
+	): Promise<{ config: SessionTreeConfig; diagnostics: ConfigDiagnostic[] }> {
+		return this.serialized(async () => {
+			const next = await this.candidate(params);
+			this.publish(next);
+			this.lastLoadedParams = structuredClone(params);
+			return { config: this.getConfig(), diagnostics: this.getDiagnostics() };
+		});
+	}
+	public reload(): Promise<{
 		success: boolean;
 		config: SessionTreeConfig;
 		error?: string;
 		diagnostics: ConfigDiagnostic[];
 	}> {
-		if (!this.lastLoadedParams) {
-			return {
-				success: true,
-				config: this.currentConfig,
-				diagnostics: [],
-			};
-		}
-
-		const savedValidConfig = JSON.parse(JSON.stringify(this.lastValidConfig));
-		const result = await this.loadLayers(this.lastLoadedParams);
-
-		// If diagnostics indicate an invalid layer during reload
-		if (result.diagnostics.length > 0) {
-			// Per Spec R13: a failed reload retains the last valid effective configuration
-			this.currentConfig = savedValidConfig;
-			this.lastValidConfig = savedValidConfig;
-			return {
-				success: false,
-				config: this.currentConfig,
-				error: result.diagnostics.map((e) => e.message).join("; "),
-				diagnostics: result.diagnostics,
-			};
-		}
-
-		return {
-			success: true,
-			config: this.currentConfig,
-			diagnostics: result.diagnostics,
-		};
+		return this.serialized(async () => {
+			if (!this.lastLoadedParams)
+				return { success: true, config: this.getConfig(), diagnostics: [] };
+			const next = await this.candidate(this.lastLoadedParams);
+			if (next.diagnostics.length) {
+				this.diagnostics = next.diagnostics;
+				return {
+					success: false,
+					config: this.getConfig(),
+					error: next.diagnostics.map((d) => d.message).join("; "),
+					diagnostics: this.getDiagnostics(),
+				};
+			}
+			this.publish(next);
+			return { success: true, config: this.getConfig(), diagnostics: [] };
+		});
 	}
-
-	public async updateSetting(
+	public updateSetting(
 		pathKey: string,
 		val: unknown,
 	): Promise<SessionTreeConfig> {
-		const parts = pathKey.split(".");
-		const partial: Record<string, unknown> = {};
-		let cur = partial;
-
-		for (let i = 0; i < parts.length - 1; i++) {
-			cur[parts[i]] = {};
-			cur = cur[parts[i]] as Record<string, unknown>;
-		}
-		cur[parts[parts.length - 1]] = val;
-
-		// Merge into current
-		this.currentConfig = deepMergeConfig(this.currentConfig, partial);
-		this.lastValidConfig = JSON.parse(JSON.stringify(this.currentConfig));
-
-		// Persist to global config path
-		if (this.globalConfigPath) {
-			await writeJsonConfig(
-				this.globalConfigPath,
-				this.currentConfig,
-				SessionTreeConfigSchema,
+		return this.serialized(async () => {
+			const parts = pathKey.split(".");
+			if (
+				parts.some(
+					(p) => !p || ["__proto__", "constructor", "prototype"].includes(p),
+				)
+			)
+				throw new Error("Invalid setting path");
+			const partial: Record<string, unknown> = {};
+			let cur = partial;
+			for (const part of parts.slice(0, -1)) {
+				const nested = {};
+				cur[part] = nested;
+				cur = nested;
+			}
+			cur[parts[parts.length - 1]] = val;
+			const global = deepMergeConfig(this.globalLayer, partial);
+			validate(global);
+			const config = deepMergeConfig(
+				deepMergeConfig(
+					deepMergeConfig(getDefaultConfig(), global),
+					this.projectLayer,
+				),
+				this.runtimeLayer,
 			);
-		}
-
-		return this.currentConfig;
+			validate(config);
+			if (this.globalConfigPath)
+				await writeJsonConfig(
+					this.globalConfigPath,
+					global,
+					SessionTreeConfigSchema,
+				);
+			this.globalLayer = structuredClone(global);
+			this.currentConfig = config;
+			this.diagnostics = [];
+			return this.getConfig();
+		});
 	}
 }
