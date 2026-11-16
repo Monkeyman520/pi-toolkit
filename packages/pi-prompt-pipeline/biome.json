@@ -1,0 +1,16 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.6.4/schema.json",
+	"files": {
+		"includes": ["**", "!node_modules", "!package-lock.json"]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab"
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended"
+		}
+	}
+}

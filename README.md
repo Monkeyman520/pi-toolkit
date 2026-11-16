@@ -12,8 +12,9 @@ This repository organizes Pi plugin packages; it is not the Pi host's source tre
 | [pi-pretty-session](./packages/pi-pretty-session/README.md) | Automatic session naming, title/description summarization, dynamic config, session metrics, and project info |
 | [pi-quota-keeper](./packages/pi-quota-keeper/README.md) | Coordinated account quota visibility and capability-gated activation |
 | [pi-context-aco](./packages/pi-context-aco/README.md) | **Experimental — pending optimization and broader testing.** Passive pressure/task monitoring, recommendations, scoped local evidence checkpoints, bounded historical recall and recovery-gated exact pruning; scoped extractive/native compaction with confirmation or explicit authorization; bounded authorized V4 independent children with parent-verified staged deliverables |
+| [pi-prompt-pipeline](./packages/pi-prompt-pipeline/README.md) | Conditional system-prompt transformations and one-shot agent/request boundary exports |
 
-The four plugins have controlled Pi 1.5.0 loading/usage smoke evidence. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is their ordinary versioned dependency, not an activated plugin. ACO is experimental and provides V1 observation/recommendations, V2 verified recovery/exact pruning, V3 bounded extractive/native compaction and V4 authorized independent children/staged results. Its default observe mode never executes strategies; V3/V4 require separate scoped authority and safety checks. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README. Completed ACO tickets and bounded tests are not a stable-release endorsement. Start with observation-only evaluation; do not adopt adaptive or context-changing automation by default, assume token/cost savings, or weaken safety checks to force an intervention.
+The original four plugins have controlled Pi 1.5.0 loading/usage smoke evidence. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is their ordinary versioned dependency, not an activated plugin. ACO is experimental and provides V1 observation/recommendations, V2 verified recovery/exact pruning, V3 bounded extractive/native compaction and V4 authorized independent children/staged results. Its default observe mode never executes strategies; V3/V4 require separate scoped authority and safety checks. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README. Completed ACO tickets and bounded tests are not a stable-release endorsement. Start with observation-only evaluation; do not adopt adaptive or context-changing automation by default, assume token/cost savings, or weaken safety checks to force an intervention.
 
 ## Installation model
 
@@ -52,6 +53,7 @@ pi-packages/
     ├── pi-pretty-session/     # Session summarization, metrics, and project info
     ├── pi-quota-keeper/       # Quota visibility and coordinated activation
     ├── pi-context-aco/        # Passive context-pressure monitoring foundation
+    ├── pi-prompt-pipeline/    # Conditional prompt transforms and boundary exports
     └── pi-plugin-support/    # Ordinary config/discovery/TUI support library
 ```
 
@@ -76,7 +78,7 @@ There is no root package manifest or workspace test/build runner. Each real pack
 
 ## Shared support dependency
 
-Each plugin declares `pi-plugin-support@0.1.0` and carries that ordinary package via npm `bundledDependencies`, without bundling host SDKs or activating any other plugin. Its local lockfile also resolves a shipped versioned archive for independent `npm ci` setup. No registry publication or required emitted build is assumed. See the [support-library development reference](./packages/pi-plugin-support/README.md) for APIs, ownership and archive refresh/check commands.
+Existing support-library consumers declare `pi-plugin-support@0.1.0` and carry that ordinary package via npm `bundledDependencies`, without bundling host SDKs or activating any other plugin. Each consumer's local lockfile also resolves a shipped versioned archive for independent `npm ci` setup. No registry publication or required emitted build is assumed. See the [support-library development reference](./packages/pi-plugin-support/README.md) for APIs, ownership and archive refresh/check commands. Pi Prompt Pipeline is self-contained and does not require this ordinary support library.
 
 ## Cross-plugin isolation verification
 
