@@ -41,7 +41,7 @@ function messageTextParts(content: unknown): string[] {
 		for (const key of ["text", "thinking", "name"])
 			if (key in block && typeof block[key] === "string")
 				parts.push(block[key]);
-		for (const key of ["arguments", "input"])
+		for (const key of ["arguments", "args", "input"])
 			if (key in block && block[key] !== undefined)
 				parts.push(JSON.stringify(block[key]));
 	}
@@ -74,6 +74,14 @@ export function extractFullText(entry: SessionEntry): string {
 		if (msg.toolCallId) parts.push(msg.toolCallId);
 
 		parts.push(...messageTextParts(msg.content));
+		const extraDetails = (msg as unknown as Record<string, unknown>).details;
+		if (extraDetails !== undefined) {
+			parts.push(
+				typeof extraDetails === "string"
+					? extraDetails
+					: JSON.stringify(extraDetails),
+			);
+		}
 	} else if (entry.type === "compaction") {
 		if (entry.summary) parts.push(entry.summary);
 		if (entry.firstKeptEntryId) parts.push(entry.firstKeptEntryId);
@@ -223,10 +231,12 @@ export function executeSearch(
 
 		if (regex) {
 			// Regex match
-			if (regex.test(doc.fullText) || (doc.label && regex.test(doc.label))) {
+			const match =
+				regex.exec(doc.fullText) ?? (doc.label ? regex.exec(doc.label) : null);
+			if (match) {
 				matched = true;
 				baseScore = 150;
-				matchFragments.push(q);
+				matchFragments.push(match[0] || q);
 			}
 		} else if (options.mode === "exact") {
 			// Exact substring match

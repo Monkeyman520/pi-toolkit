@@ -1,5 +1,8 @@
+import { extractSummary } from "./display.ts";
+import { isPromptRestoringEntry } from "./session-effects.ts";
 import type {
 	BranchLocation,
+	BranchTipCandidate,
 	DisplayNode,
 	ExplorerState,
 	TreeIndex,
@@ -604,4 +607,62 @@ export function navBranchCycle(
 
 	const nextIdx = (branch.currentIndex + 1) % branch.siblingBranchIds.length;
 	return branch.siblingBranchIds[nextIdx] ?? selectedId;
+}
+
+/**
+ * Find all reachable leaf entry IDs under a subtree root in deterministic preorder.
+ */
+export function findReachableBranchTips(
+	index: TreeIndex,
+	startEntryId: string,
+): string[] {
+	if (!index.entryById.has(startEntryId)) {
+		return [];
+	}
+
+	const tips: string[] = [];
+	const visited = new Set<string>();
+
+	function walk(entryId: string): void {
+		if (visited.has(entryId)) return;
+		visited.add(entryId);
+		const children = index.childrenById.get(entryId) ?? [];
+		if (children.length === 0) {
+			tips.push(entryId);
+			return;
+		}
+		for (const childId of children) {
+			walk(childId);
+		}
+	}
+
+	walk(startEntryId);
+	return tips;
+}
+
+export function buildBranchTipCandidates(
+	index: TreeIndex,
+	startEntryId: string,
+	sessionLeafId: string | null,
+): BranchTipCandidate[] {
+	const tipIds = findReachableBranchTips(index, startEntryId);
+	const candidates: BranchTipCandidate[] = [];
+	for (const entryId of tipIds) {
+		const entry = index.entryById.get(entryId);
+		if (!entry) continue;
+		const role = entry.message?.role ?? entry.type;
+		const previewText = extractSummary(entry, false)
+			.summaryText.replace(/\s+/g, " ")
+			.trim()
+			.slice(0, 80);
+		candidates.push({
+			entryId,
+			role,
+			turnDepth: index.turnDepthById.get(entryId) ?? 0,
+			previewText,
+			isUserPrompt: isPromptRestoringEntry(entry),
+			isCurrentLeaf: entryId === sessionLeafId,
+		});
+	}
+	return candidates;
 }

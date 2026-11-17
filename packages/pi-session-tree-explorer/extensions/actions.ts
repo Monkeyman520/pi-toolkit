@@ -6,6 +6,7 @@ import {
 	rawTargetForSelection,
 } from "./display.ts";
 import {
+	buildBranchTipCandidates,
 	findNearestBranch,
 	navBranchActive,
 	navBranchCycle,
@@ -43,9 +44,22 @@ import { transitionSearch } from "./search-state.ts";
 import type {
 	ActionContext,
 	ActionDefinition,
+	DisplayOptions,
 	ExplorerState,
 	TreeIndex,
 } from "./types.ts";
+
+function recordDisplayOverride<K extends keyof DisplayOptions>(
+	state: ExplorerState,
+	key: K,
+	value: DisplayOptions[K],
+): void {
+	state.displayOptions[key] = value;
+	state.explicitDisplayOverrides = {
+		...(state.explicitDisplayOverrides ?? {}),
+		[key]: value,
+	};
+}
 
 function updateSelection(
 	ctx: ActionContext,
@@ -66,6 +80,7 @@ function updateSelection(
 	)
 		revealPathToRoot(targetId, ctx.index, ctx.state);
 	ctx.state.selectedEntryId = targetId;
+	ctx.state.previewNodeId = targetId;
 
 	// Keep recent leaf updated if the selected node is a leaf
 	if (ctx.index.leafIds.has(targetId)) {
@@ -278,7 +293,7 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	register({
 		id: "node.current",
 		description: "Reveal/select the real Session Leaf",
-		defaultKeys: ["tab"],
+		defaultKeys: ["gc"],
 		modes: ["normal"],
 		execute: (ctx) => {
 			const target = navNodeCurrent(ctx.visibleNodes, ctx.state.sessionLeafId);
@@ -602,6 +617,124 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 			updateSelection(ctx, target, true);
 		},
 	});
+
+	register({
+		id: "branch.tip",
+		description: "Go to reachable branch tip of selected subtree",
+		defaultKeys: ["g"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			const sel = rawTargetForSelection(
+				ctx.state.selectedEntryId,
+				ctx.visibleNodes,
+				ctx.index,
+			);
+			if (!sel) return;
+			const candidates = buildBranchTipCandidates(
+				ctx.index,
+				sel,
+				ctx.state.sessionLeafId,
+			);
+			if (candidates.length === 0) return;
+			if (candidates.length === 1) {
+				const tip = candidates[0];
+				if (tip.isUserPrompt) {
+					if (ctx.confirmUserTip) {
+						ctx.confirmUserTip(tip);
+						return;
+					}
+					ctx.notify?.(
+						`Tip '${tip.entryId}' is a user message; navigating will restore its prompt into the editor.`,
+						"warning",
+					);
+				}
+				ctx.navigate?.(tip.entryId);
+				return;
+			}
+			if (ctx.openTipPicker) {
+				ctx.openTipPicker(candidates);
+				return;
+			}
+			ctx.notify?.(
+				`Branch has ${candidates.length} reachable tips; open the tip picker to choose one.`,
+				"info",
+			);
+		},
+	});
+
+	register({
+		id: "branch.diff",
+		description: "Compare two branches (topology and workspace diff)",
+		defaultKeys: ["gd"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			if (!ctx.openBranchDiff) {
+				ctx.notify?.("Branch diff UI unavailable", "warning");
+				return;
+			}
+			const raw = rawTargetForSelection(
+				ctx.state.selectedEntryId,
+				ctx.visibleNodes,
+				ctx.index,
+			);
+			ctx.openBranchDiff(raw ?? ctx.state.sessionLeafId);
+		},
+	});
+
+	register({
+		id: "branch.bookmark",
+		description: "Bookmark or unbookmark the selected branch",
+		defaultKeys: ["B"],
+		modes: ["normal"],
+		execute: async (ctx) => {
+			const target = rawTargetForSelection(
+				ctx.state.selectedEntryId,
+				ctx.visibleNodes,
+				ctx.index,
+			);
+			if (!target) {
+				ctx.notify?.("Select a valid entry to bookmark.", "warning");
+				return;
+			}
+			const current =
+				ctx.state.branchBookmarks?.[target] ??
+				ctx.index.displayLabelsById.get(target);
+			const edit = ctx.editBookmark
+				? await ctx.editBookmark(target, current)
+				: { label: current ? undefined : "bookmark" };
+			if (edit === null || (ctx.isCurrent && !ctx.isCurrent())) return;
+			const next = edit.label?.trim() || undefined;
+			const nextMap = { ...(ctx.state.branchBookmarks ?? {}) };
+			if (next) {
+				nextMap[target] = next;
+			} else {
+				delete nextMap[target];
+			}
+			ctx.state.branchBookmarks = nextMap;
+			ctx.state.version++;
+			ctx.reproject?.();
+			ctx.notify?.(
+				next
+					? `Bookmarked '${next}' on ${target}`
+					: `Removed bookmark on ${target}`,
+				"info",
+			);
+		},
+	});
+
+	register({
+		id: "branch.bookmarks",
+		description: "Open branch switcher for bookmarked and active branches",
+		defaultKeys: ["gB"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			if (!ctx.openBranchSwitcher) {
+				ctx.notify?.("Branch switcher UI unavailable", "warning");
+				return;
+			}
+			ctx.openBranchSwitcher();
+		},
+	});
 	// 11 Fold Actions
 	register({
 		id: "fold.toggle",
@@ -613,7 +746,21 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 			if (!sel) return;
 
 			// Virtual summary expand
-			if (ctx.visibleNodes.find((n) => n.id === sel)?.isVirtual) {
+			const selNode = ctx.visibleNodes.find((n) => n.id === sel);
+			if (selNode?.kind === "virtual-tool-group") {
+				if (selNode.isExpanded) {
+					ctx.state.manualExpandedIds.delete(sel);
+					ctx.state.manualCollapsedIds.add(sel);
+				} else {
+					ctx.state.manualCollapsedIds.delete(sel);
+					ctx.state.manualExpandedIds.add(sel);
+				}
+				ctx.state.version++;
+				ctx.reproject?.();
+				return;
+			}
+			// Virtual summary expand
+			if (selNode?.isVirtual) {
 				const anchorId = expandDisplaySelection(
 					sel,
 					ctx.visibleNodes,
@@ -650,6 +797,14 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
 			if (!sel) return;
+			const selNode = ctx.visibleNodes.find((n) => n.id === sel);
+			if (selNode?.kind === "virtual-tool-group") {
+				ctx.state.manualCollapsedIds.delete(sel);
+				ctx.state.manualExpandedIds.add(sel);
+				ctx.state.version++;
+				ctx.reproject?.();
+				return;
+			}
 			const target = expandDisplaySelection(
 				sel,
 				ctx.visibleNodes,
@@ -676,6 +831,23 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 			const sel = ctx.state.selectedEntryId;
 			if (!sel) return;
 
+			const selNode = ctx.visibleNodes.find((n) => n.id === sel);
+			if (selNode?.kind === "virtual-tool-group") {
+				ctx.state.manualExpandedIds.delete(sel);
+				ctx.state.manualCollapsedIds.add(sel);
+				ctx.state.version++;
+				ctx.reproject?.();
+				return;
+			}
+			if (selNode?.visibleParentId?.startsWith("virtual:tool-group:")) {
+				const groupId = selNode.visibleParentId;
+				ctx.state.manualExpandedIds.delete(groupId);
+				ctx.state.manualCollapsedIds.add(groupId);
+				updateSelection(ctx, groupId);
+				ctx.state.version++;
+				ctx.reproject?.();
+				return;
+			}
 			// If it's a leaf or has no children, collapse visible parent
 			const children = ctx.index.childrenById.get(sel) ?? [];
 			if (children.length === 0) {
@@ -716,6 +888,20 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 			ctx.state.manualExpandedIds.clear();
 			ctx.state.foldOptions.mode = "depth-limited";
 			ctx.state.foldOptions.maxExpandDepth = 0;
+			ctx.state.version++;
+			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "fold.smart",
+		description: "Switch to smart fold mode",
+		defaultKeys: [],
+		modes: ["normal"],
+		execute: (ctx) => {
+			ctx.state.manualExpandedIds.clear();
+			ctx.state.manualCollapsedIds.clear();
+			ctx.state.foldOptions.mode = "smart";
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -827,8 +1013,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.showAssistantNodes =
-				!ctx.state.displayOptions.showAssistantNodes;
+			recordDisplayOverride(
+				ctx.state,
+				"showAssistantNodes",
+				!ctx.state.displayOptions.showAssistantNodes,
+			);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -840,8 +1029,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.showToolNodes =
-				!ctx.state.displayOptions.showToolNodes;
+			recordDisplayOverride(
+				ctx.state,
+				"showToolNodes",
+				!ctx.state.displayOptions.showToolNodes,
+			);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -853,8 +1045,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.showThinkingNodes =
-				!ctx.state.displayOptions.showThinkingNodes;
+			recordDisplayOverride(
+				ctx.state,
+				"showThinkingNodes",
+				!ctx.state.displayOptions.showThinkingNodes,
+			);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -866,8 +1061,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.showMetadataNodes =
-				!ctx.state.displayOptions.showMetadataNodes;
+			recordDisplayOverride(
+				ctx.state,
+				"showMetadataNodes",
+				!ctx.state.displayOptions.showMetadataNodes,
+			);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -879,7 +1077,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.userOnly = !ctx.state.displayOptions.userOnly;
+			recordDisplayOverride(
+				ctx.state,
+				"userOnly",
+				!ctx.state.displayOptions.userOnly,
+			);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -891,8 +1093,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.branchOnly =
-				!ctx.state.displayOptions.branchOnly;
+			recordDisplayOverride(
+				ctx.state,
+				"branchOnly",
+				!ctx.state.displayOptions.branchOnly,
+			);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -904,8 +1109,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: [],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.labeledOnly =
-				!ctx.state.displayOptions.labeledOnly;
+			recordDisplayOverride(
+				ctx.state,
+				"labeledOnly",
+				!ctx.state.displayOptions.labeledOnly,
+			);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -920,6 +1128,7 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 			ctx.state.displayOptions = {
 				...(ctx.defaults?.display ?? defaultDisplayOptions()),
 			};
+			ctx.state.explicitDisplayOverrides = {};
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -957,7 +1166,7 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		execute: (ctx) => {
 			const cur = ctx.state.displayOptions.depthMode;
 			const next = cur === "turn" ? "raw" : cur === "raw" ? "branch" : "turn";
-			ctx.state.displayOptions.depthMode = next;
+			recordDisplayOverride(ctx.state, "depthMode", next);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -969,8 +1178,11 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		defaultKeys: ["C"],
 		modes: ["normal"],
 		execute: (ctx) => {
-			ctx.state.displayOptions.layout =
-				ctx.state.displayOptions.layout === "normal" ? "compact" : "normal";
+			recordDisplayOverride(
+				ctx.state,
+				"layout",
+				ctx.state.displayOptions.layout === "normal" ? "compact" : "normal",
+			);
 			ctx.state.version++;
 			ctx.reproject?.();
 		},
@@ -986,10 +1198,28 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 				ctx.defaults?.display.depthMode ?? "turn";
 			ctx.state.displayOptions.layout =
 				ctx.defaults?.display.layout ?? "normal";
+			if (ctx.state.explicitDisplayOverrides) {
+				delete ctx.state.explicitDisplayOverrides.depthMode;
+				delete ctx.state.explicitDisplayOverrides.layout;
+			}
 			ctx.state.showDetails = true;
 			ctx.state.showContext = true;
 			ctx.state.version++;
 			ctx.reproject?.();
+		},
+	});
+
+	register({
+		id: "view.stats",
+		description: "Show session statistics (nodes, branches, tokens, tools)",
+		defaultKeys: ["S"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			if (!ctx.openSessionStats) {
+				ctx.notify?.("Session statistics UI unavailable", "warning");
+				return;
+			}
+			ctx.openSessionStats();
 		},
 	});
 
@@ -1117,7 +1347,20 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 		execute: (ctx) => {
 			const sel = ctx.state.selectedEntryId;
 			if (!sel) return;
-			if (ctx.visibleNodes.find((n) => n.id === sel)?.isVirtual) {
+			const selNode = ctx.visibleNodes.find((n) => n.id === sel);
+			if (selNode?.kind === "virtual-tool-group") {
+				if (selNode.isExpanded) {
+					ctx.state.manualExpandedIds.delete(sel);
+					ctx.state.manualCollapsedIds.add(sel);
+				} else {
+					ctx.state.manualCollapsedIds.delete(sel);
+					ctx.state.manualExpandedIds.add(sel);
+				}
+				ctx.state.version++;
+				ctx.reproject?.();
+				return;
+			}
+			if (selNode?.isVirtual) {
 				const anchorId = expandDisplaySelection(
 					sel,
 					ctx.visibleNodes,
@@ -1188,7 +1431,7 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	register({
 		id: "session.preview",
 		description: "Preview complete node content",
-		defaultKeys: ["p"],
+		defaultKeys: ["p", "tab"],
 		modes: ["normal", "preview"],
 		execute: (ctx) => {
 			if (ctx.state.mode === "preview") {
@@ -1305,7 +1548,7 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 	register({
 		id: "session.refresh",
 		description: "Refresh session entries from host",
-		defaultKeys: ["r"],
+		defaultKeys: ["R"],
 		modes: ["normal"],
 		execute: async (ctx) => {
 			await ctx.refresh?.();
@@ -1313,6 +1556,25 @@ export function createActionRegistry(): Map<string, ActionDefinition> {
 			ctx.state.version++;
 			ctx.reproject?.();
 			ctx.notify?.("Refreshed session tree.", "info");
+		},
+	});
+
+	register({
+		id: "session.restorePrevious",
+		description: "Restore previous active session leaf from navigation history",
+		defaultKeys: ["r"],
+		modes: ["normal"],
+		execute: (ctx) => {
+			const prevLeafId = ctx.navigationHistory?.peek();
+			if (!prevLeafId) {
+				ctx.notify?.("No previous navigation history", "info");
+				return;
+			}
+			if (ctx.restorePrevious) {
+				ctx.restorePrevious(prevLeafId);
+				return;
+			}
+			ctx.navigate?.(prevLeafId);
 		},
 	});
 

@@ -39,7 +39,14 @@ export const CONFIGURABLE_KEYS: Record<
 	"display.layout": { type: "enum", values: ["normal", "compact"] },
 	"fold.mode": {
 		type: "enum",
-		values: ["focused-only", "all", "active-only", "depth-limited", "manual"],
+		values: [
+			"focused-only",
+			"smart",
+			"all",
+			"active-only",
+			"depth-limited",
+			"manual",
+		],
 	},
 	"fold.collapseInactiveBranches": { type: "boolean" },
 	"fold.collapseLinearPaths": { type: "boolean" },
@@ -65,6 +72,7 @@ export const CONFIGURABLE_KEYS: Record<
 	},
 	"session.forkPosition": { type: "enum", values: ["at"] },
 	"session.navigateSummarize": { type: "boolean" },
+	"session.promptSummary": { type: "boolean" },
 	"session.confirmFork": { type: "boolean" },
 	"session.busyBehavior": { type: "enum", values: ["reject", "wait"] },
 	"performance.virtualRendering": { type: "boolean" },

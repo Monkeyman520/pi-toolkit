@@ -18,6 +18,8 @@ export function createInitialState(
 		version: 1,
 		vimMode: true,
 		displayOptions: defaultDisplayOptions(),
+		explicitDisplayOverrides: {},
+		branchBookmarks: {},
 		foldOptions: defaultFoldOptions(),
 		manualExpandedIds: new Set<string>(),
 		manualCollapsedIds: new Set<string>(),

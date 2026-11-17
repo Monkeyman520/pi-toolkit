@@ -4,6 +4,7 @@ import type {
 	ExplorerState,
 	FoldOptions,
 	SessionEntry,
+	ToolGroupInfo,
 	TreeIndex,
 } from "./types.ts";
 
@@ -223,6 +224,124 @@ export function countSubtreeForks(id: string, index: TreeIndex): number {
 	return forks;
 }
 
+export function countTotalTurns(index: TreeIndex): number {
+	let turns = 0;
+	for (const entry of index.entryById.values()) {
+		if (
+			(entry.type === "message" && entry.message?.role === "user") ||
+			entry.type === "custom_message"
+		) {
+			turns++;
+		}
+	}
+	return turns;
+}
+
+export function isToolEntry(entry: SessionEntry): boolean {
+	if (entry.type !== "message" || !entry.message) return false;
+	if (entry.message.role === "toolResult") return true;
+	if (
+		entry.message.role === "assistant" &&
+		Array.isArray(entry.message.content)
+	) {
+		let hasToolCall = false;
+		let hasText = false;
+		for (const block of entry.message.content) {
+			if (block && typeof block === "object" && "type" in block) {
+				const t = (block as { type?: unknown }).type;
+				if (t === "toolCall") hasToolCall = true;
+				else if (
+					t === "text" &&
+					"text" in block &&
+					typeof (block as { text?: unknown }).text === "string" &&
+					(block as { text: string }).text.trim().length > 0
+				) {
+					hasText = true;
+				}
+			}
+		}
+		return hasToolCall && !hasText;
+	}
+	return false;
+}
+
+function extractToolNamesFromEntry(entry: SessionEntry): string[] {
+	const names: string[] = [];
+	if (entry.message?.role === "toolResult") {
+		if (entry.message.toolName) names.push(entry.message.toolName);
+		return names.length > 0 ? names : ["tool"];
+	}
+	if (
+		entry.message?.role === "assistant" &&
+		Array.isArray(entry.message.content)
+	) {
+		for (const block of entry.message.content) {
+			if (
+				block &&
+				typeof block === "object" &&
+				"type" in block &&
+				(block as { type?: unknown }).type === "toolCall" &&
+				"name" in block &&
+				typeof (block as { name?: unknown }).name === "string"
+			) {
+				names.push((block as { name: string }).name);
+			}
+		}
+	}
+	return names;
+}
+
+function computeToolGroupInfo(entries: SessionEntry[]): {
+	toolNames: string[];
+	count: number;
+	statusSummary: string;
+} {
+	const seen = new Set<string>();
+	const toolNames: string[] = [];
+	let toolResultCount = 0;
+	let toolCallCount = 0;
+	let errorCount = 0;
+
+	for (const entry of entries) {
+		for (const name of extractToolNamesFromEntry(entry)) {
+			if (!seen.has(name)) {
+				seen.add(name);
+				toolNames.push(name);
+			}
+		}
+		if (entry.message?.role === "toolResult") {
+			toolResultCount++;
+			if (entry.message.isError) errorCount++;
+		} else if (
+			entry.message?.role === "assistant" &&
+			Array.isArray(entry.message.content)
+		) {
+			for (const block of entry.message.content) {
+				if (
+					block &&
+					typeof block === "object" &&
+					"type" in block &&
+					(block as { type?: unknown }).type === "toolCall"
+				) {
+					toolCallCount++;
+				}
+			}
+		}
+	}
+
+	const count =
+		toolResultCount > 0
+			? toolResultCount
+			: Math.max(toolCallCount, entries.length);
+	const okCount = Math.max(0, count - errorCount);
+	const statusSummary =
+		errorCount > 0 ? `${okCount} ok, ${errorCount} err` : `${count} ok`;
+	return {
+		toolNames: toolNames.length > 0 ? toolNames : ["tool"],
+		count,
+		statusSummary,
+	};
+}
 /**
  * Determine whether a node should be collapsed based on precedence:
  * Temporary Reveal > Manual Overrides > Configured Policy > Default
@@ -261,7 +380,10 @@ export function isNodeCollapsed(
 		return rawDepth >= state.foldOptions.maxExpandDepth;
 	}
 
-	if (mode === "focused-only" || mode === "active-only") {
+	if (mode === "focused-only" || mode === "active-only" || mode === "smart") {
+		if (mode === "smart" && countTotalTurns(index) < 20) {
+			return false;
+		}
 		const parentId = index.parentById.get(nodeId);
 		if (!parentId) {
 			return false;
@@ -329,6 +451,9 @@ export function buildDisplayProjection(
 ): DisplayNode[] {
 	const nodes: DisplayNode[] = [];
 	const activePath = getActivePathIds(index, state.sessionLeafId);
+	const totalTurns = countTotalTurns(index);
+	const isSmartMode = state.foldOptions.mode === "smart";
+	const isLongSmart = isSmartMode && totalTurns >= 20;
 	const revealedAncestors = new Set<string>();
 	for (const id of state.temporaryRevealedIds) {
 		let cur: string | null = id;
@@ -346,6 +471,16 @@ export function buildDisplayProjection(
 			return (
 				(index.rawDepthById.get(id) ?? 0) >= state.foldOptions.maxExpandDepth
 			);
+		if (mode === "smart") {
+			if (!isLongSmart || !state.foldOptions.collapseInactiveBranches)
+				return false;
+			const parent = index.parentById.get(id);
+			return (
+				!!parent &&
+				(index.childrenById.get(parent)?.length ?? 0) > 1 &&
+				!state.focusedPathIds.has(id)
+			);
+		}
 		if (
 			(mode === "focused-only" || mode === "active-only") &&
 			state.foldOptions.collapseInactiveBranches
@@ -372,6 +507,122 @@ export function buildDisplayProjection(
 		const { id, parent } = frame;
 		const entry = index.entryById.get(id);
 		if (!entry) continue;
+		const toolAggregationActive =
+			!state.displayOptions.userOnly &&
+			!state.displayOptions.branchOnly &&
+			!state.displayOptions.labeledOnly &&
+			(state.displayOptions.showToolNodes || isSmartMode);
+		if (toolAggregationActive && !frame.asSummary && !collapsed(id)) {
+			const span: string[] = [];
+			const spanEntries: SessionEntry[] = [];
+			let curTool: string | undefined = id;
+			while (curTool) {
+				const item = index.entryById.get(curTool);
+				const itemChildren: string[] = index.childrenById.get(curTool) ?? [];
+				if (
+					!item ||
+					!isToolEntry(item) ||
+					index.parentById.get(curTool) == null ||
+					itemChildren.length > 1 ||
+					index.displayLabelsById.has(curTool) ||
+					curTool === state.sessionLeafId ||
+					collapsed(curTool)
+				) {
+					break;
+				}
+				span.push(curTool);
+				spanEntries.push(item);
+				curTool = itemChildren.length === 1 ? itemChildren[0] : undefined;
+			}
+			const minToolSpan =
+				isSmartMode && !state.displayOptions.showToolNodes ? 1 : 2;
+			if (span.length >= minToolSpan) {
+				const virtualId = `virtual:tool-group:${id}`;
+				const hasReveal = span.some(
+					(s) => state.temporaryRevealedIds.has(s) || revealedAncestors.has(s),
+				);
+				const isExpanded =
+					!state.manualCollapsedIds.has(virtualId) &&
+					(state.manualExpandedIds.has(virtualId) || hasReveal);
+				const meta = computeToolGroupInfo(spanEntries);
+				const toolGroup: ToolGroupInfo = {
+					toolNames: meta.toolNames,
+					count: meta.count,
+					statusSummary: meta.statusSummary,
+					isExpanded,
+					entryIds: span,
+				};
+				const groupRawDepth = index.rawDepthById.get(id) ?? 0;
+				nodes.push({
+					id: virtualId,
+					realId: null,
+					isVirtual: true,
+					isVirtualSummary: true,
+					anchorEntryId: id,
+					compressedEntryIds: span,
+					kind: "virtual-tool-group",
+					summaryText: `${isExpanded ? "▾" : "▸"} [Tools ×${meta.count}] ${meta.toolNames.join(", ")}`,
+					timestamp: entry.timestamp,
+					rawDepth: groupRawDepth,
+					turnDepth: index.turnDepthById.get(id) ?? 0,
+					branchDepth: index.branchDepthById.get(id) ?? 0,
+					hasChildren: true,
+					isLeaf: false,
+					isFork: false,
+					isCurrentLeaf: false,
+					isSelected: state.selectedEntryId === virtualId,
+					visibleParentId: parent,
+					isCollapsed: !isExpanded,
+					isExpanded,
+					virtualDescendantCount: span.length,
+					virtualForkCount: 0,
+					toolGroup,
+				});
+				if (isExpanded) {
+					for (let sIdx = 0; sIdx < span.length; sIdx++) {
+						const spanId = span[sIdx];
+						const spanEntry = spanEntries[sIdx];
+						const { summaryText: childSummary, role: childRole } = summaryFor(
+							spanEntry,
+							state.displayOptions.showThinkingNodes,
+						);
+						nodes.push({
+							id: spanId,
+							realId: spanId,
+							isVirtual: false,
+							kind: spanEntry.type,
+							role: childRole,
+							summaryText: childSummary,
+							timestamp: spanEntry.timestamp,
+							rawDepth: groupRawDepth + 1,
+							turnDepth: index.turnDepthById.get(spanId) ?? 0,
+							branchDepth: index.branchDepthById.get(spanId) ?? 0,
+							hasChildren: false,
+							isLeaf: (index.childrenById.get(spanId)?.length ?? 0) === 0,
+							isFork: false,
+							isCurrentLeaf: spanId === state.sessionLeafId,
+							isSelected: spanId === state.selectedEntryId,
+							label:
+								state.branchBookmarks?.[spanId] ??
+								index.displayLabelsById.get(spanId),
+							visibleParentId: virtualId,
+							isCollapsed: false,
+							isExpanded: true,
+						});
+					}
+				}
+				const lastId = span[span.length - 1];
+				const lastChildren = index.childrenById.get(lastId) ?? [];
+				for (let i = lastChildren.length - 1; i >= 0; i--) {
+					stack.push({
+						id: lastChildren[i],
+						parent: virtualId,
+						asSummary: lastChildren.length > 1,
+					});
+				}
+				continue;
+			}
+		}
 		if (state.foldOptions.collapseLinearPaths) {
 			const eligible = (candidate: string) => {
 				const item = index.entryById.get(candidate);
@@ -380,6 +631,7 @@ export function buildDisplayProjection(
 					index.parentById.get(candidate) != null &&
 					(index.childrenById.get(candidate)?.length ?? 0) === 1 &&
 					!index.displayLabelsById.has(candidate) &&
+					!state.branchBookmarks?.[candidate] &&
 					candidate !== state.selectedEntryId &&
 					candidate !== state.sessionLeafId &&
 					!state.manualExpandedIds.has(candidate) &&
@@ -425,10 +677,17 @@ export function buildDisplayProjection(
 			}
 		}
 		const children = index.childrenById.get(id) ?? [];
+		const smartEffectiveDisplay: DisplayOptions =
+			isSmartMode &&
+			!state.displayOptions.userOnly &&
+			!state.displayOptions.branchOnly &&
+			!state.displayOptions.labeledOnly
+				? { ...state.displayOptions, showAssistantNodes: true }
+				: state.displayOptions;
 		const visible = isNodeVisible(
 			entry,
 			index,
-			state.displayOptions,
+			smartEffectiveDisplay,
 			state.temporaryRevealedIds.has(id),
 		);
 		const folded = collapsed(id);
@@ -463,7 +722,7 @@ export function buildDisplayProjection(
 				isFork: !summary && children.length > 1,
 				isCurrentLeaf: !summary && id === state.sessionLeafId,
 				isSelected: (summary ? summaryId : id) === state.selectedEntryId,
-				label: index.displayLabelsById.get(id),
+				label: state.branchBookmarks?.[id] ?? index.displayLabelsById.get(id),
 				visibleParentId: parent,
 				isCollapsed: folded,
 				isExpanded: !folded,

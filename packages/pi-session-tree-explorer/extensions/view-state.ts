@@ -4,24 +4,31 @@ import { dirname, join } from "node:path";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { DisplayConfigSchema } from "./config-schema.ts";
-import type { DisplayOptions, ExplorerState, TreeIndex } from "./types.ts";
+import type {
+	DisplayOptions,
+	ExplorerState,
+	SessionViewState,
+	TreeIndex,
+} from "./types.ts";
 
-const ViewStateSchema = Type.Object(
+export type { SessionViewState } from "./types.ts";
+
+const DisplayOverridesSchema = Type.Object(
+	{
+		...DisplayConfigSchema.properties,
+		userOnly: Type.Optional(Type.Boolean()),
+		branchOnly: Type.Optional(Type.Boolean()),
+		labeledOnly: Type.Optional(Type.Boolean()),
+	},
+	{ additionalProperties: false },
+);
+
+export const ViewStateV1Schema = Type.Object(
 	{
 		version: Type.Literal(1),
 		sessionId: Type.String(),
 		focusedBranchId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-		displayOptions: Type.Optional(
-			Type.Object(
-				{
-					...DisplayConfigSchema.properties,
-					userOnly: Type.Optional(Type.Boolean()),
-					branchOnly: Type.Optional(Type.Boolean()),
-					labeledOnly: Type.Optional(Type.Boolean()),
-				},
-				{ additionalProperties: false },
-			),
-		),
+		displayOptions: Type.Optional(DisplayOverridesSchema),
 		showDetails: Type.Optional(Type.Boolean()),
 		showContext: Type.Optional(Type.Boolean()),
 		manualExpandedIds: Type.Optional(Type.Array(Type.String())),
@@ -29,20 +36,30 @@ const ViewStateSchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-export type LoadedViewState = Partial<Omit<ExplorerState, "displayOptions">> & {
-	displayOptions?: Partial<DisplayOptions>;
-};
 
-export interface SessionViewState {
-	version: number;
-	sessionId: string;
-	focusedBranchId?: string | null;
-	displayOptions?: Partial<DisplayOptions>;
-	showDetails?: boolean;
-	showContext?: boolean;
-	manualExpandedIds?: string[];
-	manualCollapsedIds?: string[];
-}
+export const ViewStateV2Schema = Type.Object(
+	{
+		version: Type.Literal(2),
+		sessionId: Type.String(),
+		focusedBranchId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+		selectedNodeId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+		explicitDisplayOverrides: Type.Optional(DisplayOverridesSchema),
+		showDetails: Type.Optional(Type.Boolean()),
+		showContext: Type.Optional(Type.Boolean()),
+		manualExpandedIds: Type.Optional(Type.Array(Type.String())),
+		manualCollapsedIds: Type.Optional(Type.Array(Type.String())),
+		branchBookmarks: Type.Optional(Type.Record(Type.String(), Type.String())),
+	},
+	{ additionalProperties: false },
+);
+
+export type LoadedViewState = Partial<
+	Omit<ExplorerState, "displayOptions" | "selectedEntryId">
+> & {
+	selectedNodeId?: string | null;
+	explicitDisplayOverrides?: Partial<DisplayOptions>;
+	migratedFromVersion?: 1;
+};
 
 export function sanitizeSessionId(sessionId: string): string {
 	return sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -56,9 +73,20 @@ export function getViewStateFilePath(
 	return join(agentDir, "state", "session-tree", `${safeId}.json`);
 }
 
+function buildExplicitOverridesPayload(
+	overrides: Partial<DisplayOptions> | undefined,
+): Partial<DisplayOptions> | undefined {
+	if (!overrides) return undefined;
+	const entries = Object.entries(overrides).filter(
+		([, value]) => value !== undefined,
+	);
+	if (entries.length === 0) return undefined;
+	return Object.fromEntries(entries) as Partial<DisplayOptions>;
+}
+
 /**
- * Persist allowed view state properties outside Session JSONL.
- * Never pollutes session history with CustomEntry noise.
+ * Persist Tier-2 per-session view state overrides outside Session JSONL.
+ * Never persists full displayOptions snapshots, activeLeafId, or temporary search state.
  */
 export async function saveViewState(
 	agentDir: string,
@@ -72,16 +100,23 @@ export async function saveViewState(
 	const filePath = getViewStateFilePath(agentDir, sessionId);
 	const dir = dirname(filePath);
 
-	// Collect only permitted state (excludes temporary search data, reveals, and tasks)
+	const explicitDisplayOverrides = buildExplicitOverridesPayload(
+		state.explicitDisplayOverrides,
+	);
+
 	const data: SessionViewState = {
-		version: 1,
+		version: 2,
 		sessionId,
 		focusedBranchId: state.focusedBranchId,
-		displayOptions: { ...state.displayOptions },
+		selectedNodeId: state.selectedEntryId,
+		...(explicitDisplayOverrides ? { explicitDisplayOverrides } : {}),
 		showDetails: state.showDetails,
 		showContext: state.showContext,
 		manualExpandedIds: Array.from(state.manualExpandedIds),
 		manualCollapsedIds: Array.from(state.manualCollapsedIds),
+		...(state.branchBookmarks && Object.keys(state.branchBookmarks).length > 0
+			? { branchBookmarks: { ...state.branchBookmarks } }
+			: {}),
 	};
 
 	try {
@@ -95,7 +130,8 @@ export async function saveViewState(
 }
 
 /**
- * Load persisted view state for a session, filtering out stale entry IDs.
+ * Load persisted Tier-2 view state for a session, migrating v1 files and filtering stale entry IDs.
+ * Full v1 displayOptions snapshots are discarded so Global Config changes remain authoritative.
  */
 export async function loadViewState(
 	agentDir: string,
@@ -112,49 +148,100 @@ export async function loadViewState(
 	try {
 		const text = await readFile(filePath, "utf8");
 		const parsed: unknown = JSON.parse(text);
-		if (!Check(ViewStateSchema, parsed) || parsed.sessionId !== sessionId)
-			return null;
-		const data = parsed;
 
-		const overrides: LoadedViewState = {};
+		if (Check(ViewStateV2Schema, parsed)) {
+			if (parsed.sessionId !== sessionId) return null;
+			const overrides: LoadedViewState = {};
 
-		if (data.displayOptions) {
-			overrides.displayOptions = {
-				...overrides.displayOptions,
-				...data.displayOptions,
-			} as DisplayOptions;
-		}
-
-		if (typeof data.showDetails === "boolean") {
-			overrides.showDetails = data.showDetails;
-		}
-
-		if (typeof data.showContext === "boolean") {
-			overrides.showContext = data.showContext;
-		}
-
-		if (data.focusedBranchId && index.entryById.has(data.focusedBranchId)) {
-			overrides.focusedBranchId = data.focusedBranchId;
-		}
-
-		if (rememberManualOverrides) {
-			if (Array.isArray(data.manualExpandedIds)) {
-				// Only keep valid existing entry IDs, ignore stale IDs
-				const validExpanded = data.manualExpandedIds.filter((id) =>
-					index.entryById.has(id),
+			if (parsed.explicitDisplayOverrides) {
+				const cleanOverrides = buildExplicitOverridesPayload(
+					parsed.explicitDisplayOverrides as Partial<DisplayOptions>,
 				);
-				overrides.manualExpandedIds = new Set(validExpanded);
+				if (cleanOverrides) {
+					overrides.explicitDisplayOverrides = cleanOverrides;
+				}
+			}
+			if (typeof parsed.showDetails === "boolean") {
+				overrides.showDetails = parsed.showDetails;
+			}
+			if (typeof parsed.showContext === "boolean") {
+				overrides.showContext = parsed.showContext;
+			}
+			if (
+				parsed.focusedBranchId &&
+				index.entryById.has(parsed.focusedBranchId)
+			) {
+				overrides.focusedBranchId = parsed.focusedBranchId;
+			}
+			if (parsed.selectedNodeId && index.entryById.has(parsed.selectedNodeId)) {
+				overrides.selectedNodeId = parsed.selectedNodeId;
+			}
+			if (parsed.branchBookmarks) {
+				const validBookmarks: Record<string, string> = {};
+				for (const [entryId, bookmark] of Object.entries(
+					parsed.branchBookmarks,
+				)) {
+					if (index.entryById.has(entryId) && bookmark.trim()) {
+						validBookmarks[entryId] = bookmark;
+					}
+				}
+				if (Object.keys(validBookmarks).length > 0) {
+					overrides.branchBookmarks = validBookmarks;
+				}
+			}
+			if (rememberManualOverrides) {
+				if (Array.isArray(parsed.manualExpandedIds)) {
+					overrides.manualExpandedIds = new Set(
+						parsed.manualExpandedIds.filter((id) => index.entryById.has(id)),
+					);
+				}
+				if (Array.isArray(parsed.manualCollapsedIds)) {
+					overrides.manualCollapsedIds = new Set(
+						parsed.manualCollapsedIds.filter((id) => index.entryById.has(id)),
+					);
+				}
 			}
 
-			if (Array.isArray(data.manualCollapsedIds)) {
-				const validCollapsed = data.manualCollapsedIds.filter((id) =>
-					index.entryById.has(id),
-				);
-				overrides.manualCollapsedIds = new Set(validCollapsed);
-			}
+			return overrides;
 		}
 
-		return overrides;
+		// Automatic migration from legacy version 1:
+		// preserve manual folds/focus/toggles and discard full displayOptions snapshot.
+		if (Check(ViewStateV1Schema, parsed)) {
+			if (parsed.sessionId !== sessionId) return null;
+			const overrides: LoadedViewState = {
+				migratedFromVersion: 1,
+			};
+
+			if (typeof parsed.showDetails === "boolean") {
+				overrides.showDetails = parsed.showDetails;
+			}
+			if (typeof parsed.showContext === "boolean") {
+				overrides.showContext = parsed.showContext;
+			}
+			if (
+				parsed.focusedBranchId &&
+				index.entryById.has(parsed.focusedBranchId)
+			) {
+				overrides.focusedBranchId = parsed.focusedBranchId;
+			}
+			if (rememberManualOverrides) {
+				if (Array.isArray(parsed.manualExpandedIds)) {
+					overrides.manualExpandedIds = new Set(
+						parsed.manualExpandedIds.filter((id) => index.entryById.has(id)),
+					);
+				}
+				if (Array.isArray(parsed.manualCollapsedIds)) {
+					overrides.manualCollapsedIds = new Set(
+						parsed.manualCollapsedIds.filter((id) => index.entryById.has(id)),
+					);
+				}
+			}
+
+			return overrides;
+		}
+
+		return null;
 	} catch {
 		return null;
 	}

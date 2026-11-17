@@ -124,11 +124,11 @@ describe("T0007: Per-Session View State Persistence & Stale ID Filtering", () =>
 		await saveViewState(tempAgentDir, "validation", state);
 		const path = getViewStateFilePath(tempAgentDir, "validation");
 		const data = JSON.parse(await readFile(path, "utf8"));
-		data.displayOptions.layout = 123;
+		data.explicitDisplayOverrides = { layout: 123 };
 		const { writeFile } = await import("node:fs/promises");
 		await writeFile(path, JSON.stringify(data));
 		expect(await loadViewState(tempAgentDir, "validation", index)).toBeNull();
-		data.displayOptions.layout = "normal";
+		data.explicitDisplayOverrides = { layout: "normal" };
 		data.sessionId = "other";
 		await writeFile(path, JSON.stringify(data));
 		expect(await loadViewState(tempAgentDir, "validation", index)).toBeNull();

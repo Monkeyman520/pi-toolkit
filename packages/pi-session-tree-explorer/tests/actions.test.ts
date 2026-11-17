@@ -43,6 +43,10 @@ describe("Action Registry & Browsing Invariants", () => {
 			"branch.nextLeaf",
 			"branch.prevLeaf",
 			"branch.cycle",
+			"branch.tip",
+			"branch.diff",
+			"branch.bookmark",
+			"branch.bookmarks",
 		];
 
 		for (const id of expectedNodeActions) {
@@ -72,6 +76,7 @@ describe("Action Registry & Browsing Invariants", () => {
 			"session.copyContent",
 			"session.setLabel",
 			"session.refresh",
+			"session.restorePrevious",
 			"session.close",
 		];
 		for (const id of expectedSessionActions) {
@@ -88,12 +93,13 @@ describe("Action Registry & Browsing Invariants", () => {
 			"view.reloadConfig",
 			"view.settings",
 			"view.reset",
+			"view.stats",
 		];
 		for (const id of expectedViewActions) {
 			expect(registry.has(id), `Missing view action: ${id}`).toBe(true);
 		}
 
-		expect(registry.size).toBe(80);
+		expect(registry.size).toBe(87);
 	});
 
 	it("executes actions updating ExplorerState in memory without mutating session entries", () => {

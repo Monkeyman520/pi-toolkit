@@ -58,6 +58,7 @@ export const FoldConfigSchema = Type.Object(
 				Type.Literal("active-only"),
 				Type.Literal("depth-limited"),
 				Type.Literal("manual"),
+				Type.Literal("smart"),
 			]),
 		),
 		collapseInactiveBranches: Type.Optional(Type.Boolean()),
@@ -107,6 +108,7 @@ export const SessionConfigSchema = Type.Object(
 	{
 		forkPosition: Type.Optional(Type.Literal("at")),
 		navigateSummarize: Type.Optional(Type.Boolean()),
+		promptSummary: Type.Optional(Type.Boolean()),
 		confirmFork: Type.Optional(Type.Boolean()),
 		busyBehavior: Type.Optional(
 			Type.Union([Type.Literal("reject"), Type.Literal("wait")]),
@@ -170,7 +172,13 @@ export interface SessionTreeConfig {
 		layout: "normal" | "compact";
 	};
 	fold: {
-		mode: "all" | "focused-only" | "active-only" | "depth-limited" | "manual";
+		mode:
+			| "all"
+			| "focused-only"
+			| "active-only"
+			| "depth-limited"
+			| "manual"
+			| "smart";
 		collapseInactiveBranches: boolean;
 		collapseLinearPaths: boolean;
 		rememberManualOverrides: boolean;
@@ -198,6 +206,7 @@ export interface SessionTreeConfig {
 	session: {
 		forkPosition: "at";
 		navigateSummarize: boolean;
+		promptSummary?: boolean;
 		confirmFork: boolean;
 		busyBehavior: "reject" | "wait";
 	};
@@ -262,6 +271,7 @@ export function getDefaultConfig(): SessionTreeConfig {
 		session: {
 			forkPosition: "at",
 			navigateSummarize: false,
+			promptSummary: false,
 			confirmFork: false,
 			busyBehavior: "reject",
 		},

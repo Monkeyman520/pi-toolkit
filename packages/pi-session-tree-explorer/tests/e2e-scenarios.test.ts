@@ -435,7 +435,7 @@ describe("T0008: End-to-End Acceptance Scenarios (Spec E01 - E07)", () => {
 	// E07: Preserve all original Actions and catalog the existing settings shortcut.
 	it("Scenario E07: original Action inventory plus catalog-owned settings link", () => {
 		const registry = createActionRegistry();
-		expect(registry.size).toBe(80);
+		expect(registry.size).toBe(87);
 
 		// Count by domain
 		const domainCounts: Record<string, number> = {};
@@ -445,11 +445,11 @@ describe("T0008: End-to-End Acceptance Scenarios (Spec E01 - E07)", () => {
 		}
 
 		expect(domainCounts.node).toBe(17);
-		expect(domainCounts.branch).toBe(13);
-		expect(domainCounts.fold).toBe(11);
+		expect(domainCounts.branch).toBe(17);
+		expect(domainCounts.fold).toBe(12);
 		expect(domainCounts.filter).toBe(8);
 		expect(domainCounts.search).toBe(7);
-		expect(domainCounts.session).toBe(9);
-		expect(domainCounts.view).toBe(15);
+		expect(domainCounts.session).toBe(10);
+		expect(domainCounts.view).toBe(16);
 	});
 });

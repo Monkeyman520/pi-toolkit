@@ -1,9 +1,12 @@
-import {
-	truncateToWidth,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { createActionRegistry } from "./actions.ts";
+import {
+	type BranchDiffResult,
+	buildDiffBranchOptions,
+	compareBranches,
+	type DiffBranchOption,
+	formatBranchDiffLines,
+} from "./branch-diff.ts";
 import { getDefaultConfig, type SessionTreeConfig } from "./config-schema.ts";
 import {
 	type ActiveModelInfo,
@@ -17,21 +20,33 @@ import {
 	reconcileSelection,
 	resolveDisplayTarget,
 } from "./display.ts";
-import { InspectionView } from "./inspection-view.ts";
-import { KeyResolver } from "./keymap.ts";
+import {
+	computeSessionStatistics,
+	formatRichPreviewLines,
+	formatSessionStatisticsLines,
+	InspectionView,
+} from "./inspection-view.ts";
+import { KeyResolver, matchRawInput } from "./keymap.ts";
 import { MetricsController } from "./metrics-controller.ts";
-import { extractContentText } from "./search.ts";
+import { findReachableBranchTips } from "./navigation.ts";
 import { SearchController } from "./search-state.ts";
+import {
+	computeBranchSummaryContext,
+	type NavigationHistory,
+} from "./session-effects.ts";
 import type { SessionSnapshot } from "./session-snapshot.ts";
 import type {
 	ActionContext,
 	ActionDefinition,
+	BranchSummaryContext,
+	BranchTipCandidate,
 	ContextMetrics,
 	DisplayNode,
 	ExplorerResult,
 	ExplorerState,
 	TreeIndex,
 } from "./types.ts";
+import { computeResponsiveLayout, renderDualPane } from "./ui.ts";
 
 export interface SessionTreeComponentOptions {
 	tui: {
@@ -52,6 +67,8 @@ export interface SessionTreeComponentOptions {
 		entryId: string,
 		current: string | undefined,
 	) => Promise<{ label: string | undefined } | null>;
+	navigationHistory?: NavigationHistory;
+	cwd?: string;
 }
 
 export class SessionTreeComponent {
@@ -73,6 +90,47 @@ export class SessionTreeComponent {
 	private closed = false;
 	private inspection = new InspectionView();
 	private lastRenderWidth = 80;
+	private navigationHistory?: NavigationHistory;
+	private tipPicker: {
+		tips: BranchTipCandidate[];
+		selectedIndex: number;
+	} | null = null;
+	private userTipConfirm: BranchTipCandidate | null = null;
+	private summaryPrompt: {
+		entryId: string;
+		context: BranchSummaryContext;
+		selectedIndex: number;
+		customInputMode: boolean;
+		customInstructions: string;
+	} | null = null;
+	private cwd?: string;
+	private branchDiff: {
+		stage: "pick-a" | "pick-b" | "loading" | "view";
+		options: DiffBranchOption[];
+		selectedIndex: number;
+		branchAId?: string;
+		branchBId?: string;
+		result?: BranchDiffResult;
+		scrollOffset: number;
+	} | null = null;
+	private branchSwitcher: {
+		items: Array<{
+			anchorId: string;
+			tipId: string;
+			bookmark: string;
+			isBookmarked: boolean;
+			isCurrentLeaf: boolean;
+			messageCount: number;
+			lastUpdated: string;
+			preview: string;
+		}>;
+		selectedIndex: number;
+	} | null = null;
+	private bookmarkPrompt: {
+		entryId: string;
+		value: string;
+	} | null = null;
+	private statsView: { scrollOffset: number } | null = null;
 
 	private searchController: SearchController;
 	private metricsController: MetricsController;
@@ -134,6 +192,8 @@ export class SessionTreeComponent {
 		this.onReloadConfig = options.onReloadConfig;
 		this.onOpenSettings = options.onOpenSettings;
 		this.onEditLabel = options.onEditLabel;
+		this.navigationHistory = options.navigationHistory;
+		this.cwd = options.cwd;
 		if (options.config) {
 			this.state.searchScope = this.config.search.scope;
 			this.state.searchRegex = this.config.search.mode === "regex";
@@ -173,6 +233,13 @@ export class SessionTreeComponent {
 
 	public dispose(): void {
 		this.closed = true;
+		this.tipPicker = null;
+		this.userTipConfirm = null;
+		this.branchSwitcher = null;
+		this.bookmarkPrompt = null;
+		this.statsView = null;
+		this.branchDiff = null;
+		this.summaryPrompt = null;
 		this.summaryCache.clear();
 		this.inspection.reset();
 		this.cachedVisibleNodes = null;
@@ -219,7 +286,9 @@ export class SessionTreeComponent {
 			[...s.manualExpandedIds],
 			[...s.manualCollapsedIds],
 			[...s.temporaryRevealedIds],
-			s.foldOptions.mode === "focused-only" &&
+			s.branchBookmarks ?? {},
+			(s.foldOptions.mode === "focused-only" ||
+				s.foldOptions.mode === "smart") &&
 			s.foldOptions.collapseInactiveBranches
 				? [...s.focusedPathIds]
 				: null,
@@ -294,6 +363,268 @@ export class SessionTreeComponent {
 
 		const inspectionHeight = Math.max(1, (this.tui.terminal?.rows ?? 24) - 4);
 		this.lastRenderWidth = safeWidth;
+		if (this.userTipConfirm) {
+			const tip = this.userTipConfirm;
+			lines.push(
+				truncateToWidth(
+					"SESSION TREE EXPLORER - USER MESSAGE TIP NOTICE",
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			lines.push(
+				truncateToWidth(
+					`Target tip '${tip.entryId}' is a user message (D${tip.turnDepth}).`,
+					safeWidth,
+				),
+			);
+			lines.push(
+				truncateToWidth(
+					"Pi native navigation will move to its parent and restore this prompt into the editor:",
+					safeWidth,
+				),
+			);
+			lines.push(truncateToWidth(`  "${tip.previewText}"`, safeWidth));
+			lines.push("─".repeat(safeWidth));
+			lines.push(
+				truncateToWidth(
+					"Enter/y Confirm and restore prompt  Esc/n Cancel",
+					safeWidth,
+				),
+			);
+			return lines;
+		}
+		if (this.tipPicker) {
+			const { tips, selectedIndex } = this.tipPicker;
+			lines.push(
+				truncateToWidth(
+					`SESSION TREE EXPLORER - SELECT BRANCH TIP (${tips.length} reachable)`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			for (let i = 0; i < tips.length; i++) {
+				const tip = tips[i];
+				const prefix = i === selectedIndex ? "▶ " : "  ";
+				const tags = [
+					tip.isCurrentLeaf ? "[CURRENT]" : "",
+					tip.isUserPrompt ? "[USER->restores prompt]" : "",
+				]
+					.filter(Boolean)
+					.join(" ");
+				const row = `${prefix}[${tip.role}] D${tip.turnDepth} ${tip.previewText}${tags ? ` ${tags}` : ""} (${tip.entryId})`;
+				lines.push(truncateToWidth(row, safeWidth));
+			}
+			lines.push("─".repeat(safeWidth));
+			lines.push(
+				truncateToWidth(
+					"j/k/↑/↓ Select  Enter Go to tip  Esc/q Cancel",
+					safeWidth,
+				),
+			);
+			return lines;
+		}
+		if (this.bookmarkPrompt) {
+			const bp = this.bookmarkPrompt;
+			lines.push(
+				truncateToWidth(
+					`SESSION TREE EXPLORER - BOOKMARK BRANCH [${bp.entryId}]`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			lines.push(
+				truncateToWidth(
+					`Bookmark name (empty clears): ${bp.value}█`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			lines.push(truncateToWidth("Enter Save bookmark  Esc Cancel", safeWidth));
+			return lines;
+		}
+		if (this.branchSwitcher) {
+			const bs = this.branchSwitcher;
+			lines.push(
+				truncateToWidth(
+					`SESSION TREE EXPLORER - BRANCH SWITCHER (${bs.items.length} branches)`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			for (let i = 0; i < bs.items.length; i++) {
+				const item = bs.items[i];
+				const prefix = i === bs.selectedIndex ? "▶ " : "  ";
+				const tag = item.bookmark ? `★ [${item.bookmark}] ` : "";
+				const cur = item.isCurrentLeaf ? " [CURRENT]" : "";
+				const row = `${prefix}${tag}${item.preview} (${item.messageCount} msgs, ${item.lastUpdated})${cur} -> ${item.tipId}`;
+				lines.push(truncateToWidth(row, safeWidth));
+			}
+			lines.push("─".repeat(safeWidth));
+			lines.push(
+				truncateToWidth(
+					"j/k/↑/↓ Select  Enter Go to branch tip  Esc/q Cancel",
+					safeWidth,
+				),
+			);
+			return lines;
+		}
+		if (this.statsView) {
+			const stats = computeSessionStatistics(this.index, this.state);
+			const statLines = formatSessionStatisticsLines(stats, safeWidth);
+			const bodyHeight = Math.max(4, inspectionHeight - 4);
+			const maxScroll = Math.max(0, statLines.length - bodyHeight);
+			this.statsView.scrollOffset = Math.max(
+				0,
+				Math.min(this.statsView.scrollOffset, maxScroll),
+			);
+			const windowLines = statLines.slice(
+				this.statsView.scrollOffset,
+				this.statsView.scrollOffset + bodyHeight,
+			);
+			lines.push(
+				truncateToWidth(
+					"SESSION TREE EXPLORER - SESSION STATISTICS",
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			lines.push(...windowLines);
+			lines.push("─".repeat(safeWidth));
+			lines.push(truncateToWidth("j/k/↑/↓ Scroll  Esc/q Close", safeWidth));
+			return lines;
+		}
+		if (this.branchDiff) {
+			const bd = this.branchDiff;
+			if (bd.stage === "pick-a" || bd.stage === "pick-b") {
+				const title =
+					bd.stage === "pick-a"
+						? "SESSION TREE EXPLORER - BRANCH DIFF (SELECT BRANCH A)"
+						: `SESSION TREE EXPLORER - BRANCH DIFF (SELECT BRANCH B vs ${bd.branchAId})`;
+				lines.push(truncateToWidth(title, safeWidth));
+				lines.push("─".repeat(safeWidth));
+				for (let i = 0; i < bd.options.length; i++) {
+					const opt = bd.options[i];
+					const prefix = i === bd.selectedIndex ? "▶ " : "  ";
+					const tags = [
+						opt.isCurrentLeaf ? "[CURRENT]" : "",
+						opt.label ? `★[${opt.label}]` : "",
+						opt.entryId === bd.branchAId ? "[A]" : "",
+					]
+						.filter(Boolean)
+						.join(" ");
+					lines.push(
+						truncateToWidth(
+							`${prefix}D${opt.turnDepth} ${opt.preview}${tags ? ` ${tags}` : ""} (${opt.entryId})`,
+							safeWidth,
+						),
+					);
+				}
+				lines.push("─".repeat(safeWidth));
+				lines.push(
+					truncateToWidth(
+						"j/k/↑/↓ Select  Enter Next  Esc/q Cancel",
+						safeWidth,
+					),
+				);
+				return lines;
+			}
+			if (bd.stage === "loading" || !bd.result) {
+				lines.push(
+					truncateToWidth(
+						`SESSION TREE EXPLORER - BRANCH DIFF (${bd.branchAId} vs ${bd.branchBId})`,
+						safeWidth,
+					),
+				);
+				lines.push("─".repeat(safeWidth));
+				lines.push("Computing branch topology and workspace git diff...");
+				return lines;
+			}
+			const diffLines = formatBranchDiffLines(bd.result, safeWidth);
+			const bodyHeight = Math.max(4, inspectionHeight - 4);
+			const maxScroll = Math.max(0, diffLines.length - bodyHeight);
+			bd.scrollOffset = Math.max(0, Math.min(bd.scrollOffset, maxScroll));
+			const windowLines = diffLines.slice(
+				bd.scrollOffset,
+				bd.scrollOffset + bodyHeight,
+			);
+			lines.push(
+				truncateToWidth(
+					`SESSION TREE EXPLORER - BRANCH DIFF [${bd.branchAId} vs ${bd.branchBId}]`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			lines.push(...windowLines);
+			lines.push("─".repeat(safeWidth));
+			lines.push(
+				truncateToWidth(
+					`[${diffLines.length ? bd.scrollOffset + 1 : 0}-${Math.min(diffLines.length, bd.scrollOffset + bodyHeight)}/${diffLines.length}] j/k/↑/↓ Scroll  Esc/q Close`,
+					safeWidth,
+				),
+			);
+			return lines;
+		}
+		if (this.summaryPrompt) {
+			const sp = this.summaryPrompt;
+			const c = sp.context;
+			lines.push(
+				truncateToWidth(
+					"SESSION TREE EXPLORER - BRANCH NAVIGATION SUMMARY",
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			lines.push(
+				truncateToWidth(
+					`Source branch: ${c.sourceBranchLabel} (${c.sourceLeafId ?? "none"})`,
+					safeWidth,
+				),
+			);
+			lines.push(
+				truncateToWidth(
+					`Target branch: ${c.targetBranchLabel} (${c.targetId})`,
+					safeWidth,
+				),
+			);
+			lines.push(
+				truncateToWidth(
+					`Summarized range: ${c.abandonedEntryCount} entries (${c.abandonedTurnCount} turns) since ${c.commonAncestorId ?? "root"}`,
+					safeWidth,
+				),
+			);
+			lines.push("─".repeat(safeWidth));
+			if (sp.customInputMode) {
+				lines.push(
+					truncateToWidth(
+						`Custom prompt: ${sp.customInstructions}█`,
+						safeWidth,
+					),
+				);
+				lines.push("─".repeat(safeWidth));
+				lines.push(
+					truncateToWidth("Enter Submit custom summary  Esc Back", safeWidth),
+				);
+			} else {
+				const opts = [
+					"1: No summary (fast switch)",
+					"2: Summarize (native Pi branch summary)",
+					"3: Custom prompt (enter summary instructions)",
+				];
+				for (let i = 0; i < opts.length; i++) {
+					const prefix = i === sp.selectedIndex ? "▶ " : "  ";
+					lines.push(truncateToWidth(`${prefix}${opts[i]}`, safeWidth));
+				}
+				lines.push("─".repeat(safeWidth));
+				lines.push(
+					truncateToWidth(
+						"1/2/3 or ↑/↓ Select  Enter Confirm  Esc Cancel",
+						safeWidth,
+					),
+				);
+			}
+			return lines;
+		}
 		if (this.state.mode === "preview") {
 			const targetId = this.state.previewNodeId ?? this.state.selectedEntryId;
 			const entry = targetId ? this.index.entryById.get(targetId) : undefined;
@@ -305,23 +636,20 @@ export class SessionTreeComponent {
 				title: `SESSION TREE EXPLORER - PREVIEW [ID: ${targetId ?? "none"}]`,
 				footer: `${this.hint("session.preview", "Return")} ${this.hint("session.close", "Close preview")} ${this.hint("view.pageUp", "Prev")} ${this.hint("view.pageDown", "Next")}`,
 				body: () => {
-					if (!entry)
-						return [
-							`Virtual branch summary or missing node: ${targetId ?? ""}`,
-						];
-					const body = [
-						`Type: ${entry.type} Role: ${entry.message?.role ?? "n/a"} Timestamp: ${entry.timestamp}`,
-					];
-					const bookmark = this.index.displayLabelsById.get(entry.id);
-					if (bookmark) body.push(`Label: ${bookmark}`);
-					if (entry.message?.model) body.push(`Model: ${entry.message.model}`);
-					if (entry.message?.toolName)
-						body.push(`Tool: ${entry.message.toolName}`);
-					body.push("Full Content:");
-					for (const paragraph of extractContentText(entry).split("\n"))
-						for (const line of wrapTextWithAnsi(paragraph || " ", safeWidth))
-							body.push(line);
-					return body;
+					const previewNode = this.getVisibleNodes().find(
+						(n) => n.id === targetId,
+					);
+					const metrics = targetId
+						? this.getMetricsForEntry(targetId)
+						: undefined;
+					return formatRichPreviewLines({
+						node: previewNode,
+						entry,
+						index: this.index,
+						width: safeWidth,
+						metrics,
+						metricsBadge: metrics ? this.metricsBadge(metrics) : undefined,
+					});
 				},
 			});
 		}
@@ -412,8 +740,11 @@ export class SessionTreeComponent {
 		const selectedIndex = visibleNodes.findIndex(
 			(n) => n.id === this.state.selectedEntryId,
 		);
+		const maxRows = this.tui.terminal?.rows
+			? Math.min(this.pageSize, Math.max(5, this.tui.terminal.rows - 8))
+			: this.pageSize;
 		const viewportHeight = this.config.performance.virtualRendering
-			? Math.max(5, this.pageSize)
+			? Math.max(5, maxRows)
 			: visibleNodes.length;
 
 		let start = 0;
@@ -442,17 +773,26 @@ export class SessionTreeComponent {
 			]);
 		}
 
+		const layout = computeResponsiveLayout(safeWidth);
+		const outlineWidth = layout.outlineWidth;
+		const outlineLines: string[] = [];
+
 		for (let i = start; i < end; i++) {
 			const node = visibleNodes[i];
 			const isSel = node.id === this.state.selectedEntryId;
 			const isCurrent = node.id === this.state.sessionLeafId;
 
 			const parts: string[] = [];
-			if (this.index.rootIds.includes(node.id)) parts.push("●");
-			if (isCurrent) parts.push("◉");
-			if (node.isCollapsed || node.isVirtualSummary) parts.push("▸");
-			else if (node.isFork) parts.push("▾");
-			const marker = parts.join("") || "◇";
+			if (node.kind === "virtual-tool-group") {
+				if (isCurrent) parts.push("◉");
+			} else {
+				if (this.index.rootIds.includes(node.id)) parts.push("●");
+				if (isCurrent) parts.push("◉");
+				if (node.isCollapsed || node.isVirtualSummary) parts.push("▸");
+				else if (node.isFork) parts.push("▾");
+			}
+			const marker =
+				parts.join("") || (node.kind === "virtual-tool-group" ? "" : "◇");
 			const selPrefix = isSel ? "▶ " : "  ";
 			const indent = (
 				this.state.displayOptions.layout === "compact" ? " " : "  "
@@ -501,21 +841,83 @@ export class SessionTreeComponent {
 
 			const prefix = `${selPrefix}${indent}${marker} `;
 			const meta = `${this.state.displayOptions.showNodeId ? ` [${node.realId ?? "summary"}]` : ""}${this.state.displayOptions.showTimestamps ? ` ${node.timestamp}` : ""}`;
+			const queryTerm = this.state.searchQuery.trim();
+			const isSearchHit =
+				queryTerm.length > 0 &&
+				this.state.searchResults.some(
+					(r) => r.id === node.id || r.id === node.realId,
+				);
+			const rawSlice = node.summaryText.slice(
+				0,
+				this.state.displayOptions.maxMessageLength,
+			);
+			const hasInlineMatch =
+				isSearchHit &&
+				(this.config.search.caseSensitive
+					? rawSlice.includes(queryTerm)
+					: rawSlice.toLowerCase().includes(queryTerm.toLowerCase()));
+			const searchHitTag = isSearchHit && !hasInlineMatch ? " [hit]" : "";
 			const availableTextWidth = Math.max(
 				0,
-				safeWidth -
+				outlineWidth -
 					visibleWidth(prefix) -
 					visibleWidth(contextSuffix) -
 					visibleWidth(labelTag) -
+					visibleWidth(searchHitTag) -
 					visibleWidth(meta) -
 					2,
 			);
-			const truncatedText = truncateToWidth(
-				node.summaryText.slice(0, this.state.displayOptions.maxMessageLength),
-				availableTextWidth,
+			let truncatedText = truncateToWidth(rawSlice, availableTextWidth);
+			if (hasInlineMatch) {
+				const escaped = queryTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+				const rx = new RegExp(
+					escaped,
+					this.config.search.caseSensitive ? "g" : "gi",
+				);
+				truncatedText = truncatedText.replace(
+					rx,
+					(m) => `\x1b[1;33m${m}\x1b[0m`,
+				);
+			}
+			const row = `${prefix}${truncatedText}${searchHitTag}${labelTag}${contextSuffix}${meta}`;
+			outlineLines.push(truncateToWidth(row, outlineWidth));
+		}
+
+		if (layout.mode === "dual-pane") {
+			const previewTargetId =
+				this.state.previewNodeId ?? this.state.selectedEntryId;
+			const previewNode =
+				visibleNodes.find((n) => n.id === previewTargetId) ??
+				visibleNodes[Math.max(selectedIndex, 0)];
+			const previewEntry = previewTargetId
+				? this.index.entryById.get(previewTargetId)
+				: undefined;
+			const previewMetrics = previewTargetId
+				? this.getMetricsForEntry(previewTargetId)
+				: undefined;
+			const previewBody = formatRichPreviewLines({
+				node: previewNode,
+				entry: previewEntry,
+				index: this.index,
+				width: layout.previewWidth,
+				metrics: previewMetrics,
+				metricsBadge: previewMetrics
+					? this.metricsBadge(previewMetrics)
+					: undefined,
+			});
+			const paneHeight = Math.max(
+				outlineLines.length,
+				Math.min(maxRows, previewBody.length + 2),
+				6,
 			);
-			const row = `${prefix}${truncatedText}${labelTag}${contextSuffix}${meta}`;
-			lines.push(truncateToWidth(row, safeWidth));
+			const previewLines = [
+				"NODE PREVIEW",
+				"─".repeat(layout.previewWidth),
+				...previewBody,
+			].slice(0, paneHeight);
+			lines.push(...renderDualPane(outlineLines, previewLines, layout));
+		} else {
+			lines.push(...outlineLines);
 		}
 
 		lines.push("─".repeat(safeWidth));
@@ -529,9 +931,12 @@ export class SessionTreeComponent {
 			const contextBadge = this.metricsBadge(metrics);
 			const sourceLabel = metrics?.source ? ` (source: ${metrics.source})` : "";
 
-			const detailLine2 = selectedNode.isVirtualSummary
-				? `Virtual Branch Summary  Descendants: ${selectedNode.virtualDescendantCount ?? 0}  Forks: ${selectedNode.virtualForkCount ?? 0}`
-				: `ID: ${selectedNode.id}  Depth: D${selectedNode.turnDepth}  Branch: ${selectedNode.branchDepth}  Context: ${contextBadge}${sourceLabel}`;
+			const detailLine2 =
+				selectedNode.kind === "virtual-tool-group" && selectedNode.toolGroup
+					? `Tool Group: ${selectedNode.toolGroup.count} calls (${selectedNode.toolGroup.statusSummary})  Tools: ${selectedNode.toolGroup.toolNames.join(", ")}`
+					: selectedNode.isVirtualSummary
+						? `Virtual Branch Summary  Descendants: ${selectedNode.virtualDescendantCount ?? 0}  Forks: ${selectedNode.virtualForkCount ?? 0}`
+						: `ID: ${selectedNode.id}  Depth: D${selectedNode.turnDepth}  Branch: ${selectedNode.branchDepth}  Context: ${contextBadge}${sourceLabel}`;
 			lines.push(truncateToWidth(detailLine1, safeWidth));
 			lines.push(truncateToWidth(detailLine2, safeWidth));
 		} else {
@@ -543,6 +948,9 @@ export class SessionTreeComponent {
 		lines.push("─".repeat(safeWidth));
 		const footer = [
 			["session.navigate", "Go"],
+			["session.preview", "Preview"],
+			["branch.tip", "Tip"],
+			["session.restorePrevious", "Restore"],
 			["session.fork", "Fork"],
 			["session.forkBefore", "ForkBefore"],
 			["fold.toggle", "Fold"],
@@ -609,6 +1017,13 @@ export class SessionTreeComponent {
 		this.state.sessionLeafId = snapshot.leafId;
 		this.activeModel = snapshot.activeModel;
 		this.activeUsage = snapshot.activeUsage;
+		this.tipPicker = null;
+		this.userTipConfirm = null;
+		this.branchDiff = null;
+		this.summaryPrompt = null;
+		this.branchSwitcher = null;
+		this.bookmarkPrompt = null;
+		this.statsView = null;
 		this.state.searchSnapshot = undefined;
 		if (this.state.mode === "search") this.state.mode = "normal";
 		for (const ids of [
@@ -628,6 +1043,8 @@ export class SessionTreeComponent {
 				...defaultDisplayOptions(),
 				...this.config.display,
 			};
+			this.state.explicitDisplayOverrides = {};
+			this.state.branchBookmarks = {};
 			this.state.foldOptions = { ...this.config.fold };
 			this.state.showDetails = true;
 			this.state.showContext = true;
@@ -677,6 +1094,8 @@ export class SessionTreeComponent {
 				"session.forkBefore",
 				"session.setLabel",
 				"session.refresh",
+				"session.restorePrevious",
+				"branch.tip",
 				"view.settings",
 			].includes(actionId)
 		) {
@@ -734,8 +1153,136 @@ export class SessionTreeComponent {
 				}
 			},
 			notify: this.onNotify,
-			navigate: (entryId, summarize) =>
-				this.done({ type: "navigate", entryId, summarize }),
+			navigationHistory: this.navigationHistory,
+			openTipPicker: (tips) => {
+				this.tipPicker = { tips, selectedIndex: 0 };
+				this.userTipConfirm = null;
+			},
+			openBranchDiff: (initialBranchId) => {
+				const options = buildDiffBranchOptions(
+					this.index,
+					this.state.sessionLeafId,
+					initialBranchId ?? this.state.selectedEntryId,
+				);
+				if (options.length < 2) {
+					this.onNotify?.(
+						"Need at least two branches or entries to compare.",
+						"info",
+					);
+					return;
+				}
+				const initialIdx = Math.max(
+					0,
+					options.findIndex(
+						(o) => o.entryId === (initialBranchId ?? this.state.sessionLeafId),
+					),
+				);
+				this.branchDiff = {
+					stage: "pick-a",
+					options,
+					selectedIndex: initialIdx,
+					scrollOffset: 0,
+				};
+			},
+			openBranchSwitcher: () => {
+				const bookmarked = new Map<string, string>();
+				for (const [id, label] of this.index.displayLabelsById.entries()) {
+					bookmarked.set(id, label);
+				}
+				if (this.state.branchBookmarks) {
+					for (const [id, label] of Object.entries(
+						this.state.branchBookmarks,
+					)) {
+						if (this.index.entryById.has(id) && label.trim()) {
+							bookmarked.set(id, label);
+						}
+					}
+				}
+				const items: NonNullable<typeof this.branchSwitcher>["items"] = [];
+				const seenTips = new Set<string>();
+				const addBranch = (
+					anchorId: string,
+					bookmark: string,
+					isBookmarked: boolean,
+				) => {
+					const tips = findReachableBranchTips(this.index, anchorId);
+					const tipId = tips[tips.length - 1] ?? anchorId;
+					if (seenTips.has(tipId) && !isBookmarked) return;
+					seenTips.add(tipId);
+					const tipEntry = this.index.entryById.get(tipId);
+					const anchorEntry = this.index.entryById.get(anchorId);
+					let messageCount = 0;
+					let cur: string | null = tipId;
+					const guard = new Set<string>();
+					while (cur && !guard.has(cur)) {
+						guard.add(cur);
+						messageCount++;
+						cur = this.index.parentById.get(cur) ?? null;
+					}
+					const previewSource = anchorEntry ?? tipEntry;
+					items.push({
+						anchorId,
+						tipId,
+						bookmark,
+						isBookmarked,
+						isCurrentLeaf: tipId === this.state.sessionLeafId,
+						messageCount,
+						lastUpdated: tipEntry?.timestamp ?? "",
+						preview: previewSource
+							? extractSummary(previewSource, false).summaryText.slice(0, 48)
+							: anchorId,
+					});
+				};
+				for (const [id, label] of bookmarked.entries()) {
+					addBranch(id, label, true);
+				}
+				for (const leafId of this.index.leafIds) {
+					addBranch(leafId, bookmarked.get(leafId) ?? "", false);
+				}
+				if (items.length === 0) {
+					this.onNotify?.("No branches available.", "info");
+					return;
+				}
+				this.branchSwitcher = { items, selectedIndex: 0 };
+			},
+			openSessionStats: () => {
+				this.statsView = { scrollOffset: 0 };
+			},
+			editBookmark: async (entryId, current) => {
+				this.bookmarkPrompt = { entryId, value: current ?? "" };
+				this.invalidate();
+				return null;
+			},
+			confirmUserTip: (tip) => {
+				this.userTipConfirm = tip;
+				this.tipPicker = null;
+				this.onNotify?.(
+					`Tip '${tip.entryId}' is a user message; native navigation will restore its prompt into the editor.`,
+					"warning",
+				);
+			},
+			restorePrevious: (entryId) =>
+				this.done({ type: "navigate", entryId, restore: true }),
+			navigate: (entryId, summarize) => {
+				if (this.config.session.promptSummary && summarize === undefined) {
+					const summaryCtx = computeBranchSummaryContext(
+						this.index,
+						this.state.sessionLeafId,
+						entryId,
+					);
+					if (summaryCtx.isCrossBranch) {
+						this.summaryPrompt = {
+							entryId,
+							context: summaryCtx,
+							selectedIndex: 0,
+							customInputMode: false,
+							customInstructions: "",
+						};
+						return;
+					}
+				}
+				this.done({ type: "navigate", entryId, summarize });
+			},
 			fork: (entryId, position) =>
 				this.done({ type: "fork", entryId, position }),
 		};
@@ -774,6 +1321,337 @@ export class SessionTreeComponent {
 
 	public handleInput(data: string): void {
 		if (this.closed) return;
+		if (this.bookmarkPrompt) {
+			const bp = this.bookmarkPrompt;
+			const key = matchRawInput(data);
+			if (key === "\r") {
+				const label = bp.value.trim() || undefined;
+				const nextMap = { ...(this.state.branchBookmarks ?? {}) };
+				if (label) nextMap[bp.entryId] = label;
+				else delete nextMap[bp.entryId];
+				this.state.branchBookmarks = nextMap;
+				this.bookmarkPrompt = null;
+				this.state.version++;
+				this.cachedVisibleNodes = null;
+				this.onNotify?.(
+					label
+						? `Bookmarked '${label}' on ${bp.entryId}`
+						: `Removed bookmark on ${bp.entryId}`,
+					"info",
+				);
+				this.invalidate();
+				return;
+			}
+			if (key === "\u001b") {
+				this.bookmarkPrompt = null;
+				this.invalidate();
+				return;
+			}
+			if (data === "\b" || data === "\x7f") {
+				bp.value = [...bp.value].slice(0, -1).join("");
+				this.invalidate();
+				return;
+			}
+			if (
+				data.length > 0 &&
+				[...data].every((c) => {
+					const code = c.charCodeAt(0);
+					return code >= 32 && (code < 127 || code > 159);
+				})
+			) {
+				bp.value += data;
+				this.invalidate();
+			}
+			return;
+		}
+		if (this.branchSwitcher) {
+			const bs = this.branchSwitcher;
+			const key = matchRawInput(data);
+			if (key === "\u001b" || key === "q") {
+				this.branchSwitcher = null;
+				this.invalidate();
+				return;
+			}
+			if (key === "j" || key === "down" || key === "ctrl+n") {
+				bs.selectedIndex = Math.min(bs.items.length - 1, bs.selectedIndex + 1);
+				this.invalidate();
+				return;
+			}
+			if (key === "k" || key === "up" || key === "ctrl+p") {
+				bs.selectedIndex = Math.max(0, bs.selectedIndex - 1);
+				this.invalidate();
+				return;
+			}
+			if (key === "\r") {
+				const chosen = bs.items[bs.selectedIndex];
+				this.branchSwitcher = null;
+				if (chosen) {
+					this.done({ type: "navigate", entryId: chosen.tipId });
+				} else {
+					this.invalidate();
+				}
+				return;
+			}
+			return;
+		}
+		if (this.statsView) {
+			const key = matchRawInput(data);
+			if (key === "\u001b" || key === "q") {
+				this.statsView = null;
+				this.invalidate();
+				return;
+			}
+			if (key === "j" || key === "down") {
+				this.statsView.scrollOffset++;
+				this.invalidate();
+			} else if (key === "k" || key === "up") {
+				this.statsView.scrollOffset = Math.max(
+					0,
+					this.statsView.scrollOffset - 1,
+				);
+				this.invalidate();
+			}
+			return;
+		}
+		if (this.branchDiff) {
+			const bd = this.branchDiff;
+			const key = matchRawInput(data);
+			if (key === "\u001b" || key === "q") {
+				this.branchDiff = null;
+				this.invalidate();
+				return;
+			}
+			if (bd.stage === "pick-a" || bd.stage === "pick-b") {
+				if (key === "j" || key === "down" || key === "ctrl+n") {
+					bd.selectedIndex = Math.min(
+						bd.options.length - 1,
+						bd.selectedIndex + 1,
+					);
+					this.invalidate();
+					return;
+				}
+				if (key === "k" || key === "up" || key === "ctrl+p") {
+					bd.selectedIndex = Math.max(0, bd.selectedIndex - 1);
+					this.invalidate();
+					return;
+				}
+				if (key === "\r") {
+					const chosen = bd.options[bd.selectedIndex];
+					if (!chosen) return;
+					if (bd.stage === "pick-a") {
+						bd.branchAId = chosen.entryId;
+						bd.stage = "pick-b";
+						const nextIdx = bd.options.findIndex(
+							(o) => o.entryId !== chosen.entryId,
+						);
+						bd.selectedIndex = nextIdx === -1 ? 0 : nextIdx;
+						this.invalidate();
+						return;
+					}
+					const branchAId = bd.branchAId ?? chosen.entryId;
+					const branchBId = chosen.entryId;
+					bd.branchBId = branchBId;
+					bd.stage = "loading";
+					this.invalidate();
+					const rev = this.sessionRevision;
+					const diffPromise = compareBranches({
+						index: this.index,
+						branchAId,
+						branchBId,
+						cwd: this.cwd,
+					}).then((res) => {
+						if (this.closed || rev !== this.sessionRevision || !this.branchDiff)
+							return;
+						this.branchDiff.result = res;
+						this.branchDiff.stage = "view";
+						this.branchDiff.scrollOffset = 0;
+						this.invalidate();
+					});
+					this.pendingEffects.add(diffPromise);
+					void diffPromise.finally(() =>
+						this.pendingEffects.delete(diffPromise),
+					);
+					return;
+				}
+				return;
+			}
+			if (bd.stage === "view") {
+				if (key === "j" || key === "down") {
+					bd.scrollOffset++;
+					this.invalidate();
+				} else if (key === "k" || key === "up") {
+					bd.scrollOffset = Math.max(0, bd.scrollOffset - 1);
+					this.invalidate();
+				} else if (key === "pagedown" || key === "ctrl+d") {
+					bd.scrollOffset += 8;
+					this.invalidate();
+				} else if (key === "pageup" || key === "ctrl+u") {
+					bd.scrollOffset = Math.max(0, bd.scrollOffset - 8);
+					this.invalidate();
+				} else if (key === "home") {
+					bd.scrollOffset = 0;
+					this.invalidate();
+				} else if (key === "end") {
+					bd.scrollOffset = Number.MAX_SAFE_INTEGER;
+					this.invalidate();
+				}
+				return;
+			}
+			return;
+		}
+		if (this.summaryPrompt) {
+			const sp = this.summaryPrompt;
+			const key = matchRawInput(data);
+			if (sp.customInputMode) {
+				if (key === "\r") {
+					const instructions = sp.customInstructions.trim() || undefined;
+					const entryId = sp.entryId;
+					this.summaryPrompt = null;
+					this.done({
+						type: "navigate",
+						entryId,
+						summarize: true,
+						...(instructions ? { customInstructions: instructions } : {}),
+					});
+					return;
+				}
+				if (key === "\u001b") {
+					sp.customInputMode = false;
+					this.invalidate();
+					return;
+				}
+				if (data === "\b" || data === "\x7f") {
+					sp.customInstructions = [...sp.customInstructions]
+						.slice(0, -1)
+						.join("");
+					this.invalidate();
+					return;
+				}
+				if (
+					data.length > 0 &&
+					[...data].every((c) => {
+						const code = c.charCodeAt(0);
+						return code >= 32 && (code < 127 || code > 159);
+					})
+				) {
+					sp.customInstructions += data;
+					this.invalidate();
+				}
+				return;
+			}
+			if (key === "j" || key === "down" || key === "ctrl+n") {
+				sp.selectedIndex = Math.min(2, sp.selectedIndex + 1);
+				this.invalidate();
+				return;
+			}
+			if (key === "k" || key === "up" || key === "ctrl+p") {
+				sp.selectedIndex = Math.max(0, sp.selectedIndex - 1);
+				this.invalidate();
+				return;
+			}
+			if (key === "1") {
+				const entryId = sp.entryId;
+				this.summaryPrompt = null;
+				this.done({ type: "navigate", entryId, summarize: false });
+				return;
+			}
+			if (key === "2") {
+				const entryId = sp.entryId;
+				this.summaryPrompt = null;
+				this.done({ type: "navigate", entryId, summarize: true });
+				return;
+			}
+			if (key === "3") {
+				sp.selectedIndex = 2;
+				sp.customInputMode = true;
+				this.invalidate();
+				return;
+			}
+			if (key === "\r") {
+				if (sp.selectedIndex === 0) {
+					const entryId = sp.entryId;
+					this.summaryPrompt = null;
+					this.done({ type: "navigate", entryId, summarize: false });
+					return;
+				}
+				if (sp.selectedIndex === 1) {
+					const entryId = sp.entryId;
+					this.summaryPrompt = null;
+					this.done({ type: "navigate", entryId, summarize: true });
+					return;
+				}
+				sp.customInputMode = true;
+				this.invalidate();
+				return;
+			}
+			if (key === "\u001b" || key === "q") {
+				this.summaryPrompt = null;
+				this.invalidate();
+				return;
+			}
+			return;
+		}
+		if (this.userTipConfirm) {
+			const key = matchRawInput(data);
+			if (key === "\r" || key === "y" || key === "Y") {
+				const entryId = this.userTipConfirm.entryId;
+				this.userTipConfirm = null;
+				this.done({ type: "navigate", entryId });
+				return;
+			}
+			if (key === "\u001b" || key === "n" || key === "N" || key === "q") {
+				this.userTipConfirm = null;
+				this.onNotify?.("Branch tip navigation cancelled.", "info");
+				this.invalidate();
+				return;
+			}
+			return;
+		}
+		if (this.tipPicker) {
+			const key = matchRawInput(data);
+			const tips = this.tipPicker.tips;
+			if (key === "j" || key === "down" || key === "ctrl+n") {
+				this.tipPicker.selectedIndex = Math.min(
+					tips.length - 1,
+					this.tipPicker.selectedIndex + 1,
+				);
+				this.invalidate();
+				return;
+			}
+			if (key === "k" || key === "up" || key === "ctrl+p") {
+				this.tipPicker.selectedIndex = Math.max(
+					0,
+					this.tipPicker.selectedIndex - 1,
+				);
+				this.invalidate();
+				return;
+			}
+			if (key === "\r") {
+				const chosen = tips[this.tipPicker.selectedIndex];
+				this.tipPicker = null;
+				if (!chosen) {
+					this.invalidate();
+					return;
+				}
+				if (chosen.isUserPrompt) {
+					this.userTipConfirm = chosen;
+					this.onNotify?.(
+						`Tip '${chosen.entryId}' is a user message; native navigation will restore its prompt into the editor.`,
+						"warning",
+					);
+					this.invalidate();
+					return;
+				}
+				this.done({ type: "navigate", entryId: chosen.entryId });
+				return;
+			}
+			if (key === "\u001b" || key === "q") {
+				this.tipPicker = null;
+				this.invalidate();
+				return;
+			}
+			return;
+		}
 		this.keyResolver.setVimMode(this.state.vimMode);
 
 		const result = this.keyResolver.handleInput(

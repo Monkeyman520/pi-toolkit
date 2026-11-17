@@ -2,7 +2,11 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { SettingItem } from "@earendil-works/pi-tui";
+import {
+	type SettingItem,
+	truncateToWidth,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
 import {
 	DISCOVER_EVENT,
 	discoverLoadedPanels,
@@ -17,6 +21,56 @@ import type { ConfigManager } from "./config.ts";
 
 export const SELF_PLUGIN_ID = "pi-session-tree-explorer";
 
+export interface ResponsiveLayoutMetrics {
+	mode: "dual-pane" | "single-pane";
+	totalWidth: number;
+	outlineWidth: number;
+	previewWidth: number;
+}
+
+export function computeResponsiveLayout(
+	columns: number,
+): ResponsiveLayoutMetrics {
+	const totalWidth = Math.max(1, Math.floor(columns));
+	if (totalWidth >= 100) {
+		const outlineWidth = Math.floor(totalWidth * 0.6);
+		const previewWidth = Math.max(1, totalWidth - outlineWidth - 1);
+		return {
+			mode: "dual-pane",
+			totalWidth,
+			outlineWidth,
+			previewWidth,
+		};
+	}
+	return {
+		mode: "single-pane",
+		totalWidth,
+		outlineWidth: totalWidth,
+		previewWidth: totalWidth,
+	};
+}
+
+export function padToWidth(line: string, width: number): string {
+	const safeWidth = Math.max(1, Math.floor(width));
+	const truncated = truncateToWidth(line, safeWidth);
+	const w = visibleWidth(truncated);
+	return w < safeWidth ? `${truncated}${" ".repeat(safeWidth - w)}` : truncated;
+}
+
+export function renderDualPane(
+	leftLines: string[],
+	rightLines: string[],
+	layout: ResponsiveLayoutMetrics,
+): string[] {
+	const height = Math.max(leftLines.length, rightLines.length);
+	const combined: string[] = [];
+	for (let i = 0; i < height; i++) {
+		const left = padToWidth(leftLines[i] ?? "", layout.outlineWidth);
+		const right = padToWidth(rightLines[i] ?? "", layout.previewWidth);
+		combined.push(truncateToWidth(`${left}│${right}`, layout.totalWidth));
+	}
+	return combined;
+}
 export async function openSessionTreeSettingsPanel(params: {
 	ctx: ExtensionContext;
 	events: ExtensionAPI["events"];
@@ -45,7 +99,14 @@ export async function openSessionTreeSettingsPanel(params: {
 			label: "Fold Policy Mode",
 			description: "Default branch folding behavior in Explorer",
 			currentValue: config.fold.mode,
-			values: ["focused-only", "all", "active-only", "depth-limited", "manual"],
+			values: [
+				"focused-only",
+				"smart",
+				"all",
+				"active-only",
+				"depth-limited",
+				"manual",
+			],
 		},
 		{
 			id: "display.showAssistantNodes",

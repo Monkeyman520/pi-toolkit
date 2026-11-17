@@ -194,6 +194,7 @@ export class SearchController {
 		this.state.searchResults = results.map((r) => ({
 			id: r.document.id,
 			score: r.score,
+			matches: r.matches,
 		}));
 		this.state.searchResultIndex = results.length ? 0 : -1;
 		this.state.temporaryRevealedIds = new Set(

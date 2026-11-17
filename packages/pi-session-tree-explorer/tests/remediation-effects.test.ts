@@ -66,7 +66,7 @@ describe("remediation: stale asynchronous effects", () => {
 			onRefresh: () => pending,
 		});
 		const version = state.version;
-		component.handleInput("r");
+		component.handleInput("R");
 		component.handleInput("q");
 		resolve({
 			sessionId: "replacement",

@@ -79,7 +79,8 @@ export type FoldMode =
 	| "focused-only"
 	| "active-only"
 	| "depth-limited"
-	| "manual";
+	| "manual"
+	| "smart";
 
 export interface FoldOptions {
 	mode: FoldMode;
@@ -132,6 +133,8 @@ export interface ExplorerState {
 
 	vimMode: boolean;
 	displayOptions: DisplayOptions;
+	explicitDisplayOverrides?: Partial<DisplayOptions>;
+	branchBookmarks?: Record<string, string>;
 	foldOptions: FoldOptions;
 	manualExpandedIds: Set<string>;
 	manualCollapsedIds: Set<string>;
@@ -140,12 +143,28 @@ export interface ExplorerState {
 	searchSnapshot?: SearchSnapshot;
 	searchScope: "all" | "focused-subtree";
 	searchRegex: boolean;
-	searchResults: Array<{ id: string; score: number }>;
+	searchResults: Array<{ id: string; score: number; matches?: string[] }>;
 	searchResultIndex: number;
 	previewNodeId: string | null;
 	showDetails: boolean;
 	showContext: boolean;
 	renderOverscan: number;
+}
+
+/**
+ * Persisted Tier-2 per-session overrides (never includes full displayOptions snapshots or activeLeafId).
+ */
+export interface SessionViewState {
+	version: 2;
+	sessionId: string;
+	focusedBranchId?: string | null;
+	selectedNodeId?: string | null;
+	explicitDisplayOverrides?: Partial<DisplayOptions>;
+	branchBookmarks?: Record<string, string>;
+	showDetails?: boolean;
+	showContext?: boolean;
+	manualExpandedIds?: string[];
+	manualCollapsedIds?: string[];
 }
 
 export interface ContextMetrics {
@@ -187,6 +206,24 @@ export interface DisplayNode {
 	virtualDescendantCount?: number;
 	virtualForkCount?: number;
 	contextMetrics?: ContextMetrics;
+	toolGroup?: ToolGroupInfo;
+}
+
+export interface ToolGroupInfo {
+	toolNames: string[];
+	count: number;
+	statusSummary: string;
+	isExpanded: boolean;
+	entryIds: string[];
+}
+
+export interface BranchTipCandidate {
+	entryId: string;
+	role: string;
+	turnDepth: number;
+	previewText: string;
+	isUserPrompt: boolean;
+	isCurrentLeaf: boolean;
 }
 
 export interface ActionContext {
@@ -220,6 +257,23 @@ export interface ActionContext {
 	) => Promise<void> | void;
 	refresh?: () => Promise<void> | void;
 	notify?: (message: string, type?: "info" | "warning" | "error") => void;
+	navigationHistory?: {
+		peek: () => string | undefined;
+		isEmpty: () => boolean;
+	};
+	openTipPicker?: (tips: BranchTipCandidate[]) => void;
+	confirmUserTip?: (tip: BranchTipCandidate) => void;
+	openBranchDiff?: (initialBranchId?: string | null) => void;
+	openBranchSwitcher?: () => void;
+	openSessionStats?: () => void;
+	editBookmark?: (
+		entryId: string,
+		current: string | undefined,
+	) =>
+		| Promise<{ label: string | undefined } | null>
+		| { label: string | undefined }
+		| null;
+	restorePrevious?: (entryId: string) => void;
 	navigate?: (entryId: string, summarize?: boolean) => void;
 	fork?: (entryId: string, position: "at" | "before") => void;
 }
@@ -236,7 +290,13 @@ export interface ActionDefinition {
 
 export type ExplorerResult =
 	| { type: "close" }
-	| { type: "navigate"; entryId: string; summarize?: boolean }
+	| {
+			type: "navigate";
+			entryId: string;
+			summarize?: boolean;
+			customInstructions?: string;
+			restore?: boolean;
+	  }
 	| { type: "fork"; entryId: string; position: "at" | "before" };
 
 export interface KeymapDiagnostic {
@@ -244,4 +304,30 @@ export interface KeymapDiagnostic {
 	message: string;
 	keys: string[];
 	actionId?: string;
+}
+
+export interface SessionStatistics {
+	totalNodes: number;
+	turnCount: number;
+	assistantCount: number;
+	branchCount: number;
+	forkCount: number;
+	leafCount: number;
+	totalToolCalls: number;
+	toolErrors: number;
+	toolDistribution: Record<string, number>;
+	estimatedTotalTokens: number;
+	reportedTotalTokens: number;
+	bookmarkedBranches: number;
+}
+
+export interface BranchSummaryContext {
+	sourceLeafId: string | null;
+	targetId: string;
+	commonAncestorId: string | null;
+	sourceBranchLabel: string;
+	targetBranchLabel: string;
+	abandonedEntryCount: number;
+	abandonedTurnCount: number;
+	isCrossBranch: boolean;
 }

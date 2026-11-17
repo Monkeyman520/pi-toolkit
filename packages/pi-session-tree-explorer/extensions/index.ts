@@ -7,9 +7,14 @@ export {
 	saveViewState,
 } from "./view-state.ts";
 
-import { executeSessionIntent } from "./session-effects.ts";
+import { executeSessionIntent, NavigationHistory } from "./session-effects.ts";
 
-export { executeSessionIntent } from "./session-effects.ts";
+export {
+	executeSessionIntent,
+	isPromptRestoringEntry,
+	NavigationHistory,
+	NavigationHistoryStack,
+} from "./session-effects.ts";
 
 import type {
 	ExtensionAPI,
@@ -35,6 +40,14 @@ import {
 } from "./ui.ts";
 
 export { createActionRegistry, getDefaultKeybindings } from "./actions.ts";
+export {
+	buildDiffBranchOptions,
+	compareBranches,
+	computeTopologyBranchDiff,
+	computeWorkspaceGitDiff,
+	findCommonAncestor,
+	formatBranchDiffLines,
+} from "./branch-diff.ts";
 export { copyToClipboard } from "./clipboard.ts";
 export { getStreeArgumentCompletions } from "./commands.ts";
 export { ConfigManager } from "./config.ts";
@@ -46,6 +59,10 @@ export {
 	isNodeCollapsed,
 	isNodeVisible,
 } from "./display.ts";
+export {
+	computeSessionStatistics,
+	formatSessionStatisticsLines,
+} from "./inspection-view.ts";
 export { KeyResolver, validateKeymap } from "./keymap.ts";
 export * from "./navigation.ts";
 export {
@@ -64,6 +81,8 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 	const configManager = new ConfigManager();
 	let activeExplorer: SessionTreeComponent | undefined;
 	let mutationPending = false;
+	const navigationHistory = new NavigationHistory();
+	let navigationHistorySessionId: string | null = null;
 	const disposeActive = () => {
 		activeExplorer?.dispose();
 		activeExplorer = undefined;
@@ -71,6 +90,8 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		activeExplorer?.dispose();
 		activeExplorer = undefined;
+		navigationHistory.clear();
+		navigationHistorySessionId = null;
 	});
 
 	// Installed-only dynamic discovery over pi.events per ADR 0004/0005
@@ -218,6 +239,10 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 			const sessionId = snapshot.sessionId;
 			const index = snapshot.index;
 
+			if (navigationHistorySessionId !== sessionId) {
+				navigationHistory.clear();
+				navigationHistorySessionId = sessionId;
+			}
 			// Compute focused path IDs (from active leaf up to root)
 			const focusedPathIds = new Set<string>();
 			let curr = currentLeafId;
@@ -255,11 +280,23 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 				effectiveConfig.fold.rememberManualOverrides,
 			);
 			if (savedViewState) {
-				if (savedViewState.displayOptions) {
+				if (savedViewState.explicitDisplayOverrides) {
+					state.explicitDisplayOverrides = {
+						...savedViewState.explicitDisplayOverrides,
+					};
 					state.displayOptions = {
 						...state.displayOptions,
-						...savedViewState.displayOptions,
+						...savedViewState.explicitDisplayOverrides,
 					};
+				}
+				if (
+					savedViewState.selectedNodeId &&
+					index.entryById.has(savedViewState.selectedNodeId)
+				) {
+					state.selectedEntryId = savedViewState.selectedNodeId;
+				}
+				if (savedViewState.branchBookmarks) {
+					state.branchBookmarks = { ...savedViewState.branchBookmarks };
 				}
 				if (savedViewState.showDetails !== undefined) {
 					state.showDetails = savedViewState.showDetails;
@@ -299,6 +336,8 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 							registry,
 							keybindings: effectiveConfig.keybindings,
 							config: effectiveConfig,
+							navigationHistory,
+							cwd: ctx.cwd,
 							activeModel: ctx.model,
 							activeUsage: ctx.getContextUsage() ?? undefined,
 							onReloadConfig: async () => {
@@ -359,8 +398,13 @@ export default function sessionTreeExplorerPlugin(pi: ExtensionAPI): void {
 						ctx,
 						config: configManager.getConfig(),
 						expectedSessionId: sessionId,
+						navigationHistory,
 						onNotify: (msg, type) => ctx.ui.notify(msg, type),
-						onReplacementCleanup: disposeActive,
+						onReplacementCleanup: () => {
+							disposeActive();
+							navigationHistory.clear();
+							navigationHistorySessionId = null;
+						},
 					});
 			} finally {
 				mutationPending = false;

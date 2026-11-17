@@ -111,7 +111,8 @@
 						"focused-only",
 						"active-only",
 						"depth-limited",
-						"manual"
+						"manual",
+						"smart"
 					],
 					"default": "focused-only"
 				},
@@ -224,6 +225,10 @@
 					"default": "at"
 				},
 				"navigateSummarize": {
+					"type": "boolean",
+					"default": false
+				},
+				"promptSummary": {
 					"type": "boolean",
 					"default": false
 				},
