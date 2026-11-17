@@ -39,6 +39,22 @@
 - **Relationships:**
   - belongs to Adaptive Context Orchestrator
 
+### Session Explorer State Tiers
+- **Definition:** The 3-tier state architecture for session tree exploration: Global Config (base defaults), Session View State (per-session explicit user overrides, manual expansion overrides, and last selection, avoiding full snapshot pollution), and Runtime State (in-memory tracking of activeLeafId from SessionManager, selectedNodeId, and previewNodeId).
+- **Relationships:**
+  - belongs to Pi Plugin Package
+  - references Pi Agent
+
+### Tool Call Aggregation
+- **Definition:** Virtual projection-level clustering of consecutive tool invocations and results into collapsible summaries (e.g. `[Tools ×N] names...`) in the session outline without altering raw session entry topology or addressing.
+- **Relationships:**
+  - belongs to Pi Plugin Package
+
+### Branch Tip Navigation and History
+- **Definition:** Safe routing from any subtree or historical node to its reachable branch tip(s) with multi-fork resolution, paired with an in-memory session navigation stack supporting deterministic restoration (`Restore Previous`) of prior active session leaves.
+- **Relationships:**
+  - belongs to Pi Plugin Package
+  - references Pi Agent
 ### Project Language
 - **Definition:** English is the language for repository-maintained documentation and written project guidance, including README files, agent guidance, context, architectural decisions, and specifications. This is a human-language convention, not a programming-language selection.
 
@@ -52,3 +68,5 @@
 - [ADR 0005: Versioned plugin support library with independent plugin lifecycles](./adr/0005-versioned-plugin-support-library.md) records the ordinary-library dependency boundary and partially supersedes ADR 0004's cross-package code restriction.
 
 - [ADR 0006: Task-aware context working set and isolation](./adr/0006-task-aware-context-working-set-and-isolation.md) records ACO's task-dependent working-set model, observation-only first delivery, recovery-gated later exact offloading/pruning, and project/task-session-lineage memory isolation.
+
+- [ADR 0007: Interactive session explorer navigation, state tiers, and inspection](./adr/0007-interactive-session-explorer-navigation-and-state.md) records the decoupled navigation vs. preview model, 3-tier view state architecture, projection-level tool aggregation, and branch tip restoration stack for `pi-session-tree-explorer`.
