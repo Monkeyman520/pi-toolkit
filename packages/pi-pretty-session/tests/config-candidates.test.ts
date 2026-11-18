@@ -9,6 +9,8 @@ const expected = {
 	enabled: ["true", "false", "on", "off"],
 	useLlm: ["true", "false", "on", "off"],
 	model: ["default"],
+	titleUpdateMode: ["once", "dynamic"],
+	language: ["auto", "zh-CN", "en", "ja"],
 	updateEveryTurns: ["1", "2", "3", "5", "10"],
 	contextDeltaTokens: ["2000", "4000", "8000", "16000", "32000"],
 	summarizeOnCompact: ["true", "false", "on", "off"],
@@ -16,8 +18,8 @@ const expected = {
 	showWidget: ["true", "false", "on", "off"],
 	widgetPlacement: ["aboveEditor", "belowEditor"],
 	showStatus: ["true", "false", "on", "off"],
-	maxTitleLength: ["40", "60", "80", "100"],
-	maxDescriptionLength: ["100", "160", "220", "280"],
+	maxTitleLength: ["32", "40", "60", "80"],
+	maxDescriptionLength: ["80", "100", "140", "200"],
 	summaryTimeoutMs: ["5000", "10000", "15000", "30000"],
 };
 
@@ -56,6 +58,12 @@ describe("configuration suggestions contract", () => {
 			expect((await manager.setOption("updateEveryTurns", "0", false)).ok).toBe(
 				false,
 			);
+			expect((await manager.setOption("language", "fr-FR", false)).ok).toBe(
+				true,
+			);
+			expect(
+				(await manager.setOption("language", "invalid tag", false)).ok,
+			).toBe(false);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

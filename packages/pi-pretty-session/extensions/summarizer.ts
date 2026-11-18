@@ -11,10 +11,11 @@ import type {
 	SessionEntry,
 	SessionHeader,
 } from "@earendil-works/pi-coding-agent";
-import type { PrettySessionConfig } from "./config.ts";
+import { defaultConfig, type PrettySessionConfig } from "./config.ts";
 import type { ProjectInfo } from "./project.ts";
 
 export const CUSTOM_ENTRY_TYPE = "pretty-session";
+export const TITLE_TIMESTAMP_SUFFIX_LENGTH = 22;
 
 export type SummarySource = "llm" | "heuristic" | "manual";
 
@@ -59,10 +60,28 @@ export interface PrettySessionEntryData {
 	gitBranch?: string;
 }
 
-const SUMMARY_SYSTEM_PROMPT = `You are a session title and description generator for a coding agent.
-Given the conversation excerpts and project context, output ONLY a single valid JSON object with two keys:
-{"title": "<concise 3-8 word session title>", "description": "<single-sentence summary of the goal, key actions, and current state>"}
-Do not include markdown code fences or extra commentary.`;
+export function buildSummarySystemPrompt(
+	config: Pick<
+		PrettySessionConfig,
+		"maxTitleLength" | "maxDescriptionLength" | "language"
+	>,
+): string {
+	const languageInstruction =
+		config.language === "auto"
+			? "Write BOTH title and description in the primary natural language used by the user in the conversation."
+			: `Write BOTH title and description strictly in ${config.language}, even if the conversation excerpts or project context use another language.`;
+
+	return [
+		"You are a session title and description generator for a coding agent.",
+		"Given the conversation excerpts and project context, output ONLY a single valid JSON object with two keys:",
+		`{"title": "<ultra-concise topic phrase, <= ${config.maxTitleLength} chars>", "description": "<single condensed sentence, <= ${config.maxDescriptionLength} chars>"}`,
+		"Rules:",
+		`- title: an ultra-concise phrase naming the core subject directly, with no filler modifiers, quotes, or trailing punctuation (max ${config.maxTitleLength} characters).`,
+		`- description: ONE highly condensed sentence directly stating the core goal and current progress/outcome (max ${config.maxDescriptionLength} characters). Do NOT use boilerplate or meta-openers such as "本会话旨在", "本会话主要", "用户希望", "该会话", "This session aims to", "This conversation focuses on", or "The user wants to".`,
+		`- ${languageInstruction}`,
+		"- Output raw JSON only; do not include markdown code fences or extra commentary.",
+	].join("\n");
+}
 
 export function sanitizeSingleLine(text: string, maxLen: number): string {
 	const cleaned = text
@@ -73,6 +92,108 @@ export function sanitizeSingleLine(text: string, maxLen: number): string {
 	if (cleaned.length <= maxLen) return cleaned;
 	const sliced = cleaned.slice(0, Math.max(1, maxLen - 1)).trimEnd();
 	return `${sliced}…`;
+}
+
+export function sanitizeTitle(text: string, maxLen: number): string {
+	const cleaned = text
+		.replace(/\p{Cc}/gu, " ")
+		.replace(/\s+/g, " ")
+		.replace(/^["'`]+|["'`]+$/g, "")
+		.trim()
+		.replace(/[.,;:!?。，；：！？、]+$/u, "")
+		.trim();
+	if (cleaned.length <= maxLen) return cleaned;
+	const limit = Math.max(1, maxLen - 1);
+	let sliced = cleaned.slice(0, limit).trimEnd();
+	const lastSpace = sliced.lastIndexOf(" ");
+	if (lastSpace >= Math.floor(limit * 0.5)) {
+		sliced = sliced.slice(0, lastSpace).trimEnd();
+	}
+	sliced = sliced.replace(/[.,;:!?。，；：！？、]+$/u, "").trimEnd();
+	if (!sliced) {
+		sliced = cleaned.slice(0, limit).trimEnd();
+	}
+	return `${sliced}…`;
+}
+
+const TRAILING_TIMESTAMP_SUFFIX_RE =
+	/\s*\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]$/;
+
+export function stripTitleTimestampSuffix(title: string): string {
+	return title.replace(TRAILING_TIMESTAMP_SUFFIX_RE, "").trimEnd();
+}
+
+function pad2(n: number): string {
+	return String(n).padStart(2, "0");
+}
+
+export function formatLocalTimestampSuffix(
+	isoOrDate?: string | number | Date,
+	fallbackMs = Date.now(),
+): string {
+	let ms: number;
+	if (isoOrDate instanceof Date) {
+		ms = isoOrDate.getTime();
+	} else if (typeof isoOrDate === "number") {
+		ms = isoOrDate;
+	} else if (typeof isoOrDate === "string" && isoOrDate.trim()) {
+		ms = Date.parse(isoOrDate);
+	} else {
+		ms = fallbackMs;
+	}
+	const date = new Date(Number.isFinite(ms) ? ms : fallbackMs);
+	const yyyy = date.getFullYear();
+	const mm = pad2(date.getMonth() + 1);
+	const dd = pad2(date.getDate());
+	const hh = pad2(date.getHours());
+	const min = pad2(date.getMinutes());
+	const ss = pad2(date.getSeconds());
+	return ` [${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}]`;
+}
+
+export function applyDuplicateTitleSuffix(options: {
+	candidateTitle: string;
+	existingTitles: readonly string[];
+	createdAt?: string;
+	maxTitleLength: number;
+	nowMs?: number;
+}): string {
+	const strippedRaw = stripTitleTimestampSuffix(options.candidateTitle);
+	const normalizedBaseFull = sanitizeTitle(strippedRaw, 200);
+	const normalizedBaseBounded = sanitizeTitle(
+		strippedRaw,
+		options.maxTitleLength,
+	);
+	if (!normalizedBaseBounded) return "";
+
+	const candidateCleanFull = sanitizeSingleLine(strippedRaw, 200);
+	const candidateCleanBounded = sanitizeSingleLine(
+		strippedRaw,
+		options.maxTitleLength,
+	);
+
+	const hasDuplicate = options.existingTitles.some((existing) => {
+		const cleanExisting = sanitizeSingleLine(existing, 200);
+		if (!cleanExisting) return false;
+		const titleExisting = sanitizeTitle(cleanExisting, 200);
+		return (
+			cleanExisting === candidateCleanBounded ||
+			cleanExisting === candidateCleanFull ||
+			titleExisting === normalizedBaseBounded ||
+			titleExisting === normalizedBaseFull
+		);
+	});
+
+	if (!hasDuplicate) {
+		return normalizedBaseBounded;
+	}
+
+	const suffix = formatLocalTimestampSuffix(options.createdAt, options.nowMs);
+	const baseBudget = Math.max(2, options.maxTitleLength - suffix.length);
+	const truncatedBase =
+		sanitizeTitle(normalizedBaseFull, baseBudget) ||
+		normalizedBaseFull.slice(0, baseBudget).trimEnd();
+	return `${truncatedBase}${suffix}`;
 }
 
 export function extractMessageText(message: unknown): string {
@@ -272,6 +393,11 @@ export function reconstructMetadata(
 	currentSessionName: string | undefined,
 	metrics?: SessionMetrics,
 	project?: ProjectInfo,
+	options?: {
+		maxTitleLength?: number;
+		maxDescriptionLength?: number;
+		language?: string;
+	},
 ): PrettySessionEntryData | undefined {
 	let latest: PrettySessionEntryData | undefined;
 	for (const entry of entries) {
@@ -330,7 +456,13 @@ export function reconstructMetadata(
 	}
 
 	if (normalizedName) {
-		const fallbackDesc = buildHeuristicSummary(entries, project).description;
+		const fallbackDesc = buildHeuristicSummary(
+			entries,
+			project,
+			options?.maxTitleLength ?? defaultConfig.maxTitleLength,
+			options?.maxDescriptionLength ?? defaultConfig.maxDescriptionLength,
+			options?.language ?? defaultConfig.language,
+		).description;
 		return {
 			version: 1,
 			title: normalizedName,
@@ -385,9 +517,14 @@ export function evaluateSummaryTrigger(params: {
 		return { shouldSummarize: false, updateTitle: false };
 	}
 
-	const updateTitle = !(current?.manualLocked && config.protectManualName);
+	const isInitial = !current || current.summarizedAtTurn === 0;
+	const isManualLocked = Boolean(
+		current?.manualLocked && config.protectManualName,
+	);
+	const updateTitle =
+		!isManualLocked && (isInitial || config.titleUpdateMode !== "once");
 
-	if (!current || current.summarizedAtTurn === 0) {
+	if (isInitial) {
 		return {
 			shouldSummarize: true,
 			trigger: "initial",
@@ -423,89 +560,341 @@ export function evaluateSummaryTrigger(params: {
 	return { shouldSummarize: false, updateTitle: false };
 }
 
-function cleanUserPromptForSummary(raw: string): string {
-	return raw
-		.replace(/```[\s\S]*?```/g, " ")
-		.replace(/^\/[a-zA-Z0-9_:-]+\s*/, "")
-		.replace(/^\$[a-zA-Z0-9_:-]+\s*/, "")
+export function extractUserPromptClue(raw: string): {
+	text: string;
+	skillNames: string[];
+} {
+	const skillNames: string[] = [];
+	const addSkillName = (candidate: string | undefined) => {
+		const cleaned = candidate?.trim();
+		if (!cleaned || cleaned === "...") return;
+		if (!skillNames.includes(cleaned)) {
+			skillNames.push(cleaned);
+		}
+	};
+
+	const withoutSkillBlocks = raw.replace(
+		/<skill\b([^>]*)>[\s\S]*?<\/skill>/gi,
+		(_match, attrs: string) => {
+			const nameMatch = /\bname\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+			addSkillName(nameMatch?.[1] ?? nameMatch?.[2]);
+			return " ";
+		},
+	);
+
+	const withoutCodeBlocks = withoutSkillBlocks.replace(/```[\s\S]*?```/g, " ");
+	let remaining = withoutCodeBlocks.trimStart();
+
+	for (;;) {
+		const skillSlash = /^\/skill:([a-zA-Z0-9_.:-]+)(?=\s|$)\s*/i.exec(
+			remaining,
+		);
+		if (skillSlash) {
+			addSkillName(skillSlash[1]);
+			remaining = remaining.slice(skillSlash[0].length);
+			continue;
+		}
+		const slashCmd = /^\/([a-zA-Z0-9_:-]+)(?=\s|$)\s*/.exec(remaining);
+		if (slashCmd) {
+			remaining = remaining.slice(slashCmd[0].length);
+			continue;
+		}
+		const dollarCmd = /^\$([a-zA-Z][a-zA-Z0-9_.:-]*)(?=\s|$)\s*/.exec(
+			remaining,
+		);
+		if (dollarCmd) {
+			addSkillName(dollarCmd[1]);
+			remaining = remaining.slice(dollarCmd[0].length);
+			continue;
+		}
+		break;
+	}
+
+	const text = remaining
 		.replace(/\p{Cc}/gu, " ")
 		.replace(/\s+/g, " ")
 		.trim();
+
+	return { text, skillNames };
+}
+
+function cleanUserPromptForSummary(raw: string): string {
+	return extractUserPromptClue(raw).text;
+}
+
+export function detectConversationLanguage(
+	entries: readonly SessionEntry[],
+): "zh-CN" | "ja" | "en" {
+	let cjkCount = 0;
+	let kanaCount = 0;
+	let latinCount = 0;
+
+	const countSample = (sample: string) => {
+		for (const ch of sample) {
+			const code = ch.codePointAt(0) ?? 0;
+			if (
+				(code >= 0x3040 && code <= 0x309f) ||
+				(code >= 0x30a0 && code <= 0x30ff) ||
+				(code >= 0x31f0 && code <= 0x31ff)
+			) {
+				kanaCount++;
+			} else if (
+				(code >= 0x4e00 && code <= 0x9fff) ||
+				(code >= 0x3400 && code <= 0x4dbf)
+			) {
+				cjkCount++;
+			} else if (
+				(code >= 0x41 && code <= 0x5a) ||
+				(code >= 0x61 && code <= 0x7a)
+			) {
+				latinCount++;
+			}
+		}
+	};
+
+	for (const entry of entries) {
+		if (entry.type === "compaction" && entry.summary.trim()) {
+			countSample(cleanUserPromptForSummary(entry.summary));
+			continue;
+		}
+		if (entry.type !== "message") continue;
+		const role = (entry.message as unknown as { role?: string }).role;
+		if (role === "user") {
+			countSample(cleanUserPromptForSummary(extractMessageText(entry.message)));
+		} else if (role === "assistant") {
+			countSample(
+				extractMessageText(entry.message)
+					.replace(/```[\s\S]*?```/g, " ")
+					.slice(0, 600),
+			);
+		}
+	}
+
+	if (kanaCount >= 2 || (kanaCount > 0 && kanaCount + cjkCount >= 2)) {
+		return "ja";
+	}
+	if (cjkCount >= 2 && (cjkCount * 2 >= latinCount || cjkCount >= 6)) {
+		return "zh-CN";
+	}
+	return "en";
+}
+
+export function resolveEffectiveLanguage(
+	configuredLanguage: string | undefined,
+	entries: readonly SessionEntry[],
+): string {
+	const trimmed = configuredLanguage?.trim();
+	if (!trimmed || trimmed.toLowerCase() === "auto") {
+		return detectConversationLanguage(entries);
+	}
+	return trimmed;
+}
+
+interface HeuristicLocale {
+	isCjk: boolean;
+	minSecondaryLen: number;
+	minClueChars: number;
+	latestPrefix: string;
+	outcomePrefix: string;
+	filesPrefix: string;
+	projectPrefix: string;
+	skillPrefix: string;
+	emptyTitle: (projectName?: string) => string;
+	emptyDesc: (projectName?: string, branch?: string) => string;
+	skillOnlyDesc: (skills: readonly string[], projectName?: string) => string;
+}
+
+function getHeuristicLocale(language: string): HeuristicLocale {
+	const lower = language.toLowerCase();
+	if (lower === "zh" || lower.startsWith("zh-")) {
+		return {
+			isCjk: true,
+			minSecondaryLen: 14,
+			minClueChars: 6,
+			latestPrefix: "最新: ",
+			outcomePrefix: "进展: ",
+			filesPrefix: "文件: ",
+			projectPrefix: "项目: ",
+			skillPrefix: "技能: ",
+			emptyTitle: (proj) => (proj ? `${proj} 会话` : "新建 Pi 会话"),
+			emptyDesc: (proj, branch) =>
+				proj
+					? `${proj}${branch ? ` (${branch})` : ""} 交互式编码会话。`
+					: "Pi 交互式编码会话。",
+			skillOnlyDesc: (skills, proj) =>
+				`调用技能 ${skills.join(", ")}${proj ? ` · 项目: ${proj}` : ""}。`,
+		};
+	}
+	if (lower === "ja" || lower.startsWith("ja-")) {
+		return {
+			isCjk: true,
+			minSecondaryLen: 14,
+			minClueChars: 6,
+			latestPrefix: "最新: ",
+			outcomePrefix: "結果: ",
+			filesPrefix: "ファイル: ",
+			projectPrefix: "プロジェクト: ",
+			skillPrefix: "スキル: ",
+			emptyTitle: (proj) =>
+				proj ? `${proj} セッション` : "新規 Pi セッション",
+			emptyDesc: (proj, branch) =>
+				proj
+					? `${proj}${branch ? ` (${branch})` : ""} での開発セッション。`
+					: "Pi 対話コーディングセッション。",
+			skillOnlyDesc: (skills, proj) =>
+				`スキル ${skills.join(", ")} を実行${proj ? ` · プロジェクト: ${proj}` : ""}。`,
+		};
+	}
+	return {
+		isCjk: false,
+		minSecondaryLen: 20,
+		minClueChars: 10,
+		latestPrefix: "Latest: ",
+		outcomePrefix: "Outcome: ",
+		filesPrefix: "Files: ",
+		projectPrefix: "Project: ",
+		skillPrefix: "Skill: ",
+		emptyTitle: (proj) => (proj ? `${proj} session` : "New Pi session"),
+		emptyDesc: (proj, branch) =>
+			proj
+				? `Interactive coding session in ${proj}${branch ? ` (${branch})` : ""}.`
+				: "Interactive Pi coding session.",
+		skillOnlyDesc: (skills, proj) =>
+			`Invoked skill ${skills.join(", ")}${proj ? ` · Project: ${proj}` : ""}.`,
+	};
 }
 
 export function buildHeuristicSummary(
 	entries: readonly SessionEntry[],
 	project?: ProjectInfo,
-	maxTitleLen = 60,
-	maxDescLen = 160,
+	maxTitleLen = defaultConfig.maxTitleLength,
+	maxDescLen = defaultConfig.maxDescriptionLength,
+	language = defaultConfig.language,
 ): { title: string; description: string } {
-	const userPrompts: string[] = [];
+	const effectiveLang = resolveEffectiveLanguage(language, entries);
+	const locale = getHeuristicLocale(effectiveLang);
+
+	const realUserPrompts: string[] = [];
+	const skillClues: string[] = [];
 	const assistantReplies: string[] = [];
 	let latestCompaction: string | undefined;
 
 	for (const entry of entries) {
 		if (entry.type === "compaction" && entry.summary.trim()) {
-			latestCompaction = cleanUserPromptForSummary(entry.summary);
+			const cleaned = cleanUserPromptForSummary(entry.summary);
+			if (cleaned) latestCompaction = cleaned;
 			continue;
 		}
 		if (entry.type !== "message") continue;
 		const role = (entry.message as unknown as { role?: string }).role;
-		const text = cleanUserPromptForSummary(extractMessageText(entry.message));
-		if (!text) continue;
-		if (role === "user") userPrompts.push(text);
-		else if (role === "assistant") assistantReplies.push(text);
+		const rawText = extractMessageText(entry.message);
+		if (role === "user") {
+			const clue = extractUserPromptClue(rawText);
+			if (clue.text) {
+				realUserPrompts.push(clue.text);
+			} else {
+				for (const name of clue.skillNames) {
+					if (!skillClues.includes(name)) skillClues.push(name);
+				}
+			}
+		} else if (role === "assistant") {
+			const text = cleanUserPromptForSummary(rawText);
+			if (text) assistantReplies.push(text);
+		}
 	}
 
 	const touchedFiles = extractTouchedFiles(entries);
-	const firstUser = userPrompts[0] ?? latestCompaction ?? "";
-	const latestUser = userPrompts[userPrompts.length - 1] ?? firstUser;
+	const firstUser = realUserPrompts[0] ?? latestCompaction ?? "";
+	const latestUser = realUserPrompts[realUserPrompts.length - 1] ?? firstUser;
 	const latestAssistant = assistantReplies[assistantReplies.length - 1] ?? "";
 
 	if (!firstUser && !latestAssistant) {
-		const fallbackTitle = project?.name
-			? `${project.name} session`
-			: "New Pi session";
-		const fallbackDesc = project
-			? `Interactive coding session in ${project.name}${project.git.branch ? ` (${project.git.branch})` : ""}.`
-			: "Interactive Pi coding session.";
+		if (skillClues.length > 0) {
+			return {
+				title: sanitizeTitle(
+					`${locale.skillPrefix}${skillClues[0]}`,
+					maxTitleLen,
+				),
+				description: sanitizeSingleLine(
+					locale.skillOnlyDesc(skillClues.slice(0, 2), project?.name),
+					maxDescLen,
+				),
+			};
+		}
 		return {
-			title: sanitizeSingleLine(fallbackTitle, maxTitleLen),
-			description: sanitizeSingleLine(fallbackDesc, maxDescLen),
+			title: sanitizeTitle(locale.emptyTitle(project?.name), maxTitleLen),
+			description: sanitizeSingleLine(
+				locale.emptyDesc(project?.name, project?.git.branch),
+				maxDescLen,
+			),
 		};
 	}
 
-	const primarySource = latestUser || firstUser || latestAssistant;
+	const primarySource =
+		latestUser ||
+		firstUser ||
+		(skillClues.length > 0 ? `${locale.skillPrefix}${skillClues[0]}` : "") ||
+		latestAssistant;
 	const firstClause =
-		primarySource.split(/[.!?;\n]|\s+—\s+/)[0]?.trim() || primarySource;
-	const title = sanitizeSingleLine(firstClause, maxTitleLen);
+		primarySource.split(/[.!?。！？;\n]|\s+—\s+/)[0]?.trim() || primarySource;
+	const title = sanitizeTitle(firstClause, maxTitleLen);
 
-	const descParts: string[] = [];
-	if (firstUser) {
-		descParts.push(sanitizeSingleLine(firstUser, 64));
-	}
-	if (userPrompts.length > 1 && latestUser && latestUser !== firstUser) {
-		descParts.push(`Latest: ${sanitizeSingleLine(latestUser, 44)}`);
-	} else if (latestAssistant) {
-		descParts.push(`Outcome: ${sanitizeSingleLine(latestAssistant, 44)}`);
-	}
-	if (touchedFiles.length > 0) {
-		descParts.push(`Files: ${touchedFiles.join(", ")}`);
-	} else if (project?.name) {
-		descParts.push(`Project: ${project.name}`);
+	const primaryIntent =
+		firstUser ||
+		(skillClues.length > 0 ? `${locale.skillPrefix}${skillClues[0]}` : "") ||
+		latestAssistant;
+	const primaryCap = locale.isCjk
+		? Math.min(Math.floor(maxDescLen * 0.62), 56)
+		: Math.min(Math.floor(maxDescLen * 0.65), 64);
+	const primarySegment = sanitizeSingleLine(primaryIntent, primaryCap);
+
+	const remaining = maxDescLen - primarySegment.length - 3;
+	let secondarySegment = "";
+	if (remaining >= locale.minSecondaryLen) {
+		if (realUserPrompts.length > 1 && latestUser && latestUser !== firstUser) {
+			const contentBudget = remaining - locale.latestPrefix.length;
+			if (contentBudget >= locale.minClueChars) {
+				secondarySegment = `${locale.latestPrefix}${sanitizeSingleLine(latestUser, contentBudget)}`;
+			}
+		} else if (touchedFiles.length > 0) {
+			const maxFilesBudget = remaining - locale.filesPrefix.length;
+			if (maxFilesBudget >= 4) {
+				const fittedFiles: string[] = [];
+				for (const file of touchedFiles.slice(0, 2)) {
+					const candidate = [...fittedFiles, file].join(", ");
+					if (candidate.length <= maxFilesBudget) {
+						fittedFiles.push(file);
+					}
+				}
+				if (fittedFiles.length > 0) {
+					secondarySegment = `${locale.filesPrefix}${fittedFiles.join(", ")}`;
+				}
+			}
+		} else if (latestAssistant) {
+			const contentBudget = remaining - locale.outcomePrefix.length;
+			if (contentBudget >= locale.minClueChars) {
+				secondarySegment = `${locale.outcomePrefix}${sanitizeSingleLine(latestAssistant, contentBudget)}`;
+			}
+		} else if (project?.name) {
+			const candidate = `${locale.projectPrefix}${project.name}`;
+			if (candidate.length <= remaining) {
+				secondarySegment = candidate;
+			}
+		}
 	}
 
-	const description = sanitizeSingleLine(
-		descParts.join(" · ") || primarySource,
-		maxDescLen,
-	);
+	const combined = secondarySegment
+		? `${primarySegment} · ${secondarySegment}`
+		: primarySegment || primarySource;
+	const description = sanitizeSingleLine(combined, maxDescLen);
 
 	return { title, description };
 }
 
 export function parseLlmSummaryResponse(
 	rawText: string,
-	maxTitleLen = 60,
-	maxDescLen = 160,
+	maxTitleLen = defaultConfig.maxTitleLength,
+	maxDescLen = defaultConfig.maxDescriptionLength,
 ): { title: string; description: string } | undefined {
 	const trimmed = rawText.trim();
 	if (!trimmed) return undefined;
@@ -528,7 +917,7 @@ export function parseLlmSummaryResponse(
 							: "";
 				if (rawTitle && rawDesc) {
 					return {
-						title: sanitizeSingleLine(rawTitle, maxTitleLen),
+						title: sanitizeTitle(rawTitle, maxTitleLen),
 						description: sanitizeSingleLine(rawDesc, maxDescLen),
 					};
 				}
@@ -544,7 +933,7 @@ export function parseLlmSummaryResponse(
 	)?.[1];
 	if (titleLine?.trim() && descLine?.trim()) {
 		return {
-			title: sanitizeSingleLine(titleLine, maxTitleLen),
+			title: sanitizeTitle(titleLine, maxTitleLen),
 			description: sanitizeSingleLine(descLine, maxDescLen),
 		};
 	}
@@ -552,7 +941,7 @@ export function parseLlmSummaryResponse(
 	return undefined;
 }
 
-function buildConversationExcerpt(
+export function buildConversationExcerpt(
 	entries: readonly SessionEntry[],
 	project?: ProjectInfo,
 ): string {
@@ -570,19 +959,29 @@ function buildConversationExcerpt(
 	const messageLines: string[] = [];
 	for (const entry of entries) {
 		if (entry.type === "compaction" && entry.summary.trim()) {
-			messageLines.push(
-				`[Compaction Summary]: ${sanitizeSingleLine(entry.summary, 300)}`,
-			);
+			const cleaned = cleanUserPromptForSummary(entry.summary);
+			if (cleaned) {
+				messageLines.push(
+					`[Compaction Summary]: ${sanitizeSingleLine(cleaned, 300)}`,
+				);
+			}
 			continue;
 		}
 		if (entry.type !== "message") continue;
 		const role = (entry.message as unknown as { role?: string }).role;
 		if (role !== "user" && role !== "assistant") continue;
-		const text = extractMessageText(entry.message);
-		if (!text.trim()) continue;
-		messageLines.push(
-			`[${role.toUpperCase()}]: ${sanitizeSingleLine(text, 240)}`,
-		);
+		const rawText = extractMessageText(entry.message);
+		if (!rawText.trim()) continue;
+		if (role === "user") {
+			const clue = extractUserPromptClue(rawText);
+			if (clue.text) {
+				messageLines.push(`[USER]: ${sanitizeSingleLine(clue.text, 240)}`);
+			} else if (clue.skillNames.length > 0) {
+				messageLines.push(`[USER]: Skill: ${clue.skillNames.join(", ")}`);
+			}
+			continue;
+		}
+		messageLines.push(`[ASSISTANT]: ${sanitizeSingleLine(rawText, 240)}`);
 	}
 
 	const selected =
@@ -639,6 +1038,7 @@ export async function generateSessionSummary(options: {
 		options.project,
 		options.config.maxTitleLength,
 		options.config.maxDescriptionLength,
+		options.config.language,
 	);
 
 	if (!options.config.useLlm || !options.modelRegistry) {
@@ -670,7 +1070,7 @@ export async function generateSessionSummary(options: {
 		const response = await options.modelRegistry.complete(
 			targetModel,
 			{
-				systemPrompt: SUMMARY_SYSTEM_PROMPT,
+				systemPrompt: buildSummarySystemPrompt(options.config),
 				messages: [userMessage],
 			},
 			{

@@ -13,6 +13,16 @@ export const configSchema = Type.Object(
 		enabled: Type.Optional(Type.Boolean()),
 		useLlm: Type.Optional(Type.Boolean()),
 		model: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+		titleUpdateMode: Type.Optional(
+			Type.Union([Type.Literal("once"), Type.Literal("dynamic")]),
+		),
+		language: Type.Optional(
+			Type.String({
+				minLength: 2,
+				maxLength: 35,
+				pattern: "^(auto|[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*)$",
+			}),
+		),
 		updateEveryTurns: Type.Optional(
 			Type.Integer({ minimum: 1, maximum: 1000 }),
 		),
@@ -26,7 +36,7 @@ export const configSchema = Type.Object(
 			Type.Union([Type.Literal("aboveEditor"), Type.Literal("belowEditor")]),
 		),
 		showStatus: Type.Optional(Type.Boolean()),
-		maxTitleLength: Type.Optional(Type.Integer({ minimum: 12, maximum: 120 })),
+		maxTitleLength: Type.Optional(Type.Integer({ minimum: 24, maximum: 120 })),
 		maxDescriptionLength: Type.Optional(
 			Type.Integer({ minimum: 24, maximum: 280 }),
 		),
@@ -43,6 +53,8 @@ export interface PrettySessionConfig {
 	enabled: boolean;
 	useLlm: boolean;
 	model: string | undefined;
+	titleUpdateMode: "once" | "dynamic";
+	language: string;
 	updateEveryTurns: number;
 	contextDeltaTokens: number;
 	summarizeOnCompact: boolean;
@@ -59,6 +71,8 @@ export const defaultConfig: PrettySessionConfig = {
 	enabled: true,
 	useLlm: true,
 	model: undefined,
+	titleUpdateMode: "once",
+	language: "auto",
 	updateEveryTurns: 3,
 	contextDeltaTokens: 8000,
 	summarizeOnCompact: true,
@@ -66,8 +80,8 @@ export const defaultConfig: PrettySessionConfig = {
 	showWidget: true,
 	widgetPlacement: "aboveEditor",
 	showStatus: true,
-	maxTitleLength: 60,
-	maxDescriptionLength: 160,
+	maxTitleLength: 40,
+	maxDescriptionLength: 100,
 	summaryTimeoutMs: 15000,
 };
 
@@ -97,6 +111,16 @@ export const configOptions: Readonly<
 	model: {
 		description: "Optional provider/modelId override for summarization calls",
 		values: ["default"],
+	},
+	titleUpdateMode: {
+		description:
+			"Title update policy: once (initial only) | dynamic (continuous)",
+		values: ["once", "dynamic"],
+	},
+	language: {
+		description:
+			"Generation language: auto | zh-CN | en | ja (or BCP-47 language tag)",
+		values: ["auto", "zh-CN", "en", "ja"],
 	},
 	updateEveryTurns: {
 		description: "Re-summarize every N completed turns",
@@ -128,11 +152,11 @@ export const configOptions: Readonly<
 	},
 	maxTitleLength: {
 		description: "Maximum character length for generated session titles",
-		values: ["40", "60", "80", "100"],
+		values: ["32", "40", "60", "80"],
 	},
 	maxDescriptionLength: {
 		description: "Maximum character length for generated session descriptions",
-		values: ["100", "160", "220", "280"],
+		values: ["80", "100", "140", "200"],
 	},
 	summaryTimeoutMs: {
 		description: "Timeout in milliseconds for LLM summarization calls",
@@ -146,6 +170,10 @@ export const toggleAliases: Readonly<
 	auto: "enabled",
 	autosummarize: "enabled",
 	enabled: "enabled",
+	title: "titleUpdateMode",
+	titlemode: "titleUpdateMode",
+	titleupdatemode: "titleUpdateMode",
+	lang: "language",
 	updatetokendelta: "contextDeltaTokens",
 	contextdeltatokens: "contextDeltaTokens",
 	llm: "useLlm",
@@ -247,6 +275,18 @@ export class ConfigManager {
 				};
 			}
 			parsedValue = trimmedValue;
+		} else if (resolvedKey === "titleUpdateMode") {
+			const normalizedMode = trimmedValue.toLowerCase();
+			if (normalizedMode !== "once" && normalizedMode !== "dynamic") {
+				return {
+					ok: false,
+					error: `Invalid titleUpdateMode "${trimmedValue}". Expected "once" or "dynamic".`,
+				};
+			}
+			parsedValue = normalizedMode;
+		} else if (resolvedKey === "language") {
+			parsedValue =
+				trimmedValue.toLowerCase() === "auto" ? "auto" : trimmedValue;
 		} else if (resolvedKey === "model") {
 			if (
 				trimmedValue === "" ||
@@ -293,17 +333,35 @@ export class ConfigManager {
 		| {
 				ok: true;
 				key: keyof PrettySessionConfig;
-				value: boolean;
+				value: boolean | "once" | "dynamic";
 				config: PrettySessionConfig;
 		  }
 		| { ok: false; error: string }
 	> {
 		const normalized = target.trim().toLowerCase();
 		const key = toggleAliases[normalized];
-		if (!key || !Type.IsBoolean(configSchema.properties[key])) {
+		if (!key) {
 			return {
 				ok: false,
-				error: `Unknown toggle target "${target}". Supported targets: auto, llm, widget, status, lock, compact.`,
+				error: `Unknown toggle target "${target}". Supported targets: auto, llm, widget, status, lock, compact, title.`,
+			};
+		}
+		if (key === "titleUpdateMode") {
+			const nextVal =
+				this.config.titleUpdateMode === "once" ? "dynamic" : "once";
+			const res = await this.setOption(key, nextVal, persist);
+			if (!res.ok) return res;
+			return {
+				ok: true,
+				key,
+				value: res.config.titleUpdateMode,
+				config: res.config,
+			};
+		}
+		if (!Type.IsBoolean(configSchema.properties[key])) {
+			return {
+				ok: false,
+				error: `Unknown toggle target "${target}". Supported targets: auto, llm, widget, status, lock, compact, title.`,
 			};
 		}
 		const currentVal = Boolean(this.config[key]);

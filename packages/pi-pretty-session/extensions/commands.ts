@@ -30,7 +30,7 @@ export const prettySessionUsage = [
 	"  /ps unlock                       Unlock manual title so dynamic updates resume",
 	"  /ps list [current|all]           List saved sessions with descriptions & metrics",
 	"  /ps config [reload|<key> [val]]  Open TUI settings panel, reload, or update config",
-	"  /ps toggle <auto|llm|widget|status|lock|compact>",
+	"  /ps toggle <auto|llm|widget|status|lock|compact|title>",
 	"  /ps help                         Show command usage",
 ].join("\n");
 
@@ -179,7 +179,7 @@ const prettySessionActions: ReadonlyArray<{
 	{
 		action: "toggle",
 		description:
-			"Toggle boolean setting: auto, llm, widget, status, lock, compact",
+			"Toggle setting: auto, llm, widget, status, lock, compact, title",
 	},
 	{ action: "help", description: "Show command usage" },
 ];
@@ -218,6 +218,12 @@ const toggleTargets: ReadonlyArray<{
 		target: "compact",
 		key: "summarizeOnCompact",
 		description: "Toggle automatic re-summarization after /compact",
+	},
+	{
+		target: "title",
+		key: "titleUpdateMode",
+		description:
+			"Toggle title update mode between once (initial only) and dynamic",
 	},
 ];
 

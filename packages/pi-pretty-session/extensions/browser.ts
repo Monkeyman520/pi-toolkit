@@ -26,10 +26,13 @@ import {
 import { type ProjectInfo, shortenHomePath } from "./project.ts";
 import {
 	buildHeuristicSummary,
+	CUSTOM_ENTRY_TYPE,
 	computeSessionMetrics,
+	extractUserPromptClue,
 	type PrettySessionEntryData,
 	reconstructMetadata,
 	type SessionMetrics,
+	sanitizeTitle,
 } from "./summarizer.ts";
 
 const MAX_SESSION_FILE_BYTES = 8 * 1024 * 1024;
@@ -99,21 +102,18 @@ export function enrichSessionInfo(
 
 	const meta = reconstructMetadata(entries, info.name, metrics);
 	const heuristic = meta ? undefined : buildHeuristicSummary(entries);
+	const cleanFirstMessage = extractUserPromptClue(info.firstMessage).text;
 
 	const fallbackTitle =
 		info.name?.trim() ||
-		info.firstMessage
-			.replace(/\p{Cc}/gu, " ")
-			.replace(/\s+/g, " ")
-			.trim()
-			.slice(0, 60) ||
+		sanitizeTitle(cleanFirstMessage, 40) ||
 		"(untitled session)";
 
 	const title = meta?.title ?? heuristic?.title ?? fallbackTitle;
 	const description =
 		meta?.description ??
 		heuristic?.description ??
-		(info.firstMessage || "No messages recorded.");
+		(cleanFirstMessage || "No messages recorded.");
 
 	const cwd = info.cwd || header?.cwd || "";
 	const shortCwd = cwd
@@ -188,6 +188,70 @@ export async function loadEnrichedSessions(options: {
 	return enriched.sort(
 		(a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
 	);
+}
+
+export async function loadProjectSessionTitles(options: {
+	cwd: string;
+	sessionDir?: string;
+	excludeSessionId?: string;
+	excludeSessionFile?: string;
+}): Promise<string[]> {
+	let rawList: SessionInfo[] = [];
+	try {
+		rawList = await SessionManager.list(options.cwd, options.sessionDir);
+	} catch {
+		return [];
+	}
+
+	const excludeFileKey = normalizePathKey(options.excludeSessionFile);
+	const others = rawList.filter((info) => {
+		if (options.excludeSessionId && info.id === options.excludeSessionId) {
+			return false;
+		}
+		const infoFileKey = normalizePathKey(info.path);
+		if (excludeFileKey && infoFileKey && infoFileKey === excludeFileKey) {
+			return false;
+		}
+		return true;
+	});
+
+	const titles: string[] = [];
+	for (let i = 0; i < others.length; i += ENRICH_CONCURRENCY) {
+		const batch = others.slice(i, i + ENRICH_CONCURRENCY);
+		const batchTitles = await Promise.all(
+			batch.map(async (info) => {
+				const found: string[] = [];
+				if (info.name?.trim()) {
+					found.push(info.name.trim());
+				}
+				try {
+					const fileStat = await stat(info.path);
+					if (fileStat.size <= MAX_SESSION_FILE_BYTES) {
+						const rawContent = await readFile(info.path, "utf8");
+						if (rawContent.includes(CUSTOM_ENTRY_TYPE)) {
+							const fileEntries = parseSessionEntries(rawContent);
+							const entries: SessionEntry[] = [];
+							for (const e of fileEntries) {
+								if (e.type !== "session") entries.push(e);
+							}
+							const meta = reconstructMetadata(entries, info.name);
+							if (meta?.title?.trim()) {
+								found.push(meta.title.trim());
+							}
+						}
+					}
+				} catch {
+					// Ignore unreadable session file
+				}
+				return found;
+			}),
+		);
+		for (const list of batchTitles) {
+			titles.push(...list);
+		}
+	}
+
+	return titles;
 }
 
 export function filterEnrichedSessions(

@@ -3,9 +3,11 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { loadProjectSessionTitles } from "./browser.ts";
 import type { ConfigManager } from "./config.ts";
 import { inspectProject, type ProjectInfo } from "./project.ts";
 import {
+	applyDuplicateTitleSuffix,
 	buildHeuristicSummary,
 	CUSTOM_ENTRY_TYPE,
 	computeSessionMetrics,
@@ -99,7 +101,7 @@ export class SessionState {
 		this.currentMetadata = undefined;
 		this.lastPluginSetTitle = undefined;
 	}
-	rename(
+	async rename(
 		ctx: ExtensionContext,
 		title: string,
 		description?: string,
@@ -107,17 +109,28 @@ export class SessionState {
 	) {
 		if (!this.isCurrent(ctx, revision)) return undefined;
 		this.cancelSummary();
+		const cfg = this.configManager.config;
+		const { metrics } = this.recompute(ctx);
+		const existingTitles = await this.collectOtherTitles(ctx);
+		if (!this.isCurrent(ctx, revision)) return undefined;
+		const deduplicatedTitle = applyDuplicateTitleSuffix({
+			candidateTitle: title,
+			existingTitles,
+			createdAt: metrics.createdAt,
+			maxTitleLength: cfg.maxTitleLength,
+		});
 		const desc =
 			description ??
 			this.metadata?.description ??
 			buildHeuristicSummary(
 				this.entries(ctx),
 				this.project,
-				this.configManager.config.maxTitleLength,
-				this.configManager.config.maxDescriptionLength,
+				cfg.maxTitleLength,
+				cfg.maxDescriptionLength,
+				cfg.language,
 			).description;
 		return this.persist(ctx, {
-			title,
+			title: deduplicatedTitle || title,
 			description: desc,
 			source: "manual",
 			manualLocked: true,
@@ -164,6 +177,7 @@ export class SessionState {
 				this.currentProject,
 				this.configManager.config.maxTitleLength,
 				this.configManager.config.maxDescriptionLength,
+				this.configManager.config.language,
 			).description;
 
 		this.persist(ctx, {
@@ -216,11 +230,17 @@ export class SessionState {
 			? entries
 			: allEntries;
 
+		const cfg = this.configManager.config;
 		const metadata = reconstructMetadata(
 			metadataSourceEntries,
 			ctx.sessionManager.getSessionName(),
 			metrics,
 			this.currentProject,
+			{
+				maxTitleLength: cfg.maxTitleLength,
+				maxDescriptionLength: cfg.maxDescriptionLength,
+				language: cfg.language,
+			},
 		);
 
 		if (this.isCurrent(ctx)) this.currentMetadata = metadata;
@@ -246,6 +266,15 @@ export class SessionState {
 		return info;
 	}
 
+	private async collectOtherTitles(ctx: ExtensionContext): Promise<string[]> {
+		return loadProjectSessionTitles({
+			cwd: ctx.cwd,
+			sessionDir: ctx.sessionManager.getSessionDir(),
+			excludeSessionId: ctx.sessionManager.getSessionId(),
+			excludeSessionFile: ctx.sessionManager.getSessionFile(),
+		});
+	}
+
 	private persist(
 		ctx: ExtensionContext,
 		params: {
@@ -254,12 +283,15 @@ export class SessionState {
 			source: SummarySource;
 			manualLocked: boolean;
 			updateNativeName: boolean;
+			preserveTitleExact?: boolean;
 		},
 	): PrettySessionEntryData | undefined {
 		if (!this.isCurrent(ctx)) return undefined;
 		const { metrics } = this.recompute(ctx);
 		const cfg = this.configManager.config;
-		const finalTitle = sanitizeSingleLine(params.title, cfg.maxTitleLength);
+		const finalTitle = params.preserveTitleExact
+			? sanitizeSingleLine(params.title, 120)
+			: sanitizeSingleLine(params.title, cfg.maxTitleLength);
 		const finalDesc = sanitizeSingleLine(
 			params.description,
 			cfg.maxDescriptionLength,
@@ -315,10 +347,11 @@ export class SessionState {
 			if (controller.signal.aborted || !this.isCurrent(ctx, revision))
 				return undefined;
 			const entries = this.entries(ctx);
+			const cfg = this.configManager.config;
 			const summary = await generateSessionSummary({
 				entries,
 				project,
-				config: this.configManager.config,
+				config: cfg,
 				model: ctx.model,
 				modelRegistry: ctx.modelRegistry,
 				signal: controller.signal,
@@ -330,27 +363,65 @@ export class SessionState {
 
 			const preserveManualLock =
 				!options.manualOverride &&
-				Boolean(
-					this.currentMetadata?.manualLocked &&
-						this.configManager.config.protectManualName,
-				);
+				Boolean(this.currentMetadata?.manualLocked && cfg.protectManualName);
 
-			const titleToPersist = preserveManualLock
-				? (this.currentMetadata?.title ??
-					ctx.sessionManager.getSessionName() ??
-					summary.title)
-				: summary.title;
+			const existingTitle =
+				this.currentMetadata?.title ?? ctx.sessionManager.getSessionName();
 
-			const sourceToPersist: SummarySource = preserveManualLock
-				? "manual"
-				: summary.source;
+			const preservePolicyTitle =
+				!options.manualOverride &&
+				!preserveManualLock &&
+				!options.updateTitle &&
+				Boolean(existingTitle);
+
+			if (preserveManualLock) {
+				return this.persist(ctx, {
+					title: existingTitle ?? summary.title,
+					description: summary.description,
+					source: "manual",
+					manualLocked: true,
+					updateNativeName: false,
+					preserveTitleExact: true,
+				});
+			}
+
+			if (preservePolicyTitle) {
+				const preservedSource: SummarySource =
+					this.currentMetadata?.source &&
+					this.currentMetadata.source !== "manual"
+						? this.currentMetadata.source
+						: (this.currentMetadata?.source ?? summary.source);
+				return this.persist(ctx, {
+					title: existingTitle ?? summary.title,
+					description: summary.description,
+					source: preservedSource,
+					manualLocked: false,
+					updateNativeName: false,
+					preserveTitleExact: true,
+				});
+			}
+
+			const { metrics } = this.recompute(ctx);
+			const existingTitles = await this.collectOtherTitles(ctx);
+			if (controller.signal.aborted || !this.isCurrent(ctx, revision)) {
+				return undefined;
+			}
+
+			const deduplicatedTitle =
+				applyDuplicateTitleSuffix({
+					candidateTitle: summary.title,
+					existingTitles,
+					createdAt: metrics.createdAt,
+					maxTitleLength: cfg.maxTitleLength,
+				}) || summary.title;
 
 			return this.persist(ctx, {
-				title: titleToPersist,
+				title: deduplicatedTitle,
 				description: summary.description,
-				source: sourceToPersist,
-				manualLocked: preserveManualLock,
-				updateNativeName: options.updateTitle && !preserveManualLock,
+				source: summary.source,
+				manualLocked: false,
+				updateNativeName:
+					options.updateTitle || Boolean(options.manualOverride),
 			});
 		} finally {
 			if (this.summaryAbort === controller) {

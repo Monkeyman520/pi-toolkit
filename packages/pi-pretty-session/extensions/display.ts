@@ -228,7 +228,7 @@ export function formatSessionDashboard(params: {
 	const lines = [
 		`Pretty Session · ${title}`,
 		`  Description: ${desc}`,
-		`  Source: ${formatSourceBadge(meta)} · Auto-rename: ${config.enabled ? "on" : "off"} (every ${config.updateEveryTurns} turns or +${formatTokens(config.contextDeltaTokens)} tokens)`,
+		`  Source: ${formatSourceBadge(meta)} · Auto-rename: ${config.enabled ? "on" : "off"} (title: ${config.titleUpdateMode}, every ${config.updateEveryTurns} turns or +${formatTokens(config.contextDeltaTokens)} tokens)`,
 		`  Start time: ${formatTimestamp(metrics.createdAt, now)}`,
 		`  Last updated: ${formatTimestamp(metrics.updatedAt, now)}`,
 		`  Context length: ${formatContextLength(metrics)} · Turns: ${metrics.turnCount} · Messages: ${metrics.messageCount}`,
@@ -236,7 +236,7 @@ export function formatSessionDashboard(params: {
 		...formatProjectReport(project),
 		"",
 		`Configuration: ${configPath}`,
-		`  useLlm=${config.useLlm}${config.model ? ` (model=${config.model})` : ""} · protectManualName=${config.protectManualName} · showWidget=${config.showWidget} (${config.widgetPlacement}) · showStatus=${config.showStatus}`,
+		`  useLlm=${config.useLlm}${config.model ? ` (model=${config.model})` : ""} · language=${config.language} · titleUpdateMode=${config.titleUpdateMode} · protectManualName=${config.protectManualName} · showWidget=${config.showWidget} (${config.widgetPlacement}) · showStatus=${config.showStatus}`,
 	];
 
 	if (configError) {
@@ -297,7 +297,7 @@ export function formatConfigReport(
 		`Pretty Session Configuration (${configPath})`,
 		`  Active: ${JSON.stringify(config)}`,
 		`  Defaults: ${JSON.stringify(defaultConfig)}`,
-		"  Update: /ps config <key> <value> | /ps config reload | /ps toggle <auto|llm|widget|status|lock|compact>",
+		"  Update: /ps config <key> <value> | /ps config reload | /ps toggle <auto|llm|widget|status|lock|compact|title>",
 	];
 	if (error) {
 		lines.push(`  Warning: ${error}`);

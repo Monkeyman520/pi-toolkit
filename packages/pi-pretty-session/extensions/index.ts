@@ -276,7 +276,12 @@ export default function (pi: ExtensionAPI) {
 					);
 					return;
 				}
-				const saved = session.rename(ctx, title, cmd.description, revision);
+				const saved = await session.rename(
+					ctx,
+					title,
+					cmd.description,
+					revision,
+				);
 				if (!saved) return;
 				ctx.ui.notify(
 					`Session renamed (manual lock active): ${saved.title}\n${saved.description}`,

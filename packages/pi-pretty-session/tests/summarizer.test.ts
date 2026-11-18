@@ -6,13 +6,19 @@ import type {
 import { describe, expect, it } from "vitest";
 import { defaultConfig } from "../extensions/config.ts";
 import {
+	applyDuplicateTitleSuffix,
+	buildConversationExcerpt,
 	buildHeuristicSummary,
+	buildSummarySystemPrompt,
 	CUSTOM_ENTRY_TYPE,
 	computeSessionMetrics,
+	detectConversationLanguage,
 	evaluateSummaryTrigger,
+	extractUserPromptClue,
 	generateSessionSummary,
 	parseLlmSummaryResponse,
 	reconstructMetadata,
+	stripTitleTimestampSuffix,
 } from "../extensions/summarizer.ts";
 
 function makeMessageEntry(
@@ -170,27 +176,75 @@ describe("summarizer & session metrics", () => {
 		});
 		expect(noTrigger.shouldSummarize).toBe(false);
 
-		const byTurnInterval = evaluateSummaryTrigger({
+		const byTurnIntervalOnce = evaluateSummaryTrigger({
 			config: defaultConfig,
 			metrics: { ...metrics, turnCount: 4, contextTokens: 3000 },
 			current: existing,
 			reason: "turn",
 		});
-		expect(byTurnInterval).toEqual({
+		expect(byTurnIntervalOnce).toEqual({
+			shouldSummarize: true,
+			trigger: "turn_interval",
+			updateTitle: false,
+		});
+
+		const byTurnIntervalDynamic = evaluateSummaryTrigger({
+			config: { ...defaultConfig, titleUpdateMode: "dynamic" },
+			metrics: { ...metrics, turnCount: 4, contextTokens: 3000 },
+			current: existing,
+			reason: "turn",
+		});
+		expect(byTurnIntervalDynamic).toEqual({
 			shouldSummarize: true,
 			trigger: "turn_interval",
 			updateTitle: true,
 		});
 
-		const byContextDelta = evaluateSummaryTrigger({
+		const byContextDeltaOnce = evaluateSummaryTrigger({
 			config: defaultConfig,
 			metrics: { ...metrics, turnCount: 2, contextTokens: 11000 },
 			current: existing,
 			reason: "turn",
 		});
-		expect(byContextDelta).toEqual({
+		expect(byContextDeltaOnce).toEqual({
 			shouldSummarize: true,
 			trigger: "context_delta",
+			updateTitle: false,
+		});
+
+		const byContextDeltaDynamic = evaluateSummaryTrigger({
+			config: { ...defaultConfig, titleUpdateMode: "dynamic" },
+			metrics: { ...metrics, turnCount: 2, contextTokens: 11000 },
+			current: existing,
+			reason: "turn",
+		});
+		expect(byContextDeltaDynamic).toEqual({
+			shouldSummarize: true,
+			trigger: "context_delta",
+			updateTitle: true,
+		});
+
+		const byCompactOnce = evaluateSummaryTrigger({
+			config: defaultConfig,
+			metrics: { ...metrics, turnCount: 2, contextTokens: 3000 },
+			current: existing,
+			reason: "compact",
+		});
+		expect(byCompactOnce).toEqual({
+			shouldSummarize: true,
+			trigger: "compact",
+			updateTitle: false,
+		});
+
+		const byManual = evaluateSummaryTrigger({
+			config: defaultConfig,
+			metrics: { ...metrics, turnCount: 2, contextTokens: 3000 },
+			current: existing,
+			reason: "manual",
+		});
+		expect(byManual).toEqual({
+			shouldSummarize: true,
+			trigger: "manual",
 			updateTitle: true,
 		});
 
@@ -352,5 +406,168 @@ describe("summarizer & session metrics", () => {
 		});
 		expect(fallbackResult.source).toBe("heuristic");
 		expect(fallbackResult.title).toContain("Implement pretty-session plugin");
+	});
+
+	it("deduplicates colliding titles with pre-reserved local timestamp suffix without double-appending", () => {
+		const createdAt = new Date(2026, 10, 18, 14, 40, 40).toISOString();
+		const unique = applyDuplicateTitleSuffix({
+			candidateTitle: "Refactor Auth Middleware.",
+			existingTitles: ["Other Session"],
+			createdAt,
+			maxTitleLength: 40,
+		});
+		expect(unique).toBe("Refactor Auth Middleware");
+
+		const colliding = applyDuplicateTitleSuffix({
+			candidateTitle: "Refactor Auth Middleware",
+			existingTitles: ["Refactor Auth Middleware"],
+			createdAt,
+			maxTitleLength: 40,
+		});
+		expect(colliding).toBe("Refactor Auth… [2026-11-18 14:40:40]");
+		expect(colliding.length).toBeLessThanOrEqual(40);
+		expect(colliding.endsWith("[2026-11-18 14:40:40]")).toBe(true);
+
+		// Existing timestamp suffix is stripped before deduplication so suffixes never double up
+		const alreadySuffixed = applyDuplicateTitleSuffix({
+			candidateTitle: "Refactor Auth Middleware [2026-11-18 09:00:00]",
+			existingTitles: ["Refactor Auth Middleware"],
+			createdAt,
+			maxTitleLength: 40,
+		});
+		expect(alreadySuffixed).toBe("Refactor Auth… [2026-11-18 14:40:40]");
+		expect(stripTitleTimestampSuffix(alreadySuffixed)).toBe("Refactor Auth…");
+	});
+
+	it("strips expanded <skill> blocks and command prefixes while preserving real prompts and skill-only clues", () => {
+		const mixedPrompt = [
+			'<skill name="grimoire-refine" location="/skills/grimoire-refine/SKILL.md">',
+			"# Coordination",
+			"Lots of detailed English SKILL.md instructions that must never leak into summary.",
+			"</skill>",
+			"",
+			"$grimoire-refine 优化会话标题与摘要",
+		].join("\n");
+		const extracted = extractUserPromptClue(mixedPrompt);
+		expect(extracted).toEqual({
+			text: "优化会话标题与摘要",
+			skillNames: ["grimoire-refine"],
+		});
+
+		const slashSkill = extractUserPromptClue("/skill:pdf extract report.pdf");
+		expect(slashSkill).toEqual({
+			text: "extract report.pdf",
+			skillNames: ["pdf"],
+		});
+
+		const pathPreserved = extractUserPromptClue(
+			"/workspace/pi-packages/index.ts fix $100 budget",
+		);
+		expect(pathPreserved.text).toBe(
+			"/workspace/pi-packages/index.ts fix $100 budget",
+		);
+
+		const skillOnlyEntries: SessionEntry[] = [
+			makeMessageEntry(
+				"u1",
+				null,
+				"user",
+				'<skill name="pdf" location="/skills/pdf/SKILL.md">\n# PDF Tools\nFull instructions...\n</skill>',
+				Date.parse("2026-04-20T08:01:00.000Z"),
+			),
+			makeMessageEntry(
+				"a1",
+				"u1",
+				"assistant",
+				"Ready.",
+				Date.parse("2026-04-20T08:02:00.000Z"),
+			),
+		];
+		const skillOnlyHeuristic = buildHeuristicSummary(skillOnlyEntries);
+		expect(skillOnlyHeuristic.title).toBe("Skill: pdf");
+		expect(skillOnlyHeuristic.description).not.toContain("Full instructions");
+
+		const mixedEntries: SessionEntry[] = [
+			makeMessageEntry(
+				"u1",
+				null,
+				"user",
+				mixedPrompt,
+				Date.parse("2026-04-20T08:01:00.000Z"),
+			),
+			makeMessageEntry(
+				"a1",
+				"u1",
+				"assistant",
+				"已完成标题优化。",
+				Date.parse("2026-04-20T08:02:00.000Z"),
+			),
+		];
+		const excerpt = buildConversationExcerpt(mixedEntries);
+		expect(excerpt).toContain("优化会话标题与摘要");
+		expect(excerpt).not.toContain("Lots of detailed English SKILL.md");
+		expect(detectConversationLanguage(mixedEntries)).toBe("zh-CN");
+	});
+
+	it("respects configured language in both LLM prompt and localized heuristic fallback", async () => {
+		const zhPrompt = buildSummarySystemPrompt({
+			...defaultConfig,
+			language: "zh-CN",
+		});
+		expect(zhPrompt).toContain("strictly in zh-CN");
+		expect(zhPrompt).toContain("本会话旨在");
+
+		const fakeModel = {
+			id: "claude-sonnet-4-5",
+			name: "Claude Sonnet",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+		} as unknown as Model<Api>;
+
+		let capturedSystemPrompt = "";
+		await generateSessionSummary({
+			entries,
+			config: { ...defaultConfig, language: "zh-CN" },
+			model: fakeModel,
+			modelRegistry: {
+				find: () => fakeModel,
+				getAvailable: () => [fakeModel],
+				complete: async (_model, input) => {
+					capturedSystemPrompt = input.systemPrompt ?? "";
+					return {
+						role: "assistant",
+						content: [
+							{
+								type: "text",
+								text: '{"title": "会话摘要插件优化。", "description": "完成配置与多语言生成逻辑。"}',
+							},
+						],
+						stopReason: "stop",
+					} as unknown as AssistantMessage;
+				},
+			},
+		});
+		expect(capturedSystemPrompt).toContain("strictly in zh-CN");
+
+		const zhHeuristic = buildHeuristicSummary(
+			entries,
+			undefined,
+			40,
+			100,
+			"zh-CN",
+		);
+		expect(zhHeuristic.description).toContain("文件:");
+
+		const emptyZh = buildHeuristicSummary([], undefined, 40, 100, "zh-CN");
+		expect(emptyZh.title).toBe("新建 Pi 会话");
+
+		const emptyJa = buildHeuristicSummary([], undefined, 40, 100, "ja");
+		expect(emptyJa.title).toBe("新規 Pi セッション");
 	});
 });

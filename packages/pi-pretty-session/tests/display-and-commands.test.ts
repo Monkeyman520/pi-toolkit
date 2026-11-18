@@ -131,6 +131,7 @@ describe("commands, display formatting, and extension lifecycle", () => {
 			"toggle status",
 			"toggle lock",
 			"toggle compact",
+			"toggle title",
 		]);
 
 		const cfgKeys = getPrettySessionCompletions("config ") ?? [];
@@ -696,6 +697,307 @@ describe("commands, display formatting, and extension lifecycle", () => {
 				{ type: "session_shutdown", reason: "quit" },
 				ctx as ExtensionContext,
 			);
+		}
+	});
+
+	it("preserves initial title and source in titleUpdateMode=once, deduplicates against existing sessions, and updates description only", async () => {
+		type EventFn = (
+			event: Record<string, unknown>,
+			ctx: ExtensionContext,
+		) => Promise<void> | void;
+		const handlers = new Map<string, EventFn[]>();
+		const commands = new Map<
+			string,
+			(args: string, ctx: ExtensionCommandContext) => Promise<void>
+		>();
+		const entries: SessionEntry[] = [];
+		let sessionName: string | undefined;
+		let setSessionNameCalls = 0;
+
+		const createdIso = new Date(2026, 10, 18, 14, 40, 40).toISOString();
+		const header: SessionHeader = {
+			type: "session",
+			version: 3,
+			id: "sess-new",
+			timestamp: createdIso,
+			cwd: tempAgentDir,
+		};
+
+		// Write an existing historical session with colliding title in the same sessionDir
+		const existingSessionFile = join(
+			tempAgentDir,
+			"2026-11-18T10-00-00-000Z_old.jsonl",
+		);
+		await writeFile(
+			existingSessionFile,
+			`${[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "sess-old",
+					timestamp: "2026-11-18T10:00:00.000Z",
+					cwd: tempAgentDir,
+				}),
+				JSON.stringify({
+					type: "session_info",
+					id: "si1",
+					parentId: null,
+					timestamp: "2026-11-18T10:01:00.000Z",
+					name: "Auth Refactor",
+				}),
+			].join("\n")}\n`,
+			"utf8",
+		);
+
+		await writeFile(
+			join(tempAgentDir, CONFIG_FILE_NAME),
+			JSON.stringify({
+				titleUpdateMode: "once",
+				updateEveryTurns: 1,
+				maxTitleLength: 40,
+			}),
+			"utf8",
+		);
+
+		let ctx: ExtensionCommandContext;
+		const pi = {
+			events: createEventBus(),
+			on(event: string, handler: EventFn) {
+				const list = handlers.get(event) ?? [];
+				list.push(handler);
+				handlers.set(event, list);
+				return () => {};
+			},
+			registerCommand(
+				name: string,
+				options: {
+					handler: (
+						args: string,
+						ctx: ExtensionCommandContext,
+					) => Promise<void>;
+				},
+			) {
+				commands.set(name, options.handler);
+			},
+			setSessionName(name: string) {
+				setSessionNameCalls++;
+				sessionName = name;
+				for (const h of handlers.get("session_info_changed") ?? []) {
+					h({ type: "session_info_changed", name: sessionName }, ctx);
+				}
+			},
+			getSessionName() {
+				return sessionName;
+			},
+			appendEntry(customType: string, data: unknown) {
+				entries.push({
+					type: "custom",
+					id: `custom_${entries.length + 1}`,
+					parentId: entries.at(-1)?.id ?? null,
+					timestamp: new Date().toISOString(),
+					customType,
+					data,
+				});
+			},
+			exec: async () => ({ code: 1, stdout: "", stderr: "" }),
+		} as unknown as ExtensionAPI;
+
+		const fakeModel = {
+			id: "mock-model",
+			provider: "mock",
+			api: "openai-completions",
+			contextWindow: 100000,
+		};
+
+		let turnCounter = 0;
+		ctx = {
+			hasUI: true,
+			mode: "rpc",
+			cwd: tempAgentDir,
+			model: fakeModel,
+			modelRegistry: {
+				find: () => fakeModel,
+				getAvailable: () => [fakeModel],
+				complete: async () => {
+					turnCounter++;
+					return {
+						role: "assistant",
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									title:
+										turnCounter === 1
+											? "Auth Refactor"
+											: "Completely Different Title",
+									description: `Summary #${turnCounter}`,
+								}),
+							},
+						],
+						stopReason: "stop",
+					} as unknown as AssistantMessage;
+				},
+			},
+			getContextUsage: () => ({
+				tokens: 1500 * Math.max(1, turnCounter),
+				contextWindow: 100000,
+				percent: 1.5,
+			}),
+			sessionManager: {
+				getCwd: () => tempAgentDir,
+				getSessionDir: () => tempAgentDir,
+				getSessionId: () => "sess-new",
+				getSessionFile: () => join(tempAgentDir, "sess-new.jsonl"),
+				getSessionName: () => sessionName,
+				getHeader: () => header,
+				getEntries: () => [...entries],
+				getBranch: () => [...entries],
+			},
+			ui: {
+				notify: () => {},
+				setStatus: () => {},
+				setWidget: () => {},
+			},
+		} as unknown as ExtensionCommandContext;
+
+		registerPrettySession(pi);
+		for (const h of handlers.get("session_start") ?? []) {
+			await h({ type: "session_start", reason: "startup" }, ctx);
+		}
+
+		// Turn 1: initial title collides with existing session -> gets timestamp suffix
+		entries.push(
+			{
+				type: "message",
+				id: "u1",
+				parentId: null,
+				timestamp: createdIso,
+				message: {
+					role: "user",
+					content: "Refactor auth",
+					timestamp: Date.now(),
+				},
+			},
+			{
+				type: "message",
+				id: "a1",
+				parentId: "u1",
+				timestamp: createdIso,
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "Done." }],
+					api: "openai-completions",
+					provider: "mock",
+					model: "mock-model",
+					usage: {
+						input: 1000,
+						output: 200,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 1200,
+						cost: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							total: 0,
+						},
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				} as AssistantMessage,
+			},
+		);
+
+		for (const h of handlers.get("agent_settled") ?? []) {
+			await h({ type: "agent_settled", aborted: false }, ctx);
+		}
+
+		expect(sessionName).toBe("Auth Refactor [2026-11-18 14:40:40]");
+		expect(setSessionNameCalls).toBe(1);
+		const metaAfterTurn1 = entries.at(-1);
+		expect(metaAfterTurn1?.type).toBe("custom");
+		if (metaAfterTurn1?.type === "custom") {
+			const data = metaAfterTurn1.data as {
+				title: string;
+				description: string;
+				source: string;
+				manualLocked: boolean;
+			};
+			expect(data.title).toBe("Auth Refactor [2026-11-18 14:40:40]");
+			expect(data.description).toBe("Summary #1");
+			expect(data.source).toBe("llm");
+			expect(data.manualLocked).toBe(false);
+		}
+
+		// Turn 2: titleUpdateMode=once retains initial title, source="llm", manualLocked=false, and updates description only
+		entries.push(
+			{
+				type: "message",
+				id: "u2",
+				parentId: "a1",
+				timestamp: createdIso,
+				message: { role: "user", content: "Add tests", timestamp: Date.now() },
+			},
+			{
+				type: "message",
+				id: "a2",
+				parentId: "u2",
+				timestamp: createdIso,
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "Added." }],
+					api: "openai-completions",
+					provider: "mock",
+					model: "mock-model",
+					usage: {
+						input: 2000,
+						output: 300,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 2300,
+						cost: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							total: 0,
+						},
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				} as AssistantMessage,
+			},
+		);
+
+		for (const h of handlers.get("agent_settled") ?? []) {
+			await h({ type: "agent_settled", aborted: false }, ctx);
+		}
+
+		expect(sessionName).toBe("Auth Refactor [2026-11-18 14:40:40]");
+		expect(setSessionNameCalls).toBe(1);
+		const metaAfterTurn2 = entries.at(-1);
+		if (metaAfterTurn2?.type === "custom") {
+			const data = metaAfterTurn2.data as {
+				title: string;
+				description: string;
+				source: string;
+				manualLocked: boolean;
+			};
+			expect(data.title).toBe("Auth Refactor [2026-11-18 14:40:40]");
+			expect(data.description).toBe("Summary #2");
+			expect(data.source).toBe("llm");
+			expect(data.manualLocked).toBe(false);
+		}
+
+		// Manual /ps summarize still forces refreshing both title and description
+		const psHandler = commands.get("ps");
+		await psHandler?.("summarize", ctx);
+		expect(sessionName).toBe("Completely Different Title");
+		expect(setSessionNameCalls).toBe(2);
+
+		for (const h of handlers.get("session_shutdown") ?? []) {
+			await h({ type: "session_shutdown", reason: "quit" }, ctx);
 		}
 	});
 });

@@ -24,11 +24,12 @@ Runtime imports are Node built-ins and Pi-provided host modules (`@earendil-work
 ### User-facing behavior
 
 1. **Automatic session naming & summarization:**
-   - After the first completed conversation turn, `pi-pretty-session` summarizes the active branch into a concise `title` and a one-sentence `description`.
-   - When `useLlm` is enabled (default) and a session or configured model is callable, it issues an isolated, tool-free `ctx.modelRegistry.complete()` request that does not mutate the foreground conversation transcript. When no model/credentials are available or the request fails, it falls back automatically to deterministic local heuristic extraction from user prompts and touched file paths.
+   - After the first completed conversation turn, `pi-pretty-session` summarizes the active branch into a concise `title` and a single-sentence `description` (default budgets: `maxTitleLength: 40`, `maxDescriptionLength: 100`), stripping Pi-expanded `<skill>...</skill>` blocks and leading `/skill:...` / `/...` / `$...` command prefixes so `SKILL.md` instructions never pollute summaries.
+   - When `useLlm` is enabled (default) and a session or configured model is callable, it issues an isolated, tool-free `ctx.modelRegistry.complete()` request using the configured `language` (`"auto"` by default, or explicit tags like `"zh-CN"`, `"en"`, `"ja"`) without mutating the foreground conversation transcript. When no model/credentials are available or the request fails, it falls back automatically to deterministic, language-aware local heuristic extraction from user prompts and touched file paths.
+   - Duplicate titles in the same project/session directory are automatically disambiguated by reserving 22 characters before truncating the base title and appending a local `[YYYY-MM-DD HH:mm:ss]` creation-time suffix.
    - The generated `title` is written via `pi.setSessionName(title)` (so Pi's built-in `/resume` picker, footer, and terminal title show it immediately), while the full structured metadata (`title`, `description`, summary source, start/update timestamps, context token usage, and project summary) is persisted as a `pretty-session` custom entry via `pi.appendEntry()` without adding tokens to LLM context.
-2. **Dynamic summary updates & manual-rename lock:**
-   - Re-summarizes automatically when configured triggers fire: every `updateEveryTurns` completed turns, when context usage grows by `contextDeltaTokens`, or after `/compact` (`summarizeOnCompact`).
+2. **Title update policy, dynamic summary updates & manual-rename lock:**
+   - By default (`titleUpdateMode: "once"`), `title` is set on the initial summary turn and preserved (retaining `manualLocked: false` and its original `llm`/`heuristic` source) while subsequent triggers—every `updateEveryTurns` completed turns, context growth by `contextDeltaTokens`, or after `/compact` (`summarizeOnCompact`)—continue updating `description` and session metrics without re-appending duplicate suffixes. Switch `titleUpdateMode` to `"dynamic"` (via config or `/ps toggle title`) to refresh titles on subsequent triggers as well, or run `/ps summarize` to force-refresh both `title` and `description`.
    - Manual renames (via `/name`, `/resume` rename, or `/ps rename`) automatically lock the custom title against dynamic overwrite while `protectManualName` is enabled (default). Run `/ps unlock` or `/ps summarize` to resume or force title generation.
 3. **Live session metrics & project context:**
    - Displays a configurable TUI widget (`aboveEditor` or `belowEditor`) and footer status bar entry showing the session `title`, `description`, **start time**, **last update time**, **context length** (`tokens / contextWindow (%)`), turn/message counts, and **project info** (project name and shortened path, Git branch, dirty file count, latest commit summary, detected manifest `package.json`/`pyproject.toml`/`Cargo.toml`/`go.mod` name/version/scripts, and saved session count for the project).
@@ -44,8 +45,8 @@ Pi dispatches built-in interactive commands (`/resume`, `/session`, `/name`) bef
 - `/ps rename <title> [| <description>]`: Set a custom session title (and optional description) and lock it against automatic overwrite.
 - `/ps unlock`: Clear the manual title lock so automatic dynamic updates can update the title again.
 - `/ps list [current|all]`: List saved sessions for the current project (or `all` projects) with their descriptions, timestamps, and context metrics.
-- `/ps config [reload | <key> [<value>]]`: Open the interactive `SettingsList` TUI configuration panel (when invoked with no `<key>` in TUI mode), force a reload from disk (`reload`), or dynamically view/update and persist a setting (for example `/ps config updateEveryTurns 5`, `/ps config widgetPlacement belowEditor`, `/ps config model openai/gpt-4o-mini`, or `/ps config model default`).
-- `/ps toggle <auto|llm|widget|status|lock|compact>`: Toggle boolean settings at runtime without restarting Pi.
+- `/ps config [reload | <key> [<value>]]`: Open the interactive `SettingsList` TUI configuration panel (when invoked with no `<key>` in TUI mode), force a reload from disk (`reload`), or dynamically view/update and persist a setting (for example `/ps config titleUpdateMode dynamic`, `/ps config language zh-CN`, `/ps config updateEveryTurns 5`, `/ps config widgetPlacement belowEditor`, `/ps config model openai/gpt-4o-mini`, or `/ps config model default`).
+- `/ps toggle <auto|llm|widget|status|lock|compact|title>`: Toggle boolean settings (or switch `titleUpdateMode` between `once` and `dynamic` via `title`) at runtime without restarting Pi.
 - `/ps help`: Display command usage.
 
 ## Configuration
@@ -58,6 +59,8 @@ All fields are optional. Defaults:
 {
 	"enabled": true,
 	"useLlm": true,
+	"titleUpdateMode": "once",
+	"language": "auto",
 	"updateEveryTurns": 3,
 	"contextDeltaTokens": 8000,
 	"summarizeOnCompact": true,
@@ -65,8 +68,8 @@ All fields are optional. Defaults:
 	"showWidget": true,
 	"widgetPlacement": "aboveEditor",
 	"showStatus": true,
-	"maxTitleLength": 60,
-	"maxDescriptionLength": 160,
+	"maxTitleLength": 40,
+	"maxDescriptionLength": 100,
 	"summaryTimeoutMs": 15000
 }
 ```

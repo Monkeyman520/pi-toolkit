@@ -91,6 +91,12 @@ export async function openPrettySessionSettingsPanel(params: {
 					...availableModels.map((m) => `${m.provider}/${m.id}`),
 				];
 				const uniqueModels = [...new Set(modelChoices)];
+				const uniqueLanguages = [
+					...new Set([
+						...configOptions.language.values,
+						...(c.language ? [c.language] : []),
+					]),
+				];
 
 				const list: SettingItem[] = [
 					{
@@ -116,6 +122,22 @@ export async function openPrettySessionSettingsPanel(params: {
 							"Model used for LLM summarization ('default' uses the active session model)",
 						currentValue: c.model ?? "default",
 						values: uniqueModels,
+					},
+					{
+						id: "titleUpdateMode",
+						label: "Title Update Mode (title)",
+						description:
+							"once: set title on first turn only; dynamic: refresh title on subsequent triggers",
+						currentValue: c.titleUpdateMode,
+						values: [...configOptions.titleUpdateMode.values],
+					},
+					{
+						id: "language",
+						label: "Summary Language",
+						description:
+							"Target language for generated titles and descriptions ('auto' follows conversation language)",
+						currentValue: c.language,
+						values: uniqueLanguages,
 					},
 					{
 						id: "protectManualName",
@@ -326,6 +348,8 @@ export async function openPrettySessionSettingsPanel(params: {
 				settingsList.updateValue("enabled", String(c.enabled));
 				settingsList.updateValue("useLlm", String(c.useLlm));
 				settingsList.updateValue("model", c.model ?? "default");
+				settingsList.updateValue("titleUpdateMode", c.titleUpdateMode);
+				settingsList.updateValue("language", c.language);
 				settingsList.updateValue(
 					"protectManualName",
 					String(c.protectManualName),

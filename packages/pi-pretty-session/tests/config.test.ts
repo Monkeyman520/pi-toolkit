@@ -111,4 +111,39 @@ describe("ConfigManager", () => {
 		const outOfRange = await mgr.setOption("updateEveryTurns", "0", false);
 		expect(outOfRange.ok).toBe(false);
 	});
+
+	it("supports titleUpdateMode, language, tightened bounds, and toggle title", async () => {
+		const mgr = new ConfigManager(configPath);
+		expect(defaultConfig.titleUpdateMode).toBe("once");
+		expect(defaultConfig.language).toBe("auto");
+		expect(defaultConfig.maxTitleLength).toBe(40);
+		expect(defaultConfig.maxDescriptionLength).toBe(100);
+
+		const t1 = await mgr.toggleOption("title", true);
+		expect(t1.ok).toBe(true);
+		expect(mgr.config.titleUpdateMode).toBe("dynamic");
+
+		const t2 = await mgr.toggleOption("titleMode", true);
+		expect(t2.ok).toBe(true);
+		expect(mgr.config.titleUpdateMode).toBe("once");
+
+		const lang1 = await mgr.setOption("language", "zh-CN", true);
+		expect(lang1.ok).toBe(true);
+		expect(mgr.config.language).toBe("zh-CN");
+
+		const langAuto = await mgr.setOption("language", "AUTO", true);
+		expect(langAuto.ok).toBe(true);
+		expect(mgr.config.language).toBe("auto");
+
+		const badLang = await mgr.setOption("language", "english please", false);
+		expect(badLang.ok).toBe(false);
+
+		const minTitleOk = await mgr.setOption("maxTitleLength", "24", false);
+		expect(minTitleOk.ok).toBe(true);
+		const minTitleTooSmall = await mgr.setOption("maxTitleLength", "23", false);
+		expect(minTitleTooSmall.ok).toBe(false);
+
+		const badMode = await mgr.setOption("titleUpdateMode", "never", false);
+		expect(badMode.ok).toBe(false);
+	});
 });
