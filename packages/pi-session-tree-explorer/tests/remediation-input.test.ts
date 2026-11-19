@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import {
 	createActionRegistry,
 	getDefaultKeybindings,
@@ -14,7 +14,7 @@ function fixture() {
 		selectedEntryId: "u",
 		sessionLeafId: "u",
 	});
-	const done = vi.fn();
+	const done = mock();
 	const component = new SessionTreeComponent({
 		state,
 		index: buildTreeIndex([
@@ -122,7 +122,7 @@ describe("remediation: authoritative input", () => {
 	it("routes the settings shortcut through mode-qualified configurable Actions", async () => {
 		const config = getDefaultConfig();
 		config.keybindings["view.settings"] = ["ctrl+s"];
-		const open = vi.fn(async () => config),
+		const open = mock(async () => config),
 			component = new SessionTreeComponent({
 				state: createInitialState("settings", { selectedEntryId: "u" }),
 				index: buildTreeIndex([

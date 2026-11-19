@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import os from "node:os";
 import { performance } from "node:perf_hooks";
-import { describe, expect, it } from "vitest";
 import { ContextMetricsCache } from "../extensions/context-metrics.ts";
 import {
 	buildDisplayProjection,

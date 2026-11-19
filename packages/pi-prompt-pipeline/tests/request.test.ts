@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "bun:test";
 import { extractAntigravity } from "../extensions/request.ts";
 
 it("extracts only consumer system text and writes back without touching non-text parts", () => {

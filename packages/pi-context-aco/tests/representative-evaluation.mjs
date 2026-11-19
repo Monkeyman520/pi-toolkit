@@ -43,7 +43,9 @@ assert.ok(
 const root = resolve(location),
 	manifestPath = join(root, "manifest.json");
 const npm =
-	process.env.npm_execpath ??
+	(process.env.npm_execpath?.endsWith(".js")
+		? process.env.npm_execpath
+		: undefined) ??
 	join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 const providerPath =
 	"C:/Users/Administrator/.pi/agent/npm/node_modules/pi-antigravity/src/index.ts";

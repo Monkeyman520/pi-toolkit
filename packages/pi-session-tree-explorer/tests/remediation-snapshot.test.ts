@@ -1,5 +1,5 @@
+import { describe, expect, it, mock } from "bun:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
 import { createActionRegistry } from "../extensions/actions.ts";
 import { captureSessionSnapshot } from "../extensions/session-snapshot.ts";
 import { createInitialState } from "../extensions/state.ts";
@@ -36,7 +36,7 @@ describe("remediation: owned host data", () => {
 		const raw = { id: "u", parentId: null, type: "message", timestamp: "T0" };
 		const index = buildTreeIndex([raw]),
 			state = createInitialState("host", { selectedEntryId: "u" });
-		const notify = vi.fn();
+		const notify = mock();
 		await expect(
 			createActionRegistry()
 				.get("session.setLabel")

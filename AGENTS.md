@@ -10,10 +10,11 @@ Use English for repository documentation and written project guidance. Preserve 
 
 - Before adding or changing a package, read [packages/README.md](packages/README.md) for layout, manifests, development setup, resource discovery, and verification.
 - Before changing package boundaries or stack constraints, read [CONTEXT.md](.grimoire/CONTEXT.md), the relevant [ADRs](.grimoire/adr/), and the task's specification. Check the applicable official Pi documentation linked from the package reference.
-- Use TypeScript ESM with erasable syntax, Node.js >= 22.19.0, Biome, Vitest, TypeBox (`typebox`), and `tsc --noEmit`; no bundler or emitted build is required.
+- Use the pinned Bun workspace and `bun.lock`, Node.js >= 22.19.0, TypeScript ESM with erasable syntax, `tsc --noEmit`, Biome, `bun test`, and TypeBox. Build plugin bundles with Rolldown.
 - Keep used host SDK packages and `typebox` as host-provided peers with `"*"` ranges; declare other runtime dependencies and avoid undeclared sibling imports.
 - Keep package READMEs specific to actual resources, compatibility, permissions, and verified commands. Reflect the actual package catalog and available tooling; distinguish reference examples from runnable commands.
-- Verify each real package with its own type check, Biome check, Vitest tests, and Pi loading/usage evidence. Documentation/configuration inspection is not a runtime test.
+- Run the root `check`, `typecheck`, `build`, and `test` scripts with Bun and verify actual Pi loading/usage when relevant. Documentation and configuration inspection are not runtime tests.
+- Follow the [release guide](docs/releasing.md). Local verification does not authorize publication, tag pushes, or changes to npm trust.
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

@@ -1,29 +1,45 @@
 {
-	"name": "pi-prompt-pipeline",
+	"name": "@monkeyman520/pi-prompt-pipeline",
 	"version": "0.1.0",
-	"private": true,
+	"license": "MIT",
 	"type": "module",
-	"packageManager": "npm@11.20.0",
 	"description": "Conditional system prompt transformations and one-shot boundary exports for Pi",
+	"keywords": [
+		"pi-package"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Monkeyman520/pi-toolkit.git",
+		"directory": "packages/pi-prompt-pipeline"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"engines": {
 		"node": ">=22.19.0"
 	},
 	"files": [
-		"extensions",
+		"dist",
 		"README.md",
 		"examples"
 	],
 	"scripts": {
+		"build": "rolldown -c",
+		"build:watch": "rolldown -c --watch",
+		"prepack": "bun run build",
+		"dev": "pi -e ./extensions/index.ts",
+		"start": "pi -e ./dist/index.js",
 		"typecheck": "tsc --noEmit",
 		"check": "biome check .",
 		"format": "biome check --write .",
-		"test": "vitest run",
+		"test": "bun test --isolate",
 		"smoke": "node tests/pi-smoke.mjs"
 	},
 	"pi": {
 		"extensions": [
-			"./extensions/index.ts"
-		]
+			"./dist/index.js"
+		],
+		"changelogPath": "./dist/CHANGELOG.md"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "*",
@@ -31,13 +47,9 @@
 		"typebox": "*"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.6.4",
 		"@earendil-works/pi-ai": "1.5.2",
 		"@earendil-works/pi-coding-agent": "1.5.2",
 		"@earendil-works/pi-tui": "1.5.2",
-		"@types/node": "22.19.19",
-		"typebox": "1.3.27",
-		"typescript": "5.9.3",
-		"vitest": "4.1.12"
+		"typebox": "1.3.27"
 	}
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createActionRegistry } from "../extensions/actions.ts";
 import { buildDisplayProjection } from "../extensions/display.ts";
 import { createInitialState } from "../extensions/state.ts";

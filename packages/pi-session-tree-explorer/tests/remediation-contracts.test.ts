@@ -1,6 +1,6 @@
+import { describe, expect, it, mock } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
-import { describe, expect, it, vi } from "vitest";
 import {
 	getDefaultConfig,
 	SessionTreeConfigSchema,
@@ -37,7 +37,7 @@ describe("approved U4 contracts", () => {
 		state.displayOptions.showAssistantNodes = true;
 		state.foldOptions.collapseLinearPaths = true;
 		const index = buildTreeIndex(entries),
-			done = vi.fn();
+			done = mock();
 		const component = new SessionTreeComponent({
 			state,
 			index,
@@ -76,11 +76,11 @@ describe("approved U4 contracts", () => {
 			let idle = false,
 				session = "old";
 			const order: string[] = [];
-			const navigateTree = vi.fn(async () => {
+			const navigateTree = mock(async () => {
 				order.push("navigate");
 				return { cancelled: false };
 			});
-			const waitForIdle = vi.fn(async () => {
+			const waitForIdle = mock(async () => {
 				order.push("wait");
 				if (outcome === "failed") throw new Error("wait failed");
 				if (outcome === "replaced") session = "new";
@@ -153,7 +153,7 @@ describe("approved U4 contracts", () => {
 		const nodes = component.getVisibleNodes(),
 			summary = nodes.find((n) => n.anchorEntryId === "b");
 		expect(summary).toBeDefined();
-		expect(resolveDisplayTarget("y", index, nodes)).toBe(summary?.id);
+		expect<unknown>(resolveDisplayTarget("y", index, nodes)).toBe(summary?.id);
 		component.dispose();
 	});
 	it("updates compression structure after movement without losing a merged virtual target", () => {

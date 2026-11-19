@@ -1,27 +1,39 @@
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	jest,
+	mock,
+	spyOn,
+} from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as piHost from "@earendil-works/pi-coding-agent";
 import {
 	createEventBus,
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import extension from "../extensions/index.ts";
+import * as summarizer from "../extensions/summarizer.ts";
 import {
 	DISCOVER_EVENT,
 	discoverLoadedPanels,
 	isDiscoverPayload,
 	SELF_PLUGIN_ID,
 } from "../extensions/ui.ts";
+import { waitFor } from "./wait-for.ts";
 
-const scope = vi.hoisted(() => ({ dir: "" }));
-vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
-	...(await importOriginal<typeof import("@earendil-works/pi-coding-agent")>()),
+const scope = { dir: "" };
+mock.module("@earendil-works/pi-coding-agent", () => ({
+	...piHost,
 	getAgentDir: () => scope.dir,
 }));
 
-vi.mock("../extensions/project.ts", () => ({
+mock.module("../extensions/project.ts", () => ({
 	inspectProject: async (cwd: string) => ({
 		name: "fixture",
 		cwd,
@@ -31,9 +43,9 @@ vi.mock("../extensions/project.ts", () => ({
 		inspectedAt: Date.now(),
 	}),
 }));
-const summary = vi.hoisted(() => ({ generate: vi.fn() }));
-vi.mock("../extensions/summarizer.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../extensions/summarizer.ts")>()),
+const summary = { generate: mock() };
+mock.module("../extensions/summarizer.ts", () => ({
+	...summarizer,
 	generateSessionSummary: summary.generate,
 }));
 
@@ -44,12 +56,12 @@ type Handler = (
 const stops: Array<() => Promise<void>> = [];
 beforeEach(async () => {
 	scope.dir = await mkdtemp(join(tmpdir(), "pi-pretty-session-lifecycle-"));
-	vi.useFakeTimers();
+	jest.useFakeTimers();
 });
 afterEach(async () => {
 	for (const stop of stops.splice(0)) await stop();
-	vi.useRealTimers();
-	vi.restoreAllMocks();
+	jest.useRealTimers();
+	mock.restore();
 	await rm(scope.dir, { recursive: true, force: true });
 });
 
@@ -59,7 +71,7 @@ function instance(events = createEventBus()) {
 		string,
 		{ handler: (args: string, ctx: ExtensionContext) => Promise<void> }
 	>();
-	const detach = vi.fn();
+	const detach = mock();
 	const ctx = {
 		cwd: scope.dir,
 		hasUI: true,
@@ -77,11 +89,11 @@ function instance(events = createEventBus()) {
 			getSessionName: () => undefined,
 		},
 		ui: {
-			input: vi.fn(),
-			setStatus: vi.fn(),
-			setWidget: vi.fn(),
-			notify: vi.fn(),
-			onTerminalInput: vi.fn(() => detach),
+			input: mock(),
+			setStatus: mock(),
+			setWidget: mock(),
+			notify: mock(),
+			onTerminalInput: mock(() => detach),
 		},
 	} as unknown as ExtensionContext;
 	const pi = {
@@ -93,9 +105,9 @@ function instance(events = createEventBus()) {
 				handler: (args: string, ctx: ExtensionContext) => Promise<void>;
 			},
 		) => commands.set(name, command),
-		sendUserMessage: vi.fn(),
-		appendEntry: vi.fn(),
-		setSessionName: vi.fn(),
+		sendUserMessage: mock(),
+		appendEntry: mock(),
+		setSessionName: mock(),
 	};
 	extension(pi as unknown as ExtensionAPI);
 	const emit = async (
@@ -112,8 +124,8 @@ function instance(events = createEventBus()) {
 describe("package-owned lifecycle", () => {
 	it("registers only while running, replaces session registrations, and cleans up its own resources", async () => {
 		const app = instance();
-		expect(vi.getTimerCount()).toBe(0);
-		const peerOpen = vi.fn(async () => {});
+		expect(jest.getTimerCount()).toBe(0);
+		const peerOpen = mock(async () => {});
 		const unregisterPeer = app.pi.events.on(DISCOVER_EVENT, (payload) => {
 			if (isDiscoverPayload(payload))
 				payload.register({
@@ -136,16 +148,16 @@ describe("package-owned lifecycle", () => {
 		expect(registrations().sort()).toEqual(
 			["independent-peer", SELF_PLUGIN_ID].sort(),
 		);
-		const timers = vi.getTimerCount();
+		const timers = jest.getTimerCount();
 		await app.emit("session_start");
 		expect(registrations().filter((id) => id === SELF_PLUGIN_ID)).toHaveLength(
 			1,
 		);
-		expect(vi.getTimerCount()).toBe(timers);
+		expect(jest.getTimerCount()).toBe(timers);
 
 		await app.emit("session_shutdown");
 		expect(registrations()).toEqual(["independent-peer"]);
-		expect(vi.getTimerCount()).toBe(0);
+		expect(jest.getTimerCount()).toBe(0);
 		const peers = discoverLoadedPanels(app.pi.events);
 		await peers[0]?.open(app.ctx);
 		expect(peerOpen).toHaveBeenCalledWith(app.ctx);
@@ -163,10 +175,10 @@ describe("package-owned lifecycle", () => {
 		expect(discoverLoadedPanels(events).map((panel) => panel.id)).toEqual([
 			SELF_PLUGIN_ID,
 		]);
-		expect(vi.getTimerCount()).toBe(1);
+		expect(jest.getTimerCount()).toBe(1);
 		await b.emit("session_shutdown");
 		expect(discoverLoadedPanels(events)).toEqual([]);
-		expect(vi.getTimerCount()).toBe(0);
+		expect(jest.getTimerCount()).toBe(0);
 	});
 
 	it.each(["session_tree", "session_shutdown"])(
@@ -186,7 +198,7 @@ describe("package-owned lifecycle", () => {
 			const app = instance();
 			await app.emit("session_start");
 			const pending = app.commands.get("ps")?.handler("summarize", app.ctx);
-			await vi.waitFor(() => expect(summary.generate).toHaveBeenCalled());
+			await waitFor(() => expect(summary.generate).toHaveBeenCalled());
 			const signal = summary.generate.mock.calls.at(-1)?.[0]
 				.signal as AbortSignal;
 			await app.emit(event);
@@ -208,14 +220,14 @@ it("discards a rename dialog result after session replacement reuses the context
 	const app = instance();
 	await app.emit("session_start");
 	let finish!: (title: string) => void;
-	const input = vi.spyOn(app.ctx.ui, "input").mockImplementationOnce(
+	const input = spyOn(app.ctx.ui, "input").mockImplementationOnce(
 		() =>
 			new Promise((resolve) => {
 				finish = resolve;
 			}),
 	);
 	const pending = app.commands.get("ps")?.handler("rename", app.ctx);
-	await vi.waitFor(() => expect(input).toHaveBeenCalled());
+	await waitFor(() => expect(input).toHaveBeenCalled());
 	await app.emit("session_start");
 	finish("Obsolete dialog title");
 	await pending;

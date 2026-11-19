@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it, jest, mock } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,7 +8,6 @@ import {
 	type ExtensionCommandContext,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { createActionRegistry } from "../extensions/actions.ts";
 import {
 	compareBranches,
@@ -23,13 +23,14 @@ import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";
 import type { ExplorerResult, SessionEntry } from "../extensions/types.ts";
 import { getViewStateFilePath } from "../extensions/view-state.ts";
+import { restoreAgentDir, setAgentDir } from "./agent-dir-fixture.ts";
 
 describe("Spec 0008 v2.0 E01-E07 Integrated Acceptance", () => {
 	const tempDirs: string[] = [];
 
 	afterEach(async () => {
-		vi.useRealTimers();
-		vi.unstubAllEnvs();
+		jest.useRealTimers();
+		restoreAgentDir();
 		for (const dir of tempDirs.splice(0)) {
 			await rm(dir, {
 				recursive: true,
@@ -62,7 +63,7 @@ describe("Spec 0008 v2.0 E01-E07 Integrated Acceptance", () => {
 			selectedEntryId: "root",
 			sessionLeafId: "leaf-a",
 		});
-		const done = vi.fn();
+		const done = mock();
 		const comp = new SessionTreeComponent({
 			tui: { requestRender() {}, terminal: { rows: 24, columns: 120 } },
 			theme: {},
@@ -85,7 +86,7 @@ describe("Spec 0008 v2.0 E01-E07 Integrated Acceptance", () => {
 	});
 
 	it("E02 & E03: Branch tip single jump, multi-tip picker, user notice, and navigation restore stack", async () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const entries: SessionEntry[] = [
 			{
 				type: "message",
@@ -134,7 +135,7 @@ describe("Spec 0008 v2.0 E01-E07 Integrated Acceptance", () => {
 				getEntry: (id: string) => byId.get(id),
 			},
 			isIdle: () => true,
-			navigateTree: vi.fn(async (targetId: string) => {
+			navigateTree: mock(async (targetId: string) => {
 				activeLeaf = targetId;
 				return { cancelled: false };
 			}),
@@ -182,7 +183,7 @@ describe("Spec 0008 v2.0 E01-E07 Integrated Acceptance", () => {
 
 		// E03: Press g on fork -> 3-tip picker opens -> pick tip-2
 		comp.handleInput("g");
-		vi.advanceTimersByTime(900);
+		jest.advanceTimersByTime(900);
 		expect(comp.render(100).join("\n")).toContain(
 			"SELECT BRANCH TIP (3 reachable)",
 		);
@@ -217,7 +218,7 @@ describe("Spec 0008 v2.0 E01-E07 Integrated Acceptance", () => {
 			navigationHistory: history,
 		});
 		comp2.handleInput("r");
-		expect(emitted).toEqual({
+		expect<unknown>(emitted).toEqual({
 			type: "navigate",
 			entryId: "tip-1",
 			restore: true,
@@ -309,7 +310,7 @@ describe("Spec 0008 v2.0 E01-E07 Integrated Acceptance", () => {
 	it("E05: Migrates legacy v1 view state without overriding global config", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pi-stree-e05-"));
 		tempDirs.push(dir);
-		vi.stubEnv("PI_CODING_AGENT_DIR", dir);
+		setAgentDir(dir);
 
 		const session = SessionManager.inMemory(dir);
 		const u1 = session.appendMessage({

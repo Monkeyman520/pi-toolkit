@@ -1,3 +1,4 @@
+import { describe, expect, it, jest, mock } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,16 +7,16 @@ import {
 	type ExtensionCommandContext,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
 import plugin from "../extensions/index.ts";
 import type { SessionTreeComponent } from "../extensions/tui.ts";
 import type { ExplorerResult } from "../extensions/types.ts";
+import { restoreAgentDir, setAgentDir } from "./agent-dir-fixture.ts";
 
 describe("remediation: real assembly with controlled UI boundary", () => {
 	it("reads host labels and passes effective search settings through /stree", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "stree-assembly-"));
-		vi.stubEnv("PI_CODING_AGENT_DIR", dir);
-		vi.useFakeTimers();
+		setAgentDir(dir);
+		jest.useFakeTimers();
 		try {
 			await writeFile(
 				join(dir, "session-tree.json"),
@@ -53,7 +54,7 @@ describe("remediation: real assembly with controlled UI boundary", () => {
 					session.appendLabelChange(id, label);
 				},
 			} as unknown as ExtensionAPI);
-			const notify = vi.fn();
+			const notify = mock();
 			const ctx = {
 				cwd: dir,
 				mode: "tui",
@@ -80,7 +81,7 @@ describe("remediation: real assembly with controlled UI boundary", () => {
 						);
 						expect(component.render(130).join("\n")).toContain(second);
 						for (const key of ["/", ..."needle"]) component.handleInput(key);
-						vi.runAllTimers();
+						jest.runAllTimers();
 						const rendered = component.render(130).join("\n");
 						expect(rendered).toContain("1 matches");
 						component.handleInput("\r");
@@ -94,8 +95,8 @@ describe("remediation: real assembly with controlled UI boundary", () => {
 			expect(session.getLabel(first)).toBe("host-existing-label");
 			expect(session.getEntry(first)).not.toHaveProperty("label");
 		} finally {
-			vi.useRealTimers();
-			vi.unstubAllEnvs();
+			jest.useRealTimers();
+			restoreAgentDir();
 			await rm(dir, { recursive: true, force: true });
 		}
 	});

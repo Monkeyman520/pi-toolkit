@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,7 +7,6 @@ import {
 	type ExtensionCommandContext,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionRegistry } from "../extensions/actions.ts";
 import plugin from "../extensions/index.ts";
 import { createInitialState } from "../extensions/state.ts";
@@ -22,6 +22,7 @@ import {
 	loadViewState,
 	saveViewState,
 } from "../extensions/view-state.ts";
+import { restoreAgentDir, setAgentDir } from "./agent-dir-fixture.ts";
 
 describe("T0002: Three-Tier State Architecture & Schema v2 Migration", () => {
 	let tempDir: string;
@@ -31,7 +32,7 @@ describe("T0002: Three-Tier State Architecture & Schema v2 Migration", () => {
 	});
 
 	afterEach(async () => {
-		vi.unstubAllEnvs();
+		restoreAgentDir();
 		await rm(tempDir, { recursive: true, force: true });
 	});
 
@@ -165,7 +166,7 @@ describe("T0002: Three-Tier State Architecture & Schema v2 Migration", () => {
 	});
 
 	it("lets global session-tree.json changes take effect immediately over legacy v1 cache and keeps sessionLeafId authoritative", async () => {
-		vi.stubEnv("PI_CODING_AGENT_DIR", tempDir);
+		setAgentDir(tempDir);
 		const session = SessionManager.inMemory(tempDir);
 		const u1 = session.appendMessage({
 			role: "user",
@@ -286,7 +287,7 @@ describe("T0002: Three-Tier State Architecture & Schema v2 Migration", () => {
 
 		expect(capturedShowAssistant).toBe(true);
 		expect(rendered).toContain("Assistant detailed answer should be visible");
-		expect(capturedLeafId).toBe(a1);
+		expect<unknown>(capturedLeafId).toBe(a1);
 
 		// After closing, disk file is migrated to version 2 without full displayOptions
 		const migrated = JSON.parse(await readFile(statePath, "utf8"));

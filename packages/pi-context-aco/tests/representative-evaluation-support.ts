@@ -153,10 +153,14 @@ export function allowEvaluationTool(
 }
 
 /** Test-only transport gate: preserve response bytes; never persist headers, prompts or credentials. */
+type FetchRequest = (
+	...args: Parameters<typeof globalThis.fetch>
+) => ReturnType<typeof globalThis.fetch>;
+
 export function createGuardedFetch(
-	fetch: typeof globalThis.fetch,
+	fetch: FetchRequest,
 	record: (row: Record<string, unknown>) => void,
-): typeof globalThis.fetch {
+): FetchRequest {
 	let attempt = 0;
 	return async (input, init) => {
 		const url = String(input instanceof Request ? input.url : input);
@@ -262,8 +266,11 @@ export function installEvaluationGuard(
 			}),
 		}),
 	);
-	globalThis.fetch = createGuardedFetch(globalThis.fetch, (row) =>
-		append("transport.jsonl", row),
+	globalThis.fetch = Object.assign(
+		createGuardedFetch(globalThis.fetch, (row) =>
+			append("transport.jsonl", row),
+		),
+		globalThis.fetch,
 	);
 	pi.on("tool_call", (event, ctx) => {
 		const allowed = allowEvaluationTool(ctx.cwd, event.toolName, event.input);

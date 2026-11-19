@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { Composer, type StepResult } from "../extensions/composition.ts";
 
 const checkpoint = { kind: "checkpoint", request: { sourceEntryIds: ["r"] } };

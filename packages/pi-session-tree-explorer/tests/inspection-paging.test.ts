@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import { getDefaultConfig } from "../extensions/config-schema.ts";
 import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";
+import { trackContentReads } from "./track-content-reads.ts";
 
 function fixture() {
 	const terminal = { rows: 12 },
-		done = vi.fn(),
+		done = mock(),
 		state = createInitialState("paging", {
 			selectedEntryId: "r",
 			sessionLeafId: "r",
@@ -19,7 +20,7 @@ function fixture() {
 			).join("\n");
 		},
 	};
-	const read = vi.spyOn(message, "content", "get");
+	const read = trackContentReads(message);
 	const component = new SessionTreeComponent({
 		state,
 		index: buildTreeIndex([
@@ -90,7 +91,7 @@ describe("bounded help and preview inspection", () => {
 				selectedEntryId: "r",
 				sessionLeafId: "r",
 			}),
-			done = vi.fn();
+			done = mock();
 		const component = new SessionTreeComponent({
 			state,
 			index: buildTreeIndex([

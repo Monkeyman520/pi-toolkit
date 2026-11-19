@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import { getDefaultConfig } from "../extensions/config-schema.ts";
 import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
@@ -34,7 +34,7 @@ function fixture(
 			focusedPathIds: new Set(["r", "a", "aa"]),
 			sessionLeafId: "aa",
 		}),
-		done = vi.fn(),
+		done = mock(),
 		config = getDefaultConfig();
 	config.context.enabled = false;
 	config.navigation.focusFollowsSelection = focus;
@@ -78,7 +78,7 @@ describe("branch input from projected summaries", () => {
 			const { state, index, component, done } = fixture();
 			try {
 				const summary = selectSummary(component);
-				expect(state.selectedEntryId).toBe(summary);
+				expect<unknown>(state.selectedEntryId).toBe(summary);
 				for (const input of inputs) component.handleInput(input);
 				expect(state.selectedEntryId).toBe(expected);
 				expect(index.entryById.has(state.focusedBranchId ?? "")).toBe(true);
@@ -98,7 +98,7 @@ describe("branch input from projected summaries", () => {
 		try {
 			expect(state.selectedEntryId).toBe("a");
 			const summary = selectSummary(component);
-			expect(state.selectedEntryId).toBe(summary);
+			expect<unknown>(state.selectedEntryId).toBe(summary);
 			component.handleInput("]");
 			component.handleInput("b");
 			expect(
@@ -164,7 +164,7 @@ describe("branch input from projected summaries", () => {
 		});
 		try {
 			const summary = selectSummary(view);
-			expect(state.selectedEntryId).toBe(summary);
+			expect<unknown>(state.selectedEntryId).toBe(summary);
 			view.handleInput("g");
 			view.handleInput("g");
 			expect(state.selectedEntryId).toBe("r");

@@ -12,25 +12,34 @@ This repository organizes Pi plugin packages; it is not the Pi host's source tre
 | [pi-pretty-session](./packages/pi-pretty-session/README.md) | Automatic session naming, title/description summarization, dynamic config, session metrics, and project info |
 | [pi-quota-keeper](./packages/pi-quota-keeper/README.md) | Coordinated account quota visibility and capability-gated activation |
 | [pi-context-aco](./packages/pi-context-aco/README.md) | **Experimental — pending optimization and broader testing.** Passive pressure/task monitoring, recommendations, scoped local evidence checkpoints, bounded historical recall and recovery-gated exact pruning; scoped extractive/native compaction with confirmation or explicit authorization; bounded authorized V4 independent children with parent-verified staged deliverables |
+| [pi-session-tree-explorer](./packages/pi-session-tree-explorer/README.md) | Interactive session tree navigation and inspection |
 | [pi-prompt-pipeline](./packages/pi-prompt-pipeline/README.md) | Conditional system-prompt transformations and one-shot agent/request boundary exports |
 
-The original four plugins have controlled Pi 1.5.0 loading/usage smoke evidence. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is their ordinary versioned dependency, not an activated plugin. ACO is experimental and provides V1 observation/recommendations, V2 verified recovery/exact pruning, V3 bounded extractive/native compaction and V4 authorized independent children/staged results. Its default observe mode never executes strategies; V3/V4 require separate scoped authority and safety checks. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README. Completed ACO tickets and bounded tests are not a stable-release endorsement. Start with observation-only evaluation; do not adopt adaptive or context-changing automation by default, assume token/cost savings, or weaken safety checks to force an intervention.
+Built plugins have controlled Pi 1.5.2 loading/usage smoke evidence on Windows. [Pi Plugin Support](./packages/pi-plugin-support/README.md) is private and inlined, not an activated plugin. ACO is experimental and provides V1 observation/recommendations, V2 verified recovery/exact pruning, V3 bounded extractive/native compaction and V4 authorized independent children/staged results. Its default observe mode never executes strategies; V3/V4 require separate scoped authority and safety checks. Live subscription quota access/activation and physical sleep/wake remain unverified; see each README. Completed ACO tickets and bounded tests are not a stable-release endorsement. Start with observation-only evaluation; do not adopt adaptive or context-changing automation by default, assume token/cost savings, or weaken safety checks to force an intervention.
 
 ## Installation model
 
 Each plugin lives in `packages/<plugin-name>/` and owns its manifest, resources, and documentation. Select an individual package rather than installing the repository root as an all-plugins bundle.
 
-From this checkout, select one real package and follow its README. For example:
+Once available on npm, install the desired plugin without pinning a version. For example:
 
 ```sh
-# Register only Pi Auto Resume in personal Pi settings.
-pi install ./packages/pi-auto-resume
-
-# Or try Pi Quota Keeper temporarily without changing settings.
-pi -e ./packages/pi-quota-keeper
+pi install npm:@monkeyman520/pi-auto-resume
+pi update npm:@monkeyman520/pi-auto-resume
+pi update --extensions
 ```
 
-Pi does not install or modify a local package's dependency tree. Prepare any dependencies required by its README before loading it. Do not infer npm publication or host compatibility from a directory name.
+Pi can show **Extension Updates** from the bundled changelog on the next fresh launch. Pinned versions stay fixed. See the [release guide](docs/releasing.md) for the planned public catalog; experimental ACO stays private.
+
+To use a local checkout, prepare it and build before installing:
+
+```sh
+bun install --frozen-lockfile
+bun run --cwd packages/pi-auto-resume build
+pi install ./packages/pi-auto-resume
+```
+
+Pi does not prepare dependencies for a local path.
 
 Extensions run with the Pi process's operating-system permissions and can access files, credentials, prompts, and session data. Review a package and its permission disclosures before loading it. Project-local resources also follow Pi's project-trust rules.
 
@@ -53,6 +62,7 @@ pi-packages/
     ├── pi-pretty-session/     # Session summarization, metrics, and project info
     ├── pi-quota-keeper/       # Quota visibility and coordinated activation
     ├── pi-context-aco/        # Passive context-pressure monitoring foundation
+    ├── pi-session-tree-explorer/ # Interactive session tree
     ├── pi-prompt-pipeline/    # Conditional prompt transforms and boundary exports
     └── pi-plugin-support/    # Ordinary config/discovery/TUI support library
 ```
@@ -61,43 +71,36 @@ Existing development-tool configuration is omitted from this overview. Its prese
 
 ## Development baseline
 
-| Area | Project convention |
-| --- | --- |
-| Language | TypeScript, ESM, erasable syntax |
-| Runtime | Node.js >= 22.19.0 |
-| Code checks | Biome |
-| Tests | Vitest |
-| Schemas | TypeBox (`typebox`) |
-| Type checking | `tsc --noEmit`, with `erasableSyntaxOnly: true` |
-| Build | Pi loads extension sources; no bundler or emitted build required |
-| Host SDK | `@earendil-works/pi-coding-agent`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui` |
+Use Bun 1.4.4, Node.js >= 22.19.0 and Git. The private workspace shares one `bun.lock`, Biome and TypeScript configuration. Rolldown builds the individual Pi entry points, and the root test script runs Bun tests in each package directory.
 
-Host-provided SDK packages and `typebox`, when used, are peers rather than bundled runtime dependencies. See the [package development reference](packages/README.md) for manifests, TypeScript configuration, resource discovery, and verification guidance.
+```sh
+bun install --frozen-lockfile
+bun run check
+bun run typecheck
+bun run build
+bun run test
+```
 
-There is no root package manifest or workspace test/build runner. Each real package owns its npm lockfile, pinned development tooling, checks, and Pi smoke test; see its README. This does not establish a collection-wide workspace tool or publication scope.
-
-## Shared support dependency
-
-Existing support-library consumers declare `pi-plugin-support@0.1.0` and carry that ordinary package via npm `bundledDependencies`, without bundling host SDKs or activating any other plugin. Each consumer's local lockfile also resolves a shipped versioned archive for independent `npm ci` setup. No registry publication or required emitted build is assumed. See the [support-library development reference](./packages/pi-plugin-support/README.md) for APIs, ownership and archive refresh/check commands. Pi Prompt Pipeline is self-contained and does not require this ordinary support library.
+Pi SDKs and TypeBox remain host peers. The private support library is inlined where used, not published as a dependency. See the [package development reference](packages/README.md) and [release guide](docs/releasing.md).
 
 ## Cross-plugin isolation verification
 
-After preparing each package's documented development dependencies, run from the repository root:
+After the root frozen install and build, run from the repository root:
 
 ```sh
 node tests/plugin-isolation.mjs
 ```
 
-Set `PI_BINARY` to the actual Pi executable if needed (for example `$env:PI_BINARY = 'C:\path\to\pi.exe'` in PowerShell). The matrix requires Node.js >= 22.19.0, npm, installed Pi, and the npm cache populated by package setup for the quota plugin's offline production-dependency installation.
+Set `PI_BINARY` to the actual Pi executable if needed (for example `$env:PI_BINARY = 'C:\path\to\pi.exe'` in PowerShell). The matrix requires Node.js >= 22.19.0, npm, installed Pi. npm may fetch the quota plugin's declared runtime dependency if it is not cached.
 
-This development-only script covers the original three plugins (`pi-auto-resume`, `pi-pretty-session`, `pi-quota-keeper`), packing their tarballs into separate temporary consumers. It verifies only the ordinary support library is bundled, all seven combinations and three session lifecycles per combination, separate library roots and a frozen baseline discovery reader. It uses isolated empty auth and no live provider/personal settings. Expected final output is `Pi plugin isolation matrix: all 7 combinations PASS`. ACO has its own outside-checkout control-provider smoke and actual ConPTY keyboard test; it is not silently included in this historical seven-combination claim.
+This development-only script covers the original three plugins (`pi-auto-resume`, `pi-pretty-session`, `pi-quota-keeper`), packing their tarballs into separate temporary consumers. It verifies all seven combinations and three session lifecycles per combination, with inlined support and a frozen baseline discovery reader. It uses isolated empty auth and no live provider/personal settings. Expected final output is `Pi plugin isolation matrix: all 7 combinations PASS`. ACO has its own outside-checkout control-provider smoke and actual ConPTY keyboard test; it is not silently included in this historical seven-combination claim.
 
-The matrix has been verified on Windows with Pi 1.5.0. It complements, rather than replaces, each package's type checks, Biome checks, Vitest tests, and provider-fixture smoke test. The matrix is not a real terminal test. Separate agent-driven Windows Terminal keyboard checks exercised the shared panels, config persistence/reload, actions, cancel/search/navigation, loaded-plugin switching, Tab completion and orderly exit. Physical sleep/wake remains unverified.
+The matrix has been verified on Windows with Pi 1.5.2. It complements, rather than replaces, each package's type checks, Biome checks, Bun tests, and provider-fixture smoke test. The matrix is not a real terminal test. Separate agent-driven Windows Terminal keyboard checks exercised the shared panels, config persistence/reload, actions, cancel/search/navigation, loaded-plugin switching, Tab completion and orderly exit. Physical sleep/wake remains unverified.
 
 ## Contributing
 
 - Start with [AGENTS.md](AGENTS.md) and the [project context](.grimoire/CONTEXT.md).
-- Read [ADR 0001: independent packages](.grimoire/adr/0001-independently-installable-pi-packages.md) and [ADR 0002: development stack](.grimoire/adr/0002-typescript-esm-plugin-development-stack.md) before changing package boundaries or stack constraints.
+- Read [ADR 0001: independent packages](.grimoire/adr/0001-independently-installable-pi-packages.md) and [ADR 0008: development stack](.grimoire/adr/0008-bun-workspace-rolldown-and-bun-test-stack.md) before changing package boundaries or stack constraints.
 - Follow the [initialization specification](.grimoire/spec/0001-pi-plugin-collection-initialization.md) and the [package development reference](packages/README.md) when adding a package.
 - Keep installation, usage, verification, and permission claims specific to the real package and its tested environment. Preserve the collection's identity instead of inferring an unrelated scaffold from generic directory names.
 

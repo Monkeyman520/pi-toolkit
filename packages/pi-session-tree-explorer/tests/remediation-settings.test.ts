@@ -1,11 +1,11 @@
+import { afterEach, describe, expect, it, jest } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDefaultConfig } from "../extensions/config-schema.ts";
 import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => jest.useRealTimers());
 describe("remediation: effective view settings", () => {
 	it("hides details/context when toggled and makes layout observably compact", () => {
 		const state = createInitialState("settings", { selectedEntryId: "u" });
@@ -33,7 +33,7 @@ describe("remediation: effective view settings", () => {
 		component.dispose();
 	});
 	it("uses configured exact case-sensitive search and result limit", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const cfg = getDefaultConfig();
 		cfg.search.mode = "exact";
 		cfg.search.caseSensitive = true;
@@ -64,7 +64,7 @@ describe("remediation: effective view settings", () => {
 			config: cfg,
 		});
 		for (const key of ["/", ..."needle"]) component.handleInput(key);
-		vi.runAllTimers();
+		jest.runAllTimers();
 		expect(state.searchResults.map((r) => r.id)).toEqual(["two"]);
 		component.dispose();
 	});
@@ -116,7 +116,7 @@ describe("remediation: effective view settings", () => {
 		component.dispose();
 	});
 	it("does not schedule any estimation when context is disabled", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const config = getDefaultConfig();
 		config.context.enabled = false;
 		const state = createInitialState("disabled", { selectedEntryId: "u" });
@@ -137,7 +137,7 @@ describe("remediation: effective view settings", () => {
 			done() {},
 		});
 		component.render(120);
-		expect(vi.getTimerCount()).toBe(0);
+		expect(jest.getTimerCount()).toBe(0);
 		component.dispose();
 	});
 	it("does not reset view choices or search toggles when unrelated configuration changes", () => {

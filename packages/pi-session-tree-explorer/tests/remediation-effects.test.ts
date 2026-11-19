@@ -1,5 +1,5 @@
+import { describe, expect, it, mock } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
 import { getDefaultConfig } from "../extensions/config-schema.ts";
 import { executeSessionIntent } from "../extensions/session-effects.ts";
 import type { captureSessionSnapshot } from "../extensions/session-snapshot.ts";
@@ -19,7 +19,7 @@ describe("remediation: stale asynchronous effects", () => {
 				timestamp: "T0",
 				message: { role: "user", content: "prompt" },
 			};
-			const fork = vi.fn();
+			const fork = mock();
 			const ctx = {
 				sessionManager: {
 					getEntry: () => entry,

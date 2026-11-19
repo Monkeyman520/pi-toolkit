@@ -1,15 +1,19 @@
+import { expect, it, mock } from "bun:test";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { expect, it, vi } from "vitest";
 import { ConfigManager } from "../extensions/config.ts";
 import { SessionState } from "../extensions/session-state.ts";
+import * as summarizer from "../extensions/summarizer.ts";
+import { waitFor } from "./wait-for.ts";
 
-const work = vi.hoisted(() => ({ inspect: vi.fn(), summary: vi.fn() }));
-vi.mock("../extensions/project.ts", () => ({ inspectProject: work.inspect }));
-vi.mock("../extensions/summarizer.ts", async (original) => ({
-	...(await original<typeof import("../extensions/summarizer.ts")>()),
+const work = { inspect: mock(), summary: mock() };
+mock.module("../extensions/project.ts", () => ({
+	inspectProject: work.inspect,
+}));
+mock.module("../extensions/summarizer.ts", () => ({
+	...summarizer,
 	generateSessionSummary: work.summary,
 }));
 function setup() {
@@ -27,11 +31,11 @@ function setup() {
 			getSessionName: () => undefined,
 		},
 	} as unknown as ExtensionContext;
-	const pi = { exec: vi.fn(), appendEntry: vi.fn(), setSessionName: vi.fn() };
+	const pi = { exec: mock(), appendEntry: mock(), setSessionName: mock() };
 	const owner = new SessionState(
 		pi as unknown as ExtensionAPI,
 		new ConfigManager("/unused", {}),
-		vi.fn(),
+		mock(),
 	);
 	owner.attach(ctx);
 	work.inspect.mockResolvedValue({
@@ -84,7 +88,7 @@ it("rejects old results even when the host reuses a context object for another s
 			}),
 	);
 	const pending = owner.summarize(ctx, { updateTitle: true });
-	await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+	await waitFor(() => expect(finish).toBeTypeOf("function"));
 	changeId();
 	owner.attach(ctx);
 	finish({
@@ -106,7 +110,7 @@ it("keeps only the latest summary and respects manual lock transitions", async (
 			}),
 	);
 	const pending = owner.summarize(ctx, { updateTitle: true });
-	await vi.waitFor(() => expect(first).toBeTypeOf("function"));
+	await waitFor(() => expect(first).toBeTypeOf("function"));
 	owner.nameChanged("Manual title", ctx);
 	first({
 		title: "Obsolete automatic title",

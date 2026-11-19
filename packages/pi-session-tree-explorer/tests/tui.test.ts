@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";
@@ -27,7 +27,7 @@ describe("SessionTreeComponent TUI", () => {
 
 		// Test exit on 'q'
 		comp.handleInput("q");
-		expect(result).toEqual({ type: "close" });
+		expect<unknown>(result).toEqual({ type: "close" });
 	});
 
 	it("renders a populated session tree and handles key navigation", () => {
@@ -159,7 +159,7 @@ describe("SessionTreeComponent TUI", () => {
 
 		// Close via q; normal Escape clears search.
 		comp.handleInput("q");
-		expect(closeResult).toEqual({ type: "close" });
+		expect<unknown>(closeResult).toEqual({ type: "close" });
 	});
 	it("toggles and renders help overlay without modifying tree index", () => {
 		const index = buildTreeIndex([

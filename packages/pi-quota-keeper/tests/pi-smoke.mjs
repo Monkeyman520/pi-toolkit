@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,40 +22,74 @@ const agB = accountId("antigravity", "fixture-ag-b@example.test");
 const codexId = accountId("openai-codex", "fixture-codex@example.test");
 let key = 0;
 try {
-	const isolated = join(root, "plugin");
-	await cp(packageRoot, isolated, {
-		recursive: true,
-		filter: (p) => !p.includes("node_modules") && !p.includes("tests"),
-	});
-
 	const npmCli =
-		process.env.npm_execpath ??
+		(process.env.npm_execpath?.endsWith(".js")
+			? process.env.npm_execpath
+			: undefined) ??
 		join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+	const packed = spawnSync(
+		process.execPath,
+		[npmCli, "pack", "--ignore-scripts", "--json", "--pack-destination", root],
+		{ cwd: packageRoot, encoding: "utf8", windowsHide: true, timeout: 30000 },
+	);
+	assert.equal(packed.status, 0, `npm pack failed: ${packed.stderr}`);
+	const info = JSON.parse(packed.stdout)[0];
+	assert.equal(
+		info.bundled?.length ?? 0,
+		0,
+		"no bundledDependencies; support library is inlined",
+	);
+	assert.ok(
+		info.files.some((f) => f.path === "dist/index.js"),
+		"built dist/index.js must be packed",
+	);
+	assert.ok(
+		info.files.some((f) => f.path === "dist/LICENSE"),
+		"dist/LICENSE must be packed",
+	);
+	assert.ok(
+		info.files.some((f) => f.path === "dist/CHANGELOG.md"),
+		"dist/CHANGELOG.md must be packed",
+	);
+	assert.ok(
+		!info.files.some(
+			(f) => f.path.startsWith("vendor/") || f.path.startsWith("node_modules/"),
+		),
+		"no vendor/ or node_modules/ in tarball",
+	);
+	const consumer = join(root, "consumer");
+	await mkdir(consumer, { recursive: true });
+	await writeFile(
+		join(consumer, "package.json"),
+		JSON.stringify({
+			private: true,
+			dependencies: {
+				"@monkeyman520/pi-quota-keeper": `file:${join(root, info.filename).replaceAll("\\", "/")}`,
+			},
+		}),
+	);
 	const installed = spawnSync(
 		process.execPath,
 		[
 			npmCli,
-			"ci",
+			"install",
 			"--omit=dev",
 			"--ignore-scripts",
 			"--legacy-peer-deps",
-			"--offline",
+			"--prefer-offline",
 			"--no-audit",
 		],
-		{
-			cwd: isolated,
-			encoding: "utf8",
-			windowsHide: true,
-			env: {
-				...process.env,
-				NODE_OPTIONS: "--max-old-space-size=256 --max-semi-space-size=4",
-			},
-		},
+		{ cwd: consumer, encoding: "utf8", windowsHide: true, timeout: 60000 },
 	);
 	assert.equal(
 		installed.status,
 		0,
-		"isolated production dependency installation must succeed from the lockfile/cache",
+		`isolated production dependencies: ${installed.stderr}`,
+	);
+	const isolated = join(
+		consumer,
+		"node_modules",
+		..."@monkeyman520/pi-quota-keeper".split("/"),
 	);
 	const reset = Date.now() + 10000;
 	await writeFile(

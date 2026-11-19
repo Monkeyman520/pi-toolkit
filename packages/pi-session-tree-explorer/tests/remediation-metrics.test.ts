@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, jest, mock } from "bun:test";
 import {
 	computeContextMetrics,
 	estimateMessageTokens,
@@ -8,10 +8,10 @@ import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => jest.useRealTimers());
 describe("remediation: lazy metrics", () => {
 	it("does not estimate in render and reuses projection/cache across movement", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const index = buildTreeIndex(
 			Array.from({ length: 20 }, (_, i) => ({
 				id: `e${i}`,
@@ -32,7 +32,7 @@ describe("remediation: lazy metrics", () => {
 		const projection = component.getVisibleNodes();
 		expect(component.getMetricsForEntry("e0")).toBeUndefined();
 		component.render(100);
-		vi.runAllTimers();
+		jest.runAllTimers();
 		const first = component.getMetricsForEntry("e0");
 		expect(first?.tokens).toBeGreaterThan(0);
 		component.handleInput("j");
@@ -41,8 +41,8 @@ describe("remediation: lazy metrics", () => {
 		component.dispose();
 	});
 	it("cannot request rendering from estimation after disposal", () => {
-		vi.useFakeTimers();
-		const requestRender = vi.fn();
+		jest.useFakeTimers();
+		const requestRender = mock();
 		const state = createInitialState("dispose", { selectedEntryId: "u" });
 		const component = new SessionTreeComponent({
 			state,
@@ -62,7 +62,7 @@ describe("remediation: lazy metrics", () => {
 		component.render(100);
 		component.dispose();
 		requestRender.mockClear();
-		vi.runAllTimers();
+		jest.runAllTimers();
 		expect(requestRender).not.toHaveBeenCalled();
 	});
 });
@@ -97,7 +97,7 @@ describe("remediation: honest estimates", () => {
 });
 describe("remediation: selected metrics priority", () => {
 	it("reprioritizes an already queued entry when selection changes", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const entries = [
 			{
 				id: "e0",
@@ -126,7 +126,7 @@ describe("remediation: selected metrics priority", () => {
 		);
 		controller.prioritize(["e0", "e1"]);
 		controller.prioritize(["e1", "e0"]);
-		vi.advanceTimersToNextTimer();
+		jest.advanceTimersToNextTimer();
 		expect(controller.request("e1")).toBeDefined();
 		controller.dispose();
 	});

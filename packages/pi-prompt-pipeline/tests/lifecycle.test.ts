@@ -1,3 +1,4 @@
+import { afterEach, expect, it, mock } from "bun:test";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,10 +7,11 @@ import type {
 	ExtensionCommandContext,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, expect, it, vi } from "vitest";
+import * as piHost from "@earendil-works/pi-coding-agent";
 
-const env = vi.hoisted(() => ({ agent: "" }));
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+const env = { agent: "" };
+mock.module("@earendil-works/pi-coding-agent", () => ({
+	...piHost,
 	getAgentDir: () => env.agent,
 }));
 

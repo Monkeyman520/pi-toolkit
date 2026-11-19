@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, jest, mock, spyOn } from "bun:test";
 import {
 	buildSearchIndex,
 	executeSearch,
@@ -9,10 +9,10 @@ import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => jest.useRealTimers());
 describe("remediation: keyboard search", () => {
 	it("types, accepts and clears a hidden full-text hit without navigation", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const index = buildTreeIndex([
 			{
 				id: "u",
@@ -30,7 +30,7 @@ describe("remediation: keyboard search", () => {
 			},
 		]);
 		const state = createInitialState("search", { selectedEntryId: "u" }),
-			done = vi.fn();
+			done = mock();
 		const component = new SessionTreeComponent({
 			state,
 			index,
@@ -39,7 +39,7 @@ describe("remediation: keyboard search", () => {
 			done,
 		});
 		for (const key of ["/", ..."needle"]) component.handleInput(key);
-		vi.advanceTimersByTime(100);
+		jest.advanceTimersByTime(100);
 		expect(state.searchResults.map((r) => r.id)).toEqual(["a"]);
 		expect(component.render(100).join("\n")).toContain("hidden needle");
 		component.handleInput("\r");
@@ -52,7 +52,7 @@ describe("remediation: keyboard search", () => {
 		component.dispose();
 	});
 	it("cancels pending queries and restores prior result identity", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const index = buildTreeIndex([
 			{
 				id: "u",
@@ -71,11 +71,11 @@ describe("remediation: keyboard search", () => {
 			done() {},
 		});
 		for (const key of ["/", ..."old"]) component.handleInput(key);
-		vi.advanceTimersByTime(100);
+		jest.advanceTimersByTime(100);
 		component.handleInput("\r");
 		for (const key of ["/", ..."new"]) component.handleInput(key);
 		component.handleInput("\u001b");
-		vi.runAllTimers();
+		jest.runAllTimers();
 		expect(state.searchQuery).toBe("old");
 		expect(state.searchResults.map((r) => r.id)).toEqual(["u"]);
 		component.dispose();
@@ -91,7 +91,7 @@ describe("search index complexity", () => {
 			message: { role: "user", content: "text" },
 		}));
 		const index = buildTreeIndex(entries);
-		const parent = vi.spyOn(index.parentById, "get");
+		const parent = spyOn(index.parentById, "get");
 		expect(buildSearchIndex(index)).toHaveLength(1000);
 		expect(parent.mock.calls.length).toBeLessThan(entries.length * 4);
 	});

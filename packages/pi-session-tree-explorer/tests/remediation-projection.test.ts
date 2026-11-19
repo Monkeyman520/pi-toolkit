@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { buildDisplayProjection } from "../extensions/display.ts";
 import { navNodeFirstChild, navNodeParent } from "../extensions/navigation.ts";
 import { createInitialState } from "../extensions/state.ts";

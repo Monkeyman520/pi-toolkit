@@ -1,10 +1,10 @@
+import { describe, expect, it, mock } from "bun:test";
 import {
 	type Api,
 	createAssistantMessageEventStream,
 	type Model,
 } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
 import type { Account, Snapshot } from "../extensions/providers.ts";
 import { dueActivation, type Ledger } from "../extensions/schedule.ts";
 import { sendWakeup, withWakeup } from "../extensions/wakeups.ts";
@@ -46,7 +46,7 @@ function model(provider = "antigravity"): Model<Api> {
 	};
 }
 function registry() {
-	const streamSimple = vi.fn((_model, _context, _options) => {
+	const streamSimple = mock((_model, _context, _options) => {
 		const s = createAssistantMessageEventStream();
 		const message = {
 			role: "assistant",
@@ -70,7 +70,7 @@ function registry() {
 		);
 		return s;
 	});
-	const getProvider = vi.fn(() => ({ streamSimple }));
+	const getProvider = mock(() => ({ streamSimple }));
 	return {
 		registry: { getProvider } as unknown as Pick<
 			ExtensionContext["modelRegistry"],
@@ -281,7 +281,7 @@ describe("account-pinned minimal requests", () => {
 	});
 	it("does not retry or switch Google accounts on quota rejection and never exposes its body", async () => {
 		const { registry: r } = registry();
-		const fetcher = vi.fn(
+		const fetcher = mock(
 			async () =>
 				new Response("google-access private@example.test", { status: 429 }),
 		);
@@ -348,7 +348,7 @@ describe("account-pinned minimal requests", () => {
 	);
 	it("refuses provider mismatch, missing pinned credentials and cancellation before side effects", async () => {
 		const { registry: r, streamSimple } = registry();
-		const fetcher = vi.fn(async () => Response.json({}));
+		const fetcher = mock(async () => Response.json({}));
 		const controller = new AbortController();
 		controller.abort();
 		for (const [a, m, signal] of [

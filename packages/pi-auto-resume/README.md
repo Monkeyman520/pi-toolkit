@@ -4,22 +4,33 @@ An independently installable Pi extension that resumes **interrupted** tasks aft
 
 ## Compatibility and resources
 
-- Node.js >= 22.19.0; TypeScript ESM, no bundler or emitted build.
+- Node.js >= 22.19.0; TypeScript ESM with a Rolldown build.
 - Requires Pi's `agent_settled`, response metadata, session lifecycle, TUI `SettingsList` (`@earendil-works/pi-tui`), and user-message APIs. Tested with Pi **1.5.0**, Windows, Node **26.13.0**.
-- Exposed extension entry: `extensions/index.ts`. The `*` host peers are a loader contract, not a claim of compatibility with every Pi version.
-- No dependency on Pi Quota Keeper or other sibling plugins. When other collection plugins are installed in the same session, their TUI settings panels discover each other dynamically over `pi.events` without displaying uninstalled plugins. No npm publication is claimed.
+- Exposed extension entry: `dist/index.js`. The `*` host peers are a loader contract, not a claim of compatibility with every Pi version.
+- No dependency on Pi Quota Keeper or other sibling plugins. When other collection plugins are installed in the same session, their TUI settings panels discover each other dynamically over `pi.events` without displaying uninstalled plugins.
 
 ## Install and use
 
-From this collection checkout:
+After the package is available on npm, install it without a version pin:
 
 ```sh
+pi install npm:@monkeyman520/pi-auto-resume
+pi update npm:@monkeyman520/pi-auto-resume
+```
+
+Use `pi update --extensions` for all installed extensions. Pinned versions do not follow later releases. On a fresh launch after an update, Pi can show the bundled changelog under **Extension Updates**; the plugin does not poll for updates.
+
+From the repository root, prepare the workspace and build before loading locally:
+
+```sh
+bun install --frozen-lockfile
+bun run --cwd packages/pi-auto-resume build
 pi -e ./packages/pi-auto-resume
-# Or register the individual package:
+# Or persist this local package:
 pi install ./packages/pi-auto-resume
 ```
 
-Runtime imports are Node built-ins and Pi-provided host modules; no local build is required. Local development dependencies are prepared separately below.
+Runtime imports are Node built-ins and Pi-provided host modules; npm installs use the prebuilt entry.
 
 Commands follow the unified `/auto-resume <action> [other-args]` format with interactive subcommand and argument auto-completion (`getArgumentCompletions`):
 
@@ -65,7 +76,7 @@ This extension runs with Pi's full process privileges. Automatic continuation ca
 
 ## Development and verification
 
-This plugin declares `pi-plugin-support@0.1.0` as an ordinary dependency. Its versioned archive is shipped in `vendor/` for package-local lockfile setup; npm distribution bundles only that ordinary library, never host SDKs or another plugin. Follow the [support-library reference](../pi-plugin-support/README.md) when updating shared sources. No registry publication or emitted build is required. Prepare dependencies before `pi -e` or local installation; Pi does not install local-package dependencies.
+Rolldown inlines the private [support library](../pi-plugin-support/README.md) where used. Pi SDKs and TypeBox remain host peers, and each plugin owns its state and lifecycle.
 
 The shared library owns configuration-file and TUI/discovery mechanisms; this plugin retains its own schema, failure policy, actions, instances and resource cleanup.
 
@@ -73,24 +84,23 @@ Package-local configuration metadata supplies both command completions and panel
 
 The optional [collection isolation matrix](../../README.md#cross-plugin-isolation-verification) additionally exercises all seven plugin combinations in real Pi; it is development-only, not an installation or runtime dependency.
 
-Use the package-local npm lockfile and npm 11.20.0:
+From the package directory after the root frozen install and build:
 
 ```sh
 cd packages/pi-auto-resume
-npm ci --ignore-scripts --legacy-peer-deps
-npm run typecheck
-npm run check
-npm test
-npm run smoke
+bun run typecheck
+bun run check
+bun run test
+bun run smoke
 ```
 
-`typecheck`, Biome, and Vitest are separate checks. `.npmrc` disables dependency lifecycle scripts. No JavaScript is emitted.
+TypeScript no-emit, Biome and Bun tests are separate from the Rolldown build and Pi smoke.
 
 The smoke test requires an installed Pi binary. If `pi` is not directly executable (for example a Windows command shim), set `PI_BINARY` to the actual executable path. PowerShell example:
 
 ```powershell
 $env:PI_BINARY = 'C:\path\to\pi.exe'
-npm run smoke
+bun run smoke
 ```
 
 The smoke test copies only this package into a temporary directory without siblings or inherited development `node_modules`, installs its declared production dependencies from the shipped archive/lockfile, uses an isolated Pi agent directory and a synthetic provider, and launches real Pi RPC. It verifies one network recovery, no continuation after success, cancellation of an idle wait, bounded retries, dynamic configuration persistence, and clean shutdown. It does not use your credentials or send a live model request. Expected final output ends in `PASS`.

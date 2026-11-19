@@ -1,10 +1,10 @@
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OAuthCredential } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { collectAccounts } from "../extensions/accounts.ts";
 import { queryQuota } from "../extensions/providers.ts";
 
@@ -18,12 +18,12 @@ async function setup(auth: unknown) {
 	const dir = await mkdtemp(join(tmpdir(), "pi-account-test-"));
 	dirs.push(dir);
 	await writeFile(join(dir, "auth.json"), JSON.stringify(auth));
-	const getProviderAuth = vi.fn(async () => ({
+	const getProviderAuth = mock(async () => ({
 		auth: {
 			apiKey: JSON.stringify({ token: "active-token", projectId: "project" }),
 		},
 	}));
-	const getProvider = vi.fn<ExtensionContext["modelRegistry"]["getProvider"]>(
+	const getProvider = mock<ExtensionContext["modelRegistry"]["getProvider"]>(
 		() => undefined,
 	);
 	const ctx = {
@@ -78,7 +78,7 @@ async function linkedFixture() {
 	await writeFile(file, JSON.stringify(store));
 	const readStore = async () =>
 		JSON.parse(await readFile(file, "utf8")) as typeof store;
-	const refresh = vi.fn(
+	const refresh = mock(
 		async (
 			credential: OAuthCredential,
 			_signal: AbortSignal,
@@ -533,7 +533,7 @@ describe("provider-owned linked Antigravity renewal", () => {
 		expect(accounts.some((a) => a.token === "linked-new-token")).toBe(true);
 	});
 	it("acquires the auth lock across repeated linked renewals using a plain fs object", async () => {
-		const spy = vi.spyOn(lockfile, "lock");
+		const spy = spyOn(lockfile, "lock");
 		try {
 			const x = await linkedFixture();
 			await collectAccounts(x.ctx, x.dir, new AbortController().signal);

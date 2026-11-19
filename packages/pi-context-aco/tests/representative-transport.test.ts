@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { accountTransport } from "./representative-transport.ts";
 
 describe("live Antigravity transport accounting", () => {

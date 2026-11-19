@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { compareForecasts } from "./representative-forecast.ts";
 
 const trace = (n: number, projected: number | null, used = n * 10) => ({

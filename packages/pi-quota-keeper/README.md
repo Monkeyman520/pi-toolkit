@@ -4,23 +4,33 @@ Show quota for Pi-logged-in accounts, track actual service reset times, and perf
 
 ## Compatibility and resources
 
-- Node.js >= 22.19.0; TypeScript ESM; no bundler/emitted build.
+- Node.js >= 22.19.0; TypeScript ESM with a Rolldown build.
 - Requires Pi's provider auth/model-registry, isolated `complete()`, session lifecycle, TUI `SettingsList` (`@earendil-works/pi-tui`), and command APIs. Tested with Pi **1.5.0**, Windows, Node **26.13.0**.
-- One resource: `extensions/index.ts`; command `/quota`. No sibling package is required.
+- One resource: `dist/index.js`; command `/quota`. No sibling package is required.
 - Google/Gemini here means **Google Antigravity**, including Pi-owned linked accounts from `pi-antigravity` 0.11.0's documented credential format. This package does not install, import, or silently enable that optional provider.
 
 ## Install and use
 
-From the collection checkout:
+After the package is available on npm, install it without a version pin:
 
 ```sh
-npm --prefix ./packages/pi-quota-keeper ci --omit=dev --ignore-scripts --legacy-peer-deps
+pi install npm:@monkeyman520/pi-quota-keeper
+pi update npm:@monkeyman520/pi-quota-keeper
+```
+
+Use `pi update --extensions` for all installed extensions. Pinned versions do not follow later releases. On a fresh launch after an update, Pi can show the bundled changelog under **Extension Updates**; the plugin does not poll for updates.
+
+From the repository root, prepare the workspace and build before loading locally:
+
+```sh
+bun install --frozen-lockfile
+bun run --cwd packages/pi-quota-keeper build
 pi -e ./packages/pi-quota-keeper
-# Or persist the individual package:
+# Or persist this local package:
 pi install ./packages/pi-quota-keeper
 ```
 
-Runtime imports use Node, host-provided peers, and the declared dependency `proper-lockfile`. Local packages require the dependency preparation above; managed npm/git installs prepare declared dependencies. No build is needed. `/quota` shows a compact health summary, available accounts first, percentage bars, relative reset countdowns, and concise failures without duplicated activation errors. `/quota details` includes configuration IDs, per-account check times, exact UTC resets, full reasons, and activation outcomes. The footer identifies owner/follower. Compact views show six limits per account; full output is capped at 200 lines.
+Runtime imports use Node, host-provided peers, and the declared dependency `proper-lockfile`. Local packages require the dependency preparation above; managed npm/git installs prepare declared dependencies. `/quota` shows a compact health summary, available accounts first, percentage bars, relative reset countdowns, and concise failures without duplicated activation errors. `/quota details` includes configuration IDs, per-account check times, exact UTC resets, full reasons, and activation outcomes. The footer identifies owner/follower. Compact views show six limits per account; full output is capped at 200 lines.
 
 ## Commands
 
@@ -132,7 +142,7 @@ The extension has Pi's process privileges. It reads Pi auth and optional Pi Anti
 
 ## Development and verification
 
-This plugin declares `pi-plugin-support@0.1.0` as an ordinary dependency. Its versioned archive is shipped in `vendor/` for package-local lockfile setup; npm distribution bundles only that ordinary library, never host SDKs or another plugin. Follow the [support-library reference](../pi-plugin-support/README.md) when updating shared sources. No registry publication or emitted build is required. Prepare dependencies before `pi -e` or local installation; Pi does not install local-package dependencies.
+Rolldown inlines the private [support library](../pi-plugin-support/README.md) where used. Pi SDKs and TypeBox remain host peers, and each plugin owns its state and lifecycle.
 
 The shared library owns configuration-file and TUI/discovery mechanisms; this plugin retains its own schema, failure policy, actions, instances and resource cleanup.
 
@@ -140,24 +150,23 @@ Package-local configuration metadata supplies both command completions and scala
 
 The optional [collection isolation matrix](../../README.md#cross-plugin-isolation-verification) additionally exercises all seven plugin combinations in real Pi; it is development-only, not an installation or runtime dependency.
 
-Use npm 11.20.0 and the package-local lockfile:
+From the package directory after the root frozen install and build:
 
 ```sh
 cd packages/pi-quota-keeper
-npm ci --ignore-scripts --legacy-peer-deps
-npm run typecheck
-npm run check
-npm test
-npm run smoke
+bun run typecheck
+bun run check
+bun run test
+bun run smoke
 ```
 
-The separate checks are TypeScript no-emit, Biome, Vitest, and real Pi loading/usage smoke. `.npmrc` disables dependency lifecycle scripts. Set `PI_BINARY` to the installed executable when needed; Windows PowerShell:
+TypeScript, Biome, Bun tests and Pi smoke are separate checks. Set `PI_BINARY` to the actual executable when needed; Windows PowerShell:
 
 ```powershell
 $env:PI_BINARY = 'C:\path\to\pi.exe'
-npm run smoke
+bun run smoke
 ```
 
-The smoke copies this package outside the checkout without sibling packages or inherited `node_modules`, installs production dependencies offline from the lockfile/cache prepared by `npm ci`, uses dummy credentials and synthetic responses in real Pi, and launches two RPC processes. It checks owner-only expired linked-token renewal/persistence, unchanged active selection and unrelated credentials, Google summary/model fallback, two Google wake-ups (including a non-retried 429), pinned Codex and Claude requests, reset+delay, untouched foreground messages/root auth, one owner, abrupt takeover without replay, credential-free cache, and shutdown. Expected output ends in `PASS`. Pure tests additionally cover renewal failures/cooldown, concurrent deduplication, removal/identity races, cancellation before and during provider refresh, current OpenAI, Copilot model-token/proxy separation, Grok, fixed mode without queryable quota, and missing/reset-window selection.
+The smoke packs and installs the built tarball outside the checkout without sibling packages or inherited `node_modules`, using npm for declared runtime dependencies, uses dummy credentials and synthetic responses in real Pi, and launches two RPC processes. It checks owner-only expired linked-token renewal/persistence, unchanged active selection and unrelated credentials, Google summary/model fallback, two Google wake-ups (including a non-retried 429), pinned Codex and Claude requests, reset+delay, untouched foreground messages/root auth, one owner, abrupt takeover without replay, credential-free cache, and shutdown. Expected output ends in `PASS`. Pure tests additionally cover renewal failures/cooldown, concurrent deduplication, removal/identity races, cancellation before and during provider refresh, current OpenAI, Copilot model-token/proxy separation, Grok, fixed mode without queryable quota, and missing/reset-window selection.
 
 No live OAuth refresh, subscription activation, or authenticated service quota check was performed. Physical OS sleep/wake is not tested; deterministic schedule tests cover time jumps and current-window/no-replay rules. See the collection's [provider evidence](../../.grimoire/ticket/0001-resume-and-quota-plugins/provider-capabilities.md) for source qualification and remaining live-evidence gaps.

@@ -1,5 +1,5 @@
+import { expect, test } from "bun:test";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { expect, test } from "vitest";
 import { actionDrafts, reconcileActions } from "../extensions/actions.ts";
 
 test("drafts are not completion and partial append never becomes success", () => {

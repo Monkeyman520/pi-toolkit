@@ -1,12 +1,22 @@
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	jest,
+	mock,
+	spyOn,
+} from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as piHost from "@earendil-works/pi-coding-agent";
 import {
 	createEventBus,
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import extension from "../extensions/index.ts";
 import {
 	DISCOVER_EVENT,
@@ -15,9 +25,9 @@ import {
 	SELF_PLUGIN_ID,
 } from "../extensions/ui.ts";
 
-const scope = vi.hoisted(() => ({ dir: "" }));
-vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
-	...(await importOriginal<typeof import("@earendil-works/pi-coding-agent")>()),
+const scope = { dir: "" };
+mock.module("@earendil-works/pi-coding-agent", () => ({
+	...piHost,
 	getAgentDir: () => scope.dir,
 }));
 
@@ -28,12 +38,12 @@ type Handler = (
 const stops: Array<() => Promise<void>> = [];
 beforeEach(async () => {
 	scope.dir = await mkdtemp(join(tmpdir(), "pi-auto-resume-lifecycle-"));
-	vi.useFakeTimers();
+	jest.useFakeTimers();
 });
 afterEach(async () => {
 	for (const stop of stops.splice(0)) await stop();
-	vi.useRealTimers();
-	vi.restoreAllMocks();
+	jest.useRealTimers();
+	mock.restore();
 	await rm(scope.dir, { recursive: true, force: true });
 });
 
@@ -43,7 +53,7 @@ function instance(events = createEventBus()) {
 		string,
 		{ handler: (args: string, ctx: ExtensionContext) => Promise<void> }
 	>();
-	const detach = vi.fn();
+	const detach = mock();
 	const ctx = {
 		cwd: scope.dir,
 		hasUI: true,
@@ -61,10 +71,10 @@ function instance(events = createEventBus()) {
 			getSessionName: () => undefined,
 		},
 		ui: {
-			setStatus: vi.fn(),
-			setWidget: vi.fn(),
-			notify: vi.fn(),
-			onTerminalInput: vi.fn(() => detach),
+			setStatus: mock(),
+			setWidget: mock(),
+			notify: mock(),
+			onTerminalInput: mock(() => detach),
 		},
 	} as unknown as ExtensionContext;
 	const pi = {
@@ -76,9 +86,9 @@ function instance(events = createEventBus()) {
 				handler: (args: string, ctx: ExtensionContext) => Promise<void>;
 			},
 		) => commands.set(name, command),
-		sendUserMessage: vi.fn(),
-		appendEntry: vi.fn(),
-		setSessionName: vi.fn(),
+		sendUserMessage: mock(),
+		appendEntry: mock(),
+		setSessionName: mock(),
 	};
 	extension(pi as unknown as ExtensionAPI);
 	const emit = async (
@@ -95,8 +105,8 @@ function instance(events = createEventBus()) {
 describe("package-owned lifecycle", () => {
 	it("registers only while running, replaces session registrations, and cleans up its own resources", async () => {
 		const app = instance();
-		expect(vi.getTimerCount()).toBe(0);
-		const peerOpen = vi.fn(async () => {});
+		expect(jest.getTimerCount()).toBe(0);
+		const peerOpen = mock(async () => {});
 		const unregisterPeer = app.pi.events.on(DISCOVER_EVENT, (payload) => {
 			if (isDiscoverPayload(payload))
 				payload.register({
@@ -119,16 +129,16 @@ describe("package-owned lifecycle", () => {
 		expect(registrations().sort()).toEqual(
 			["independent-peer", SELF_PLUGIN_ID].sort(),
 		);
-		const timers = vi.getTimerCount();
+		const timers = jest.getTimerCount();
 		await app.emit("session_start");
 		expect(registrations().filter((id) => id === SELF_PLUGIN_ID)).toHaveLength(
 			1,
 		);
-		expect(vi.getTimerCount()).toBe(timers);
+		expect(jest.getTimerCount()).toBe(timers);
 		expect(app.detach).toHaveBeenCalledTimes(1);
 		await app.emit("session_shutdown");
 		expect(registrations()).toEqual(["independent-peer"]);
-		expect(vi.getTimerCount()).toBe(0);
+		expect(jest.getTimerCount()).toBe(0);
 		const peers = discoverLoadedPanels(app.pi.events);
 		await peers[0]?.open(app.ctx);
 		expect(peerOpen).toHaveBeenCalledWith(app.ctx);
@@ -146,10 +156,10 @@ describe("package-owned lifecycle", () => {
 		expect(discoverLoadedPanels(events).map((panel) => panel.id)).toEqual([
 			SELF_PLUGIN_ID,
 		]);
-		expect(vi.getTimerCount()).toBe(1);
+		expect(jest.getTimerCount()).toBe(1);
 		await b.emit("session_shutdown");
 		expect(discoverLoadedPanels(events)).toEqual([]);
-		expect(vi.getTimerCount()).toBe(0);
+		expect(jest.getTimerCount()).toBe(0);
 	});
 
 	it("cancels only the stopped instance's pending continuation", async () => {
@@ -171,7 +181,7 @@ describe("package-owned lifecycle", () => {
 			await app.emit("agent_settled", { aborted: false });
 		}
 		await a.emit("session_shutdown");
-		await vi.advanceTimersByTimeAsync(250);
+		jest.advanceTimersByTime(250);
 		expect(a.pi.sendUserMessage).not.toHaveBeenCalled();
 		expect(b.pi.sendUserMessage).toHaveBeenCalledTimes(1);
 	});
@@ -185,7 +195,7 @@ it("does not resurrect an old session's resources after a delayed configuration 
 		settings: typeof defaults;
 		isNewError: boolean;
 	}) => void;
-	vi.spyOn(AutoResumeConfigManager.prototype, "reloadIfChanged")
+	spyOn(AutoResumeConfigManager.prototype, "reloadIfChanged")
 		.mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
@@ -202,7 +212,7 @@ it("does not resurrect an old session's resources after a delayed configuration 
 	await app.emit("session_start");
 	release({ changed: true, settings: { ...defaults }, isNewError: false });
 	await old;
-	expect(vi.getTimerCount()).toBe(1);
+	expect(jest.getTimerCount()).toBe(1);
 	const ids: string[] = [];
 	app.pi.events.emit(DISCOVER_EVENT, {
 		register: (panel: { id: string }) => ids.push(panel.id),

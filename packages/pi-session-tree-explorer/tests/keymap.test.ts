@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, jest } from "bun:test";
 import { getDefaultKeybindings } from "../extensions/actions.ts";
 import { KeyResolver, validateKeymap } from "../extensions/keymap.ts";
 
@@ -71,7 +71,7 @@ describe("T0002: Keymap, Multi-Key Sequences & Mode Transitions", () => {
 	});
 
 	it("handles prefix ambiguity with timeout callback (e.g. g vs gg)", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 
 		let timeoutResolvedAction = "";
 		const resolver = new KeyResolver({
@@ -90,10 +90,10 @@ describe("T0002: Keymap, Multi-Key Sequences & Mode Transitions", () => {
 		expect(res).toEqual({ type: "prefix" });
 
 		// Advance timer past 500ms without second key -> resolves to 'single.g'!
-		vi.advanceTimersByTime(600);
+		jest.advanceTimersByTime(600);
 		expect(timeoutResolvedAction).toBe("single.g");
 
-		vi.useRealTimers();
+		jest.useRealTimers();
 	});
 
 	it("detects duplicate and conflicting keybindings via validateKeymap", () => {

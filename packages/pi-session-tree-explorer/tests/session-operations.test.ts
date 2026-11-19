@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import { getDefaultConfig } from "../extensions/config-schema.ts";
 import { executeSessionIntent } from "../extensions/session-effects.ts";
 import { createInitialState } from "../extensions/state.ts";
@@ -75,7 +75,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 		// 1. Enter on real entry dispatches navigate intent
 		state.selectedEntryId = "asst1";
 		comp.handleInput("\r");
-		expect(returnedIntent).toEqual({
+		expect<unknown>(returnedIntent).toEqual({
 			type: "navigate",
 			entryId: "asst1",
 			summarize: undefined,
@@ -85,7 +85,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 		returnedIntent = null;
 		comp = newComponent();
 		comp.handleInput("f");
-		expect(returnedIntent).toEqual({
+		expect<unknown>(returnedIntent).toEqual({
 			type: "fork",
 			entryId: "asst1",
 			position: "at",
@@ -95,7 +95,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 		returnedIntent = null;
 		comp = newComponent();
 		comp.handleInput("F");
-		expect(returnedIntent).toEqual({
+		expect<unknown>(returnedIntent).toEqual({
 			type: "fork",
 			entryId: "asst1",
 			position: "before",
@@ -153,7 +153,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 				getEntry: (id: string) => entries.find((e) => e.id === id),
 				getLeafId: () => "asst2",
 			},
-			navigateTree: vi.fn(
+			navigateTree: mock(
 				async (
 					targetId: string,
 					options?: {
@@ -193,7 +193,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			sessionManager: {
 				getEntry: (id: string) => entries.find((e) => e.id === id),
 			},
-			fork: vi.fn(
+			fork: mock(
 				async (
 					targetId: string,
 					options?: {
@@ -207,7 +207,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 					if (options?.withSession) {
 						withSessionCalled = true;
 						await options.withSession({
-							ui: { notify: vi.fn() },
+							ui: { notify: mock() },
 						});
 					}
 					return { cancelled: false };
@@ -238,7 +238,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			sessionManager: {
 				getEntry: (id: string) => entries.find((e) => e.id === id),
 			},
-			fork: vi.fn(
+			fork: mock(
 				async (
 					_targetId: string,
 					options?: {
@@ -273,7 +273,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			"Fork Before is only available for user messages",
 		);
 		expect(
-			(mockCtx as { fork: ReturnType<typeof vi.fn> }).fork,
+			(mockCtx as { fork: ReturnType<typeof mock> }).fork,
 		).not.toHaveBeenCalled();
 
 		// 2. Fork Before on user entry (user2) should SUCCEED
@@ -296,8 +296,8 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			sessionManager: {
 				getEntry: (id: string) => entries.find((e) => e.id === id),
 			},
-			navigateTree: vi.fn(),
-			fork: vi.fn(),
+			navigateTree: mock(),
+			fork: mock(),
 		};
 
 		const config = getDefaultConfig();
@@ -319,7 +319,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			"Wait for the current response or compaction to finish",
 		);
 		expect(
-			(mockCtx as { navigateTree: ReturnType<typeof vi.fn> }).navigateTree,
+			(mockCtx as { navigateTree: ReturnType<typeof mock> }).navigateTree,
 		).not.toHaveBeenCalled();
 
 		// Busy Fork
@@ -333,7 +333,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			"Wait for the current response or compaction to finish",
 		);
 		expect(
-			(mockCtx as { fork: ReturnType<typeof vi.fn> }).fork,
+			(mockCtx as { fork: ReturnType<typeof mock> }).fork,
 		).not.toHaveBeenCalled();
 	});
 
@@ -344,8 +344,8 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			sessionManager: {
 				getEntry: () => undefined, // Target missing!
 			},
-			navigateTree: vi.fn(),
-			fork: vi.fn(),
+			navigateTree: mock(),
+			fork: mock(),
 		};
 
 		const config = getDefaultConfig();
@@ -369,7 +369,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			sessionManager: {
 				getEntry: () => ({ type: "message", id: "ok", parentId: null }),
 			},
-			navigateTree: vi.fn(async () => ({ cancelled: true })), // Extension cancelled
+			navigateTree: mock(async () => ({ cancelled: true })), // Extension cancelled
 		};
 		const cancelRes = await executeSessionIntent({
 			intent: { type: "navigate", entryId: "ok" },
@@ -389,7 +389,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 			sessionManager: {
 				getEntry: (id: string) => entries.find((e) => e.id === id),
 			},
-			fork: vi.fn(
+			fork: mock(
 				async (
 					_id: string,
 					options?: {
@@ -401,7 +401,7 @@ describe("T0005: Safe Navigate & Fork Session Operations", () => {
 					if (options?.withSession) {
 						await options.withSession({
 							isReplacement: true,
-							ui: { notify: vi.fn() },
+							ui: { notify: mock() },
 						});
 					}
 					return { cancelled: false };

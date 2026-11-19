@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,7 +6,6 @@ import type {
 	ExtensionContext,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
 import { defaults } from "../extensions/config.ts";
 import { Continuity } from "../extensions/continuity.ts";
 import { Delegator } from "../extensions/delegation.ts";

@@ -1,3 +1,4 @@
+import { describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { Session as InspectorSession } from "node:inspector/promises";
 import { arch, cpus, platform, tmpdir } from "node:os";
@@ -8,7 +9,6 @@ import {
 	type ExtensionCommandContext,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
 import { ConfigManager } from "../extensions/config.ts";
 import { getDefaultConfig } from "../extensions/config-schema.ts";
 import { ContextMetricsCache } from "../extensions/context-metrics.ts";
@@ -21,6 +21,7 @@ import {
 	getViewStateFilePath,
 	loadViewState,
 } from "../extensions/view-state.ts";
+import { restoreAgentDir, setAgentDir } from "./agent-dir-fixture.ts";
 import { generateWorkload } from "./workload-generator.ts";
 
 function p95(values: number[]) {
@@ -245,7 +246,7 @@ describe("combined interaction workload evidence", () => {
 				topology: "linear-payload",
 				bytes: heavyBytes,
 			});
-			vi.stubEnv("PI_CODING_AGENT_DIR", root);
+			setAgentDir(root);
 			const session = SessionManager.inMemory(root);
 			for (let i = 0; i < 10000; i++)
 				session.appendMessage({
@@ -371,7 +372,7 @@ describe("combined interaction workload evidence", () => {
 				expect(Number.isFinite(score.p95Ms)).toBe(true);
 		} finally {
 			profiler?.disconnect();
-			vi.unstubAllEnvs();
+			restoreAgentDir();
 			component?.dispose();
 			await rm(root, { recursive: true, force: true });
 		}

@@ -11,7 +11,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pkg = resolve(here, "..");
 const root = await mkdtemp(join(tmpdir(), "aco-recovery-host-"));
 const npm =
-	process.env.npm_execpath ??
+	(process.env.npm_execpath?.endsWith(".js")
+		? process.env.npm_execpath
+		: undefined) ??
 	join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 const run = (args, cwd) => {
 	const result = spawnSync(process.execPath, [npm, ...args], {

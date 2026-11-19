@@ -1,6 +1,6 @@
 # Pi Plugin Support
 
-`pi-plugin-support@0.1.0` is an ordinary versioned dependency, **not a Pi plugin, collection loader or manager**. It exposes source-only ESM modules and no Pi resources. Consumers own their instances, sessions and cleanup; importing the library starts no resources.
+`pi-plugin-support` is a permanently private workspace library, **not a Pi plugin, collection loader or manager**. It exposes source-only ESM modules and no Pi resources. Consumers own their instances, sessions and cleanup; importing the library starts no resources.
 
 ## Modules and ownership
 
@@ -14,39 +14,23 @@ The config store preserves existing adapters' update-before-persist behavior: a 
 
 ## Compatibility and delivery
 
-Node.js >=22.19.0, TypeScript ESM/erasable syntax, TypeBox and no required bundler/emitted build. Pi 1.5.0 on Windows is the verified host. Used Pi SDK packages and `typebox` are host-provided `"*"` peers, not bundled host copies.
-
-No registry identity/publication is claimed. Each plugin declares the exact ordinary dependency `pi-plugin-support: 0.1.0` and includes **only that dependency** in npm `bundledDependencies`. npm plugin tarballs carry the prepared library source package; this is not a JavaScript bundler or shared runtime singleton. Each plugin also ships `vendor/pi-plugin-support-0.1.0.tgz`, and its local lockfile resolves that archive for independent checkout/copy setup. Do not replace the manifest dependency with a nested `file:vendor` specifier: actual npm tarball installation reproduced ENOENT for that form.
-
-From the collection checkout, after library source/API/README changes:
-
-```sh
-node scripts/package-support.mjs
-node scripts/package-support.mjs --check
-```
-
-The first command packs the canonical library, refreshes consumer archives/installed library copies and npm lock integrity, then restores the exact declared version. The check packs into a temporary directory and verifies archive parity without modifying the checkout. Prepare all affected consumers before packing them; a clean plugin tarball install is covered by the isolation matrix. Before any external release, version changes must be coordinated explicitly; do not silently overwrite a published version.
+Rolldown inlines this library into consumer bundles. It is not separately installed or published. Use Node.js >= 22.19.0, TypeScript ESM and host-provided Pi SDK/TypeBox peers. Inlined copies interoperate through the event protocol without sharing mutable runtime ownership.
 
 ## Development and verification
 
-```sh
-cd packages/pi-plugin-support
-npm ci --ignore-scripts --legacy-peer-deps
-npm run typecheck
-npm run check
-npm test
-```
-
-These are separate checks; no JavaScript is emitted. From the collection root, with `PI_BINARY` pointing at the installed executable when needed:
+From the repository root:
 
 ```sh
+bun install --frozen-lockfile
+bun run check
+bun run --cwd packages/pi-plugin-support typecheck
+bun run --cwd packages/pi-plugin-support test
+bun run build
 node tests/support-library-smoke.mjs
 node tests/plugin-isolation.mjs
 ```
 
-The library smoke installs an independent archive consumer outside the checkout and exercises real Pi host-peer resolution. The matrix installs complete plugin tarballs as dependencies in separate temporary roots, verifies only the support library is bundled, checks seven combinations and repeated session cleanup, and tests a frozen baseline protocol reader against migrated registrations. Offline installation requires the normal dependency cache prepared by documented package setup.
-
-Real Windows Terminal keyboard interaction additionally verified configuration changes/reload, navigation/search/Escape, stop/owner refresh, loaded-plugin switching, full-prefix Tab completion and orderly exit using isolated empty auth and no live provider calls. Component tests remain a separate evidence class. Other operating systems, physical sleep/wake and live services are not claimed.
+Set `PI_BINARY` to the actual Pi executable if needed. The support probe exercises inlined code and host-peer resolution. The isolation matrix loads independently packed bundles, verifies seven combinations and three session lifecycles per combination, and checks interoperability with a frozen baseline reader. This does not establish live-service or physical-terminal coverage.
 
 ## Permissions
 

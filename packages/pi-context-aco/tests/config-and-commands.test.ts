@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { complete, parse } from "../extensions/commands.ts";
 import { Config, defaults } from "../extensions/config.ts";
 
@@ -104,7 +104,7 @@ describe("strict command and full-prefix completion", () => {
 		["status extra", { kind: "help" }],
 		["config a b c", { kind: "help" }],
 	])("parses %s", (input, expected) => {
-		expect(parse(input)).toEqual(expected);
+		expect<unknown>(parse(input)).toEqual(expected);
 	});
 	it("completes whole argument strings for config keys and values, not only the final token", () => {
 		expect(complete("config hor", defaults)?.map((x) => x.value)).toEqual([

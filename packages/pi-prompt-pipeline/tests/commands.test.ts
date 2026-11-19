@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "bun:test";
 import { completions, parseCommand } from "../extensions/commands.ts";
 
 it("parses stage/mode and rejects accidental requests or trailing junk", () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
 	cp,
 	mkdir,
@@ -18,20 +18,84 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = await mkdtemp(join(tmpdir(), "pi-prompt-pipeline-smoke-"));
 const cwd = join(root, "project"),
 	agent = join(root, "agent"),
-	plugin = join(root, "plugin"),
 	output = join(root, "output");
 let child;
 try {
-	await Promise.all([mkdir(cwd), mkdir(agent), mkdir(plugin)]);
-	// Copy only distributable resources: no node_modules, repository/sibling imports or development dependencies.
-	await cp(join(packageRoot, "extensions"), join(plugin, "extensions"), {
-		recursive: true,
-	});
-	const manifest = JSON.parse(
-		await readFile(join(packageRoot, "package.json"), "utf8"),
+	await Promise.all([mkdir(cwd), mkdir(agent)]);
+	const npmCli =
+		(process.env.npm_execpath?.endsWith(".js")
+			? process.env.npm_execpath
+			: undefined) ??
+		join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+	const packed = spawnSync(
+		process.execPath,
+		[npmCli, "pack", "--ignore-scripts", "--json", "--pack-destination", root],
+		{ cwd: packageRoot, encoding: "utf8", windowsHide: true, timeout: 30000 },
 	);
-	delete manifest.devDependencies;
-	await writeFile(join(plugin, "package.json"), JSON.stringify(manifest));
+	assert.equal(packed.status, 0, `npm pack failed: ${packed.stderr}`);
+	const info = JSON.parse(packed.stdout)[0];
+	assert.equal(
+		info.bundled?.length ?? 0,
+		0,
+		"no bundledDependencies; support library is inlined",
+	);
+	assert.ok(
+		info.files.some((f) => f.path === "dist/index.js"),
+		"built dist/index.js must be packed",
+	);
+	assert.ok(
+		info.files.some((f) => f.path === "dist/LICENSE"),
+		"dist/LICENSE must be packed",
+	);
+	assert.ok(
+		info.files.some((f) => f.path === "dist/CHANGELOG.md"),
+		"dist/CHANGELOG.md must be packed",
+	);
+	assert.ok(
+		!info.files.some(
+			(f) => f.path.startsWith("vendor/") || f.path.startsWith("node_modules/"),
+		),
+		"no vendor/ or node_modules/ in tarball",
+	);
+	assert.ok(
+		info.files.some((f) => f.path.startsWith("examples/")),
+		"examples/ must be packed",
+	);
+	const consumer = join(root, "consumer");
+	await mkdir(consumer, { recursive: true });
+	await writeFile(
+		join(consumer, "package.json"),
+		JSON.stringify({
+			private: true,
+			dependencies: {
+				"@monkeyman520/pi-prompt-pipeline": `file:${join(root, info.filename).replaceAll("\\", "/")}`,
+			},
+		}),
+	);
+	const installed = spawnSync(
+		process.execPath,
+		[
+			npmCli,
+			"install",
+			"--omit=dev",
+			"--ignore-scripts",
+			"--legacy-peer-deps",
+			"--offline",
+			"--no-audit",
+		],
+		{ cwd: consumer, encoding: "utf8", windowsHide: true, timeout: 60000 },
+	);
+	assert.equal(
+		installed.status,
+		0,
+		`isolated production dependencies: ${installed.stderr}`,
+	);
+	const isolated = join(
+		consumer,
+		"node_modules",
+		..."@monkeyman520/pi-prompt-pipeline".split("/"),
+	);
+	const plugin = isolated;
 	const provider = join(root, "provider.ts"),
 		peer = join(root, "peer.ts");
 	await cp(join(packageRoot, "tests/provider-fixture.ts"), provider);
@@ -45,7 +109,7 @@ try {
 		}),
 	);
 	await writeFile(
-		join(plugin, "extensions/smoke.mjs"),
+		join(root, "smoke.mjs"),
 		'export default (text)=>text+"\\nscript-native";',
 	);
 	await writeFile(
@@ -60,7 +124,7 @@ try {
 					targets: ["intro"],
 					actions: [
 						{ type: "append", text: "\nagent-transformed" },
-						{ type: "script", path: join(plugin, "extensions/smoke.mjs") },
+						{ type: "script", path: join(root, "smoke.mjs") },
 					],
 				},
 				{

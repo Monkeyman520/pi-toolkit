@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +12,6 @@ import {
 	type SessionHeader,
 	type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	enrichSessionInfo,
 	filterEnrichedSessions,
@@ -430,7 +430,7 @@ describe("commands, display formatting, and extension lifecycle", () => {
 			JSON.stringify({
 				name: "demo-project",
 				version: "1.0.0",
-				scripts: { test: "vitest" },
+				scripts: { test: "bun test" },
 			}),
 			"utf8",
 		);

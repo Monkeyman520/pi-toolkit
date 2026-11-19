@@ -4,18 +4,29 @@ An independently installable Pi extension that automatically names sessions, sum
 
 ## Compatibility and resources
 
-- Node.js >= 22.19.0; TypeScript ESM, no bundler or emitted build.
+- Node.js >= 22.19.0; TypeScript ESM with a Rolldown build.
 - Requires Pi's `setSessionName`, `appendEntry`, `sessionManager`, `getContextUsage`, `modelRegistry.complete`, `ui.setWidget`/`ui.setStatus`/`ui.custom`, `switchSession`, and lifecycle hooks (`session_start`, `agent_settled`, `session_compact`, `session_tree`, `session_info_changed`, `session_shutdown`). Tested with Pi **1.5.0**, Windows, Node **26.13.0**.
-- One extension entry resource: `extensions/index.ts`. Host `*` peers follow Pi's extension loading contract rather than claiming compatibility with every host version.
-- No dependency on `pi-auto-resume`, `pi-quota-keeper`, or other sibling packages. No npm publication is claimed.
+- One extension entry resource: `dist/index.js`. Host `*` peers follow Pi's extension loading contract rather than claiming compatibility with every host version.
+- No dependency on `pi-auto-resume`, `pi-quota-keeper`, or other sibling packages.
 
 ## Install and use
 
-From this collection checkout:
+After the package is available on npm, install it without a version pin:
 
 ```sh
+pi install npm:@monkeyman520/pi-pretty-session
+pi update npm:@monkeyman520/pi-pretty-session
+```
+
+Use `pi update --extensions` for all installed extensions. Pinned versions do not follow later releases. On a fresh launch after an update, Pi can show the bundled changelog under **Extension Updates**; the plugin does not poll for updates.
+
+From the repository root, prepare the workspace and build before loading locally:
+
+```sh
+bun install --frozen-lockfile
+bun run --cwd packages/pi-pretty-session build
 pi -e ./packages/pi-pretty-session
-# Or register the individual package in your personal Pi settings:
+# Or persist this local package:
 pi install ./packages/pi-pretty-session
 ```
 
@@ -86,7 +97,7 @@ This extension runs with Pi's full operating-system process privileges:
 
 ## Development and verification
 
-This plugin declares `pi-plugin-support@0.1.0` as an ordinary dependency. Its versioned archive is shipped in `vendor/` for package-local lockfile setup; npm distribution bundles only that ordinary library, never host SDKs or another plugin. Follow the [support-library reference](../pi-plugin-support/README.md) when updating shared sources. No registry publication or emitted build is required. Prepare dependencies before `pi -e` or local installation; Pi does not install local-package dependencies.
+Rolldown inlines the private [support library](../pi-plugin-support/README.md) where used. Pi SDKs and TypeBox remain host peers, and each plugin owns its state and lifecycle.
 
 The shared library owns configuration-file and TUI/discovery mechanisms; this plugin retains its own schema, failure policy, actions, instances and resource cleanup.
 
@@ -94,24 +105,23 @@ Package-local configuration metadata supplies both command completions and panel
 
 The optional [collection isolation matrix](../../README.md#cross-plugin-isolation-verification) additionally exercises all seven plugin combinations in real Pi; it is development-only, not an installation or runtime dependency.
 
-Use the package-local npm lockfile and npm 11.20.0:
+From the package directory after the root frozen install and build:
 
 ```sh
 cd packages/pi-pretty-session
-npm ci --ignore-scripts --legacy-peer-deps
-npm run typecheck
-npm run check
-npm test
-npm run smoke
+bun run typecheck
+bun run check
+bun run test
+bun run smoke
 ```
 
-`typecheck` (`tsc --noEmit`), Biome (`biome check .`), and Vitest (`vitest run`) are separate checks. `.npmrc` disables dependency lifecycle scripts. No JavaScript is emitted.
+TypeScript no-emit, Biome and Bun tests are separate from the Rolldown build and Pi smoke.
 
 The smoke test requires an installed Pi binary. If `pi` is not directly executable (for example a Windows command shim), set `PI_BINARY` to the actual executable path. PowerShell example:
 
 ```powershell
 $env:PI_BINARY = 'C:\path\to\pi.exe'
-npm run smoke
+bun run smoke
 ```
 
 The smoke test copies only this package into a temporary directory without sibling plugins or inherited development `node_modules`, installs its declared production dependencies from the shipped archive/lockfile, initializes a temporary Git repository and `package.json`, configures an isolated Pi agent directory and a synthetic provider, and launches real Pi RPC. It verifies `/pretty-session` and `/ps` command registration, automatic LLM session naming and description generation after the first turn, start/update timestamps and context length reporting, project Git and manifest inspection, manual rename locking, dynamic `pi-pretty-session.json` hot-reloading (`widgetPlacement: "belowEditor"`, `updateEveryTurns: 1`), explicit `/ps summarize` override, and clean shutdown. Expected output ends in `PASS`.

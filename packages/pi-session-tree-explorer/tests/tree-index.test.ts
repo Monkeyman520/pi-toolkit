@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import type { SessionEntry } from "../extensions/types.ts";
 
