@@ -31,6 +31,11 @@ export async function readJsonConfig(
 	let text: string | undefined, mtimeMs: number | undefined;
 	try {
 		const file = await stat(path);
+		if (!file.isFile())
+			return {
+				kind: "unreadable",
+				error: new Error("Configuration path is not a regular file"),
+			};
 		if (file.size > maxBytes)
 			return {
 				kind: "invalid",

@@ -35,7 +35,7 @@ const schema = Type.Object(
 	{ additionalProperties: false },
 );
 const defaults = () => ({ enabled: true, count: 3 });
-it("distinguishes absence, invalid JSON/schema, oversized and unreadable input", async () => {
+it("distinguishes absence, invalid JSON/schema, and oversized files", async () => {
 	const path = await location();
 	expect((await readJsonConfig(path, schema, 100)).kind).toBe("missing");
 	await writeFile(path, "{bad");
@@ -44,9 +44,15 @@ it("distinguishes absence, invalid JSON/schema, oversized and unreadable input",
 	expect((await readJsonConfig(path, schema, 100)).kind).toBe("invalid");
 	await writeFile(path, '{"count":2}');
 	expect((await readJsonConfig(path, schema, 4)).kind).toBe("invalid");
-	await rm(path);
+});
+it("rejects a directory as unreadable regardless of the size limit", async () => {
+	const path = await location();
 	await mkdir(path);
-	expect((await readJsonConfig(path, schema, 100)).kind).toBe("unreadable");
+	for (const maxBytes of [1, 1024 * 1024]) {
+		expect((await readJsonConfig(path, schema, maxBytes)).kind).toBe(
+			"unreadable",
+		);
+	}
 });
 it("keeps separate safe/fail-closed policy, error state and tracking in caller instances", async () => {
 	const a = await location(),
