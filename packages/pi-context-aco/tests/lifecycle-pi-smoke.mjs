@@ -11,7 +11,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pkg = resolve(here, "..");
 const root = await mkdtemp(join(tmpdir(), "aco-lifecycle-"));
 const npm =
-	process.env.npm_execpath ??
+	(process.env.npm_execpath?.endsWith(".js")
+		? process.env.npm_execpath
+		: undefined) ??
 	join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 let client;
 const run = (args, cwd) => {
@@ -70,7 +72,9 @@ try {
 			pkg,
 		),
 	)[0];
-	assert.deepEqual(info.bundled, ["pi-plugin-support"]);
+	assert.equal(info.bundled?.length ?? 0, 0);
+	assert.ok(info.files.some((f) => f.path === "dist/index.js"));
+	assert.ok(info.files.some((f) => f.path === "dist/CHANGELOG.md"));
 	const consumer = join(root, "consumer");
 	await mkdir(consumer);
 	await writeFile(

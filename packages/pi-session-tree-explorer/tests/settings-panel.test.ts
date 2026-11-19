@@ -1,8 +1,8 @@
+import { describe, expect, it, mock } from "bun:test";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
 import { ConfigManager } from "../extensions/config.ts";
 import {
 	DISCOVER_EVENT,
@@ -17,7 +17,7 @@ describe("T0003: Settings Panel & Installed-Only pi.events Discovery", () => {
 		let registeredDescriptor: PluginUiDescriptor | null = null;
 
 		const mockPayload = {
-			register: vi.fn((desc: PluginUiDescriptor) => {
+			register: mock((desc: PluginUiDescriptor) => {
 				registeredDescriptor = desc;
 			}),
 		};
@@ -45,7 +45,7 @@ describe("T0003: Settings Panel & Installed-Only pi.events Discovery", () => {
 
 		const mockCtx = {
 			ui: {
-				custom: vi.fn(
+				custom: mock(
 					async (
 						factory: (
 							tui: unknown,
@@ -55,12 +55,12 @@ describe("T0003: Settings Panel & Installed-Only pi.events Discovery", () => {
 						) => unknown,
 					) => {
 						customUiCalled = true;
-						const mockTui = { requestRender: vi.fn() };
+						const mockTui = { requestRender: mock() };
 						const mockTheme = {
 							fg: (_c: string, text: string) => text,
 							bold: (text: string) => text,
 						};
-						const comp = factory(mockTui, mockTheme, {}, vi.fn());
+						const comp = factory(mockTui, mockTheme, {}, mock());
 						expect(comp).toBeDefined();
 					},
 				),
@@ -68,7 +68,7 @@ describe("T0003: Settings Panel & Installed-Only pi.events Discovery", () => {
 		} as unknown as ExtensionContext;
 
 		const mockEvents = {
-			emit: vi.fn((event: string, payload: unknown) => {
+			emit: mock((event: string, payload: unknown) => {
 				if (event === DISCOVER_EVENT && isDiscoverPayload(payload)) {
 					payload.register({
 						id: SELF_PLUGIN_ID,
@@ -79,7 +79,7 @@ describe("T0003: Settings Panel & Installed-Only pi.events Discovery", () => {
 					});
 				}
 			}),
-		} as unknown as ExtensionAPI["events"] & { emit: ReturnType<typeof vi.fn> };
+		} as unknown as ExtensionAPI["events"] & { emit: ReturnType<typeof mock> };
 
 		await openSessionTreeSettingsPanel({
 			ctx: mockCtx,
@@ -100,7 +100,7 @@ describe("T0003: Settings Panel & Installed-Only pi.events Discovery", () => {
 
 		const mockCtx = {
 			ui: {
-				custom: vi.fn(
+				custom: mock(
 					async (
 						factory: (
 							tui: unknown,
@@ -109,19 +109,19 @@ describe("T0003: Settings Panel & Installed-Only pi.events Discovery", () => {
 							done: () => void,
 						) => unknown,
 					) => {
-						const mockTui = { requestRender: vi.fn() };
+						const mockTui = { requestRender: mock() };
 						const mockTheme = {
 							fg: (_c: string, text: string) => text,
 							bold: (text: string) => text,
 						};
-						createdComponent = factory(mockTui, mockTheme, {}, vi.fn());
+						createdComponent = factory(mockTui, mockTheme, {}, mock());
 					},
 				),
 			},
 		} as unknown as ExtensionContext;
 
 		const mockEvents = {
-			emit: vi.fn((event: string, payload: unknown) => {
+			emit: mock((event: string, payload: unknown) => {
 				if (event === DISCOVER_EVENT && isDiscoverPayload(payload)) {
 					payload.register({
 						id: SELF_PLUGIN_ID,
@@ -135,7 +135,7 @@ describe("T0003: Settings Panel & Installed-Only pi.events Discovery", () => {
 						title: "Pretty Session",
 						command: "/ps config",
 						getSummary: () => "Auto session naming",
-						open: vi.fn(),
+						open: mock(),
 					});
 				}
 			}),

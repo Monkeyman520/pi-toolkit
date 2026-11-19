@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { PressureMonitor, textTokens } from "../extensions/pressure.ts";
 
 const settings = { historySize: 3, horizonTurns: 3, reserveTokens: 1000 };

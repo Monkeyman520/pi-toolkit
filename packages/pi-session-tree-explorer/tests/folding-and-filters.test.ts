@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createActionRegistry } from "../extensions/actions.ts";
 import { buildDisplayProjection } from "../extensions/display.ts";
 import { createInitialState } from "../extensions/state.ts";
@@ -314,7 +314,7 @@ describe("T0002: Folding and Composable Filters", () => {
 
 		// fold.collapseAll
 		registry.get("fold.collapseAll")?.execute(ctx);
-		expect(state.foldOptions.mode).toBe("depth-limited");
+		expect<unknown>(state.foldOptions.mode).toBe("depth-limited");
 		expect(state.foldOptions.maxExpandDepth).toBe(0);
 
 		// fold.increaseDepth & fold.decreaseDepth
@@ -325,9 +325,9 @@ describe("T0002: Folding and Composable Filters", () => {
 
 		// fold.activeOnly & fold.focusedOnly
 		registry.get("fold.activeOnly")?.execute(ctx);
-		expect(state.foldOptions.mode).toBe("active-only");
+		expect<unknown>(state.foldOptions.mode).toBe("active-only");
 		registry.get("fold.focusedOnly")?.execute(ctx);
-		expect(state.foldOptions.mode).toBe("focused-only");
+		expect<unknown>(state.foldOptions.mode).toBe("focused-only");
 
 		// fold.collapseSiblings
 		state.selectedEntryId = "user3A";
@@ -336,7 +336,7 @@ describe("T0002: Folding and Composable Filters", () => {
 
 		// fold.restoreDefault
 		registry.get("fold.restoreDefault")?.execute(ctx);
-		expect(state.foldOptions.mode).toBe("focused-only");
+		expect<unknown>(state.foldOptions.mode).toBe("focused-only");
 		expect(state.manualCollapsedIds.size).toBe(0);
 	});
 });

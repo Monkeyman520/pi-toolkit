@@ -3,6 +3,7 @@
 **Status:** Completed
 **Date:** 2026-11-04
 **Supersedes:** [ADR 0004](./0004-unified-command-grammar-and-dynamic-tui-configuration.md), only its blanket prohibition on cross-package code dependencies; its command, UI, event-discovery, and installed-only visibility decisions remain in force.
+**Partially superseded by:** [ADR 0008](./0008-bun-workspace-rolldown-and-bun-test-stack.md), only for archive/bundled-dependency distribution (`vendor/*.tgz`, npm `bundledDependencies`) and the no-bundler constraint; independent instance/lifecycle ownership and `pi.events` discovery remain in force.
 
 ## Context
 

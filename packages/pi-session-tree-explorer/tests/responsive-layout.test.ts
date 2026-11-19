@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it } from "vitest";
 import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";

@@ -4,7 +4,7 @@ An independently installable interactive Session Explorer extension for Pi codin
 
 ## Status
 
-The **v2.0 Interactive Session Explorer** implementation (Spec 0008 / Ticket Set 0007) passes `tsc --noEmit`, Biome, Vitest (including E01–E07 acceptance suites), and isolated Pi RPC loading/smoke checks on Windows x64 (Pi 1.5.2, Node.js >= 22.19.0). Live physical-terminal keyboard testing across WSL and Unix terminals remains external to automated headless verification.
+The **v2.0 Interactive Session Explorer** implementation (Spec 0008 / Ticket Set 0007) passes `tsc --noEmit`, Biome, Bun (including E01–E07 acceptance suites), and isolated Pi RPC loading/smoke checks on Windows x64 (Pi 1.5.2, Node.js >= 22.19.0). Live physical-terminal keyboard testing across WSL and Unix terminals remains external to automated headless verification.
 
 ### Approved configuration constraints (Spec 0008 U4)
 
@@ -15,19 +15,30 @@ The **v2.0 Interactive Session Explorer** implementation (Spec 0008 / Ticket Set
 
 ## Compatibility, installation and resources
 
-- Node.js >=22.19.0; TypeScript ESM with erasable syntax and no emitted build.
+- Node.js >=22.19.0; TypeScript ESM with a Rolldown build.
 - Verified against Pi `1.5.2` on Windows x64 (prior v1.0 evidence used Pi `1.5.0`). Wildcard peer ranges are not universal compatibility claims.
 - Host peers: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, and `typebox`.
-- Declared ordinary dependency: `pi-plugin-support@0.1.0` (archived under `vendor/`).
-- Extension resource: `extensions/index.ts`.
+- Rolldown inlines the private [support library](../pi-plugin-support/README.md) where used. Pi SDKs and TypeBox remain host peers, and each plugin owns its state and lifecycle.
+- Extension resource: `dist/index.js`.
 
-From the repository root:
+After the package is available on npm, install it without a version pin:
 
 ```sh
-pi -e ./packages/pi-session-tree-explorer
+pi install npm:@monkeyman520/pi-session-tree-explorer
+pi update npm:@monkeyman520/pi-session-tree-explorer
 ```
 
-Or install locally with `pi install ./packages/pi-session-tree-explorer`.
+Use `pi update --extensions` for all installed extensions. Pinned versions do not follow later releases. On a fresh launch after an update, Pi can show the bundled changelog under **Extension Updates**; the plugin does not poll for updates.
+
+From the repository root, prepare the workspace and build before loading locally:
+
+```sh
+bun install --frozen-lockfile
+bun run --cwd packages/pi-session-tree-explorer build
+pi -e ./packages/pi-session-tree-explorer
+# Or persist this local package:
+pi install ./packages/pi-session-tree-explorer
+```
 
 ## Commands and interaction
 
@@ -69,17 +80,19 @@ Settings panels are discovered over `pi.events` from actually loaded plugins (AD
 
 ## Verification
 
+After the root frozen install and build:
+
 ```sh
 cd packages/pi-session-tree-explorer
-npm run typecheck
-npm run check
-npm test
-npm run smoke
+bun run typecheck
+bun run check
+bun run test
+bun run smoke
 ```
 
 - `typecheck`: `tsc --noEmit` (zero errors).
 - `check`: Biome lint & format check.
-- `test`: Vitest unit, integration, and E01–E07 acceptance suite.
+- `test`: Bun unit, integration, and E01–E07 acceptance suite.
 - `smoke`: Isolated temporary production dependency install + live Pi RPC verification of `/stree` commands and native Navigate / Fork At / Fork Before safety.
 
 ## Permissions and risks

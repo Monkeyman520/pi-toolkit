@@ -1,18 +1,31 @@
 # Pi Prompt Pipeline
 
-An independently installable Pi extension for conditional system-prompt transforms and local boundary exports. Entry: `extensions/index.ts`. It does not modify the Pi host or register model-callable tools.
+An independently installable Pi extension for conditional system-prompt transforms and local boundary exports. Entry: `dist/index.js`. It does not modify the Pi host or register model-callable tools.
 
 ## Compatibility and installation
 
-Requires Node.js >= 22.19.0 and Pi APIs `before_agent_start`, `before_provider_request`, `getCommands()`, project trust and custom TUI. Tested with Pi 1.5.2 on Windows and Node.js 26.13.1. SDK/TUI/TypeBox are host-provided peers; no sibling plugin, runtime dependency, bundler or emitted build is required. Wildcard peers do not imply every host version was tested.
+Requires Node.js >= 22.19.0 and Pi APIs `before_agent_start`, `before_provider_request`, `getCommands()`, project trust and custom TUI. Tested with Pi 1.5.2 on Windows and Node.js 26.13.1. SDK/TUI/TypeBox are host-provided peers. Rolldown builds the distributed extension; it needs no sibling plugins or extra runtime dependencies. Wildcard peers do not imply every host version was tested.
 
-From the collection checkout, load only this package:
+After the package is available on npm, install it without a version pin:
 
 ```sh
-pi -e ./packages/pi-prompt-pipeline
+pi install npm:@monkeyman520/pi-prompt-pipeline
+pi update npm:@monkeyman520/pi-prompt-pipeline
 ```
 
-For persistent use, add this package's absolute directory to Pi's `settings.json` `packages` array, using Pi's ordinary trusted-resource setup. This package is private/unpublished; no npm installation identity is claimed. Do not keep the old `antigravity-prompt-compat.ts` / `dump-system-prompt.ts` loaded unintentionally alongside it.
+Use `pi update --extensions` for all installed extensions. Pinned versions do not follow later releases. On a fresh launch after an update, Pi can show the bundled changelog under **Extension Updates**; the plugin does not poll for updates.
+
+From the repository root, prepare the workspace and build before loading locally:
+
+```sh
+bun install --frozen-lockfile
+bun run --cwd packages/pi-prompt-pipeline build
+pi -e ./packages/pi-prompt-pipeline
+# Or persist this local package:
+pi install ./packages/pi-prompt-pipeline
+```
+
+Do not load the old `antigravity-prompt-compat.ts` / `dump-system-prompt.ts` alongside it.
 
 ## Commands
 
@@ -164,19 +177,18 @@ Exported prompts may contain private instructions, code, paths and project conte
 
 ## Development and verification
 
-From this package directory, with Node/npm and Pi on PATH:
+From the package directory after the root frozen install and build:
 
 ```sh
-npm ci --ignore-scripts
-npm run typecheck
-npm run check
-npm test
-npm run smoke
+bun run typecheck
+bun run check
+bun run test
+bun run smoke
 ```
 
 No install scripts are needed by this package. Development dependencies supply checker/test tooling, not runtime copies bundled into the plugin. `PI_BINARY` may select an alternate Pi executable for smoke testing.
 
-The smoke test copies only distributable extension resources/manifest into a temporary directory outside the checkout, without node_modules or siblings, and loads them through actual Pi. A synthetic Antigravity-shaped provider exercises real Pi hook dispatch, command arming without model calls, native script loading, before-only/paired captures, ordering, unrelated payload preservation and session reset. It uses **no real credentials, network provider or billable calls**; this is not a live pi-antigravity service test.
+The smoke test packs and installs the built tarball outside the checkout without siblings, and loads them through actual Pi. A synthetic Antigravity-shaped provider exercises real Pi hook dispatch, command arming without model calls, native script loading, before-only/paired captures, ordering, unrelated payload preservation and session reset. It uses **no real credentials, network provider or billable calls**; this is not a live pi-antigravity service test.
 
 Unit/integration tests cover rule selection/actions, trusted layers/path origins, per-rule rollback, both payload shapes, exports/failures, lifecycle, completion and actual SettingsList render/keyboard behavior. An additional actual Windows ConPTY test exercises SettingsList persistence, Tab completion, one-shot request pairs, panel switching and reload with keyboard input. Live Antigravity service requests and human physical-terminal interaction remain unverified. See the repository's [verification record](../../.grimoire/ticket/0007-system-prompt-pipeline/verification.md) for executed results rather than treating this README as runtime evidence.
 

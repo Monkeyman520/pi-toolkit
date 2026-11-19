@@ -10,7 +10,9 @@ const here = dirname(fileURLToPath(import.meta.url)),
 	pkg = resolve(here, ".."),
 	root = await mkdtemp(join(tmpdir(), "aco-adaptive-"));
 const npm =
-	process.env.npm_execpath ??
+	(process.env.npm_execpath?.endsWith(".js")
+		? process.env.npm_execpath
+		: undefined) ??
 	join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 const run = (args, cwd) => {
 	const r = spawnSync(process.execPath, [npm, ...args], {

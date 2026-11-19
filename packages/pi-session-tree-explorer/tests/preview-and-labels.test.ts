@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createActionRegistry } from "../extensions/actions.ts";
 import { setClipboardWriter } from "../extensions/clipboard.ts";
 import { buildDisplayProjection } from "../extensions/display.ts";

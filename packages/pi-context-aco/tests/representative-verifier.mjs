@@ -9,7 +9,9 @@ import { startPi } from "./pi-client.mjs";
 const pkg = resolve(process.argv[2]);
 const root = await mkdtemp(join(tmpdir(), "aco-p1-verifier-"));
 const npm =
-	process.env.npm_execpath ??
+	(process.env.npm_execpath?.endsWith(".js")
+		? process.env.npm_execpath
+		: undefined) ??
 	join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 function run(args, cwd) {
 	const r = spawnSync(process.execPath, [npm, ...args], {

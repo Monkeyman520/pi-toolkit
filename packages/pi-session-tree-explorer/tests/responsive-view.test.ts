@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createActionRegistry } from "../extensions/actions.ts";
 import { buildDisplayProjection } from "../extensions/display.ts";
 import { createInitialState } from "../extensions/state.ts";
@@ -180,8 +180,8 @@ describe("T0007: Responsive Layouts, Compound States & View Actions", () => {
 		state.showDetails = false;
 		registry.get("view.reset")?.execute(ctx);
 
-		expect(state.displayOptions.depthMode).toBe("turn");
-		expect(state.displayOptions.layout).toBe("normal");
+		expect<unknown>(state.displayOptions.depthMode).toBe("turn");
+		expect<unknown>(state.displayOptions.layout).toBe("normal");
 		expect(state.showDetails).toBe(true);
 		expect(state.showContext).toBe(true);
 	});

@@ -1,3 +1,4 @@
+import { describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,7 +6,6 @@ import {
 	createEventBus,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
 import {
 	formatQuotaCommand,
 	getQuotaCompletions,
@@ -100,7 +100,7 @@ describe("quota command contract", () => {
 			{ kind: "view", id: "anthropic:one", detailed: true },
 		],
 	])("parses %j without treating IDs as executable input", (args, expected) => {
-		expect(parseQuotaArgs(String(args))).toEqual(expected);
+		expect<unknown>(parseQuotaArgs(String(args))).toEqual(expected);
 	});
 	it.each([
 		"list extra",

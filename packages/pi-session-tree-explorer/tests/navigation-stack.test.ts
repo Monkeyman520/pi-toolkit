@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it, jest, mock } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createActionRegistry,
 	getDefaultKeybindings,
@@ -75,7 +75,7 @@ function buildBranchFixture(): SessionEntry[] {
 
 describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decoupling", () => {
 	afterEach(() => {
-		vi.useRealTimers();
+		jest.useRealTimers();
 	});
 
 	it("keeps default keybindings free of same-mode duplicates and invalid keys", () => {
@@ -98,7 +98,7 @@ describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decou
 				maxExpandDepth: 0,
 			},
 		});
-		const done = vi.fn();
+		const done = mock();
 		const comp = new SessionTreeComponent({
 			tui: { requestRender() {} },
 			theme: {},
@@ -142,7 +142,7 @@ describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decou
 		let activeLeafId = "b1-tip";
 		const entries = buildBranchFixture();
 		const byId = new Map(entries.map((e) => [e.id, e]));
-		const navigateTree = vi.fn(async (targetId: string) => {
+		const navigateTree = mock(async (targetId: string) => {
 			activeLeafId = targetId;
 			return { cancelled: false };
 		});
@@ -234,8 +234,8 @@ describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decou
 			selectedEntryId: "root",
 			sessionLeafId: "b1-tip",
 		});
-		const done = vi.fn();
-		const notify = vi.fn();
+		const done = mock();
+		const notify = mock();
 		const comp = new SessionTreeComponent({
 			tui: { requestRender() {} },
 			theme: {},
@@ -256,7 +256,7 @@ describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decou
 	});
 
 	it("discovers reachable tips and jumps directly when branch has a single assistant tip", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const index = buildTreeIndex(buildBranchFixture());
 		expect(findReachableBranchTips(index, "fork")).toEqual([
 			"b1-tip",
@@ -289,7 +289,7 @@ describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decou
 		});
 
 		comp.handleInput("g");
-		vi.advanceTimersByTime(900);
+		jest.advanceTimersByTime(900);
 		expect(emitted).toEqual({ type: "navigate", entryId: "single-tip" });
 	});
 
@@ -328,8 +328,8 @@ describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decou
 				maxExpandDepth: 0,
 			},
 		});
-		const done = vi.fn();
-		const notify = vi.fn();
+		const done = mock();
+		const notify = mock();
 		const comp = new SessionTreeComponent({
 			tui: { requestRender() {} },
 			theme: {},
@@ -415,7 +415,7 @@ describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decou
 	it("notifies editor-prompt restoration after executeSessionIntent navigates to user entry", async () => {
 		const entries = buildBranchFixture();
 		const byId = new Map(entries.map((e) => [e.id, e]));
-		const notify = vi.fn();
+		const notify = mock();
 		const ctx = {
 			sessionManager: {
 				getSessionId: () => "sess-user-tip",
@@ -423,7 +423,7 @@ describe("T0001: Navigation History Stack, Branch Tip Navigation & Preview Decou
 				getEntry: (id: string) => byId.get(id),
 			},
 			isIdle: () => true,
-			navigateTree: vi.fn(async () => ({ cancelled: false })),
+			navigateTree: mock(async () => ({ cancelled: false })),
 		} as unknown as ExtensionCommandContext;
 		const res = await executeSessionIntent({
 			intent: { type: "navigate", entryId: "b2-tip-user" },

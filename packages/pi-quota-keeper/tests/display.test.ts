@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { formatQuotaView } from "../extensions/display.ts";
 import type { Snapshot } from "../extensions/providers.ts";
 

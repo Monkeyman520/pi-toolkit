@@ -1,8 +1,8 @@
+import { expect, mock, test } from "bun:test";
 import type {
 	ExtensionContext,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { expect, test, vi } from "vitest";
 import { Permissions } from "../extensions/permissions.ts";
 
 function context(mode = "rpc") {
@@ -15,7 +15,7 @@ function context(mode = "rpc") {
 			timestamp: "now",
 		},
 	] as SessionEntry[];
-	const confirm = vi.fn(async () => true);
+	const confirm = mock(async () => true);
 	return {
 		ctx: {
 			cwd: "project",

@@ -1,3 +1,4 @@
+import { afterEach, expect, it } from "bun:test";
 import {
 	mkdir,
 	mkdtemp,
@@ -9,7 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "typebox";
-import { afterEach, expect, it } from "vitest";
 import {
 	JsonConfigStore,
 	readJsonConfig,

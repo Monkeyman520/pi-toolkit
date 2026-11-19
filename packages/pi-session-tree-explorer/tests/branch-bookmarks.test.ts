@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	computeSessionStatistics,
 	formatSessionStatisticsLines,
@@ -246,7 +246,7 @@ describe("T0007: Branch Bookmarks & Session Statistics", () => {
 		const comp = new SessionTreeComponent({
 			tui: { requestRender() {}, terminal: { rows: 24, columns: 100 } },
 			theme: {},
-			done: vi.fn(),
+			done: mock(),
 			index,
 			state,
 		});

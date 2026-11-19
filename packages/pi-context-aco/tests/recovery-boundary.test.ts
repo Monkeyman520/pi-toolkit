@@ -1,3 +1,4 @@
+import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,7 +6,6 @@ import type {
 	ExtensionContext,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, expect, test } from "vitest";
 import { Continuity } from "../extensions/continuity.ts";
 import {
 	createRestoreBoundaryDrafts,

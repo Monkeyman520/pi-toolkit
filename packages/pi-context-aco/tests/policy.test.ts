@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
 import { decide } from "../extensions/policy.ts";
 import { PressureMonitor } from "../extensions/pressure.ts";
 import { buildTasks } from "../extensions/tasks.ts";

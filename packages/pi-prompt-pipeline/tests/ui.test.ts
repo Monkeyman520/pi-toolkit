@@ -1,8 +1,8 @@
+import { expect, it } from "bun:test";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { expect, it } from "vitest";
 import { loadConfig } from "../extensions/config.ts";
 import { settingsPanel } from "../extensions/ui.ts";
 

@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
 import { PressureMonitor } from "../extensions/pressure.ts";
 import { recommend } from "../extensions/recommend.ts";
 import { buildTasks, validateDeclaration } from "../extensions/tasks.ts";

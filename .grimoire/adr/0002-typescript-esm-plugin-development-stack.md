@@ -1,7 +1,8 @@
 # TypeScript ESM plugin development stack
 
-**Status:** Proposed
+**Status:** Superseded
 **Date:** 2026-11-03
+**Superseded by:** [ADR 0008](./0008-bun-workspace-rolldown-and-bun-test-stack.md)
 
 ## Context
 

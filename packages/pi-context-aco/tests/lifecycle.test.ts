@@ -1,3 +1,4 @@
+import { afterEach, expect, it, mock } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,6 @@ import type {
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
-import { afterEach, expect, it, vi } from "vitest";
 import extension from "../extensions/index.ts";
 import type { declarationSchema } from "../extensions/tasks.ts";
 
@@ -31,7 +31,7 @@ async function harness() {
 	let taskTool: ToolDefinition<typeof declarationSchema> | undefined;
 	const notices: string[] = [];
 	const events = createEventBus();
-	const appendEntry = vi.fn((customType: string, data: unknown) => {
+	const appendEntry = mock((customType: string, data: unknown) => {
 			branch.push({
 				id: "meta-" + branch.length,
 				parentId: branch.at(-1)?.id ?? null,
@@ -41,7 +41,7 @@ async function harness() {
 				data,
 			});
 		}),
-		status = vi.fn();
+		status = mock();
 	const pi = {
 		registerTool: (tool: ToolDefinition<typeof declarationSchema>) => {
 			if (tool.name === "aco_task") taskTool = tool;

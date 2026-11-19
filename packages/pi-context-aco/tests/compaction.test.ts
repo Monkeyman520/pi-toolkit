@@ -1,3 +1,4 @@
+import { afterEach, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,6 @@ import type {
 	SessionEntry,
 	TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, expect, test, vi } from "vitest";
 import { Compactor } from "../extensions/compaction.ts";
 import { defaults } from "../extensions/config.ts";
 import { Continuity } from "../extensions/continuity.ts";
@@ -81,7 +81,7 @@ async function setup(mode = "compact") {
 			timestamp: "now",
 		});
 	const hooks = new Map<string, Hook>();
-	const compact = vi.fn();
+	const compact = mock();
 	const ctx = {
 		cwd,
 		mode: "rpc",
@@ -98,7 +98,7 @@ async function setup(mode = "compact") {
 			getSessionFile: () => join(cwd, "session"),
 		},
 		compact,
-		ui: { confirm: vi.fn(async () => true), notify: vi.fn() },
+		ui: { confirm: mock(async () => true), notify: mock() },
 	} as unknown as ExtensionContext;
 	const continuity = new Continuity(join(cwd, "evidence"), append);
 	const runtime = {

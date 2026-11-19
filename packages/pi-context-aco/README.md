@@ -14,23 +14,26 @@
 
 ## Compatibility and resources
 
-- Node.js >= 22.19.0, TypeScript ESM/erasable syntax, no bundler/emitted build.
+- Node.js >= 22.19.0, TypeScript ESM with a Rolldown build.
 - Verified with Pi **1.5.0**, Windows, Node **26.13.0**, npm **11.20.0**.
-- One extension: `extensions/index.ts`; command `/aco`; metadata declaration tool `aco_task` and read-only historical recall tool `aco_recall`. No provider, skill or prompt registration.
+- One extension: `dist/index.js`; command `/aco`; metadata declaration tool `aco_task` and read-only historical recall tool `aco_recall`. No provider, skill or prompt registration.
 - Uses host-native `modelRegistry.streamSimple` and registered-provider lookup through `modelRegistry.getProvider` for V4 children, usage/model/session read APIs, finalized-tool/turn/session/model/compaction/settled events, custom metadata, commands/completion and standard TUI components. Missing information remains unknown; no raw-history fallback edits.
 - Used host SDKs and TypeBox are host-provided `"*"` peers, not bundled implementations or claims about every host version.
-- Ordinary `pi-plugin-support@0.1.0` provides config I/O, loaded-panel discovery and TUI composition. Its versioned archive is shipped in `vendor/`, resolved by the development lockfile and bundled as an ordinary source-only npm dependency. No undeclared sibling imports, shared mutable manager or registry publication is assumed.
+- Rolldown inlines the private [support library](../pi-plugin-support/README.md) where used. Pi SDKs and TypeBox remain host peers, and each plugin owns its state and lifecycle.
 
 ## Setup
 
-From this package directory:
+This experimental package is private and excluded from the initial npm release.
+
+From the repository root, prepare the workspace and build before loading locally:
 
 ```sh
-npm ci --ignore-scripts --legacy-peer-deps
-pi -e .
+bun install --frozen-lockfile
+bun run --cwd packages/pi-context-aco build
+pi -e ./packages/pi-context-aco
+# Or persist this local package:
+pi install ./packages/pi-context-aco
 ```
-
-From the collection root after setup: `pi -e ./packages/pi-context-aco`. Persistent local registration: `pi install ./packages/pi-context-aco`. Pi does not install a local package's dependencies for you.
 
 ## Commands and declaration tool
 
@@ -246,7 +249,7 @@ The current selection policy compares task fit/continuity, estimated capacity re
 
 Aggregate usage distinguishes parent, child and management provider-reported input/output/cache-read/cache-write/tokens/cost. Missing fields, missing child results and absent native usage remain unavailable, not measured zero. Local rules/extractive generation add zero decision-model calls; normal tool schemas/results, parent turns, child work, storage, coordination and cache invalidation still cost resources. Totals cover the active branch, not all spending across abandoned branches or hidden third-party calls; currency/tariff comparability is not independently certified.
 
-`npm run smoke:adaptive` packs/installs the real plugin outside the checkout and exercises actual Pi checkpoint→prune, independent semantic consent, summary→offload, restoration, child-return→parent-verification→checkpoint, native→checkpoint and restart/no-replay. It compares the same deterministic task turns against no ACO, reporting outcomes, restoration, fixture tokens/cost/cache, wall time and scripted controls. Optional `ACO_EVALUATION_OUTPUT` saves its JSON report. Fixture usage is length/4 with a zero tariff and no cache simulation: **not live provider measurement or a representative-model benchmark**. Reduced context does not establish lower aggregate cost or superiority. Real representative task evidence and task-dependent policy evaluation are recorded in the final T0007 assessment; the controlled fixture alone does not establish them.
+`bun run smoke:adaptive` packs/installs the real plugin outside the checkout and exercises actual Pi checkpoint→prune, independent semantic consent, summary→offload, restoration, child-return→parent-verification→checkpoint, native→checkpoint and restart/no-replay. It compares the same deterministic task turns against no ACO, reporting outcomes, restoration, fixture tokens/cost/cache, wall time and scripted controls. Optional `ACO_EVALUATION_OUTPUT` saves its JSON report. Fixture usage is length/4 with a zero tariff and no cache simulation: **not live provider measurement or a representative-model benchmark**. Reduced context does not establish lower aggregate cost or superiority. Real representative task evidence and task-dependent policy evaluation are recorded in the final T0007 assessment; the controlled fixture alone does not establish them.
 
 ## Permissions and boundaries
 
@@ -258,33 +261,32 @@ T0004 V2 verified exact pruning/restoration and T0005 V3 bounded extractive/nati
 
 ## Verification
 
-From this directory, run separately:
+From the package directory after the root frozen install and build:
 
 ```sh
-npm run typecheck
-npm run check
-npm test
-npm run smoke
-npm run smoke:tasks
-npm run smoke:evidence
-npm run smoke:prune
-npm run smoke:compact
-npm run smoke:delegate
-npm run smoke:adaptive
-npm run smoke:lifecycle
-npm run smoke:recovery
+bun run typecheck
+bun run check
+bun run test
+bun run smoke
+bun run smoke:tasks
+bun run smoke:evidence
+bun run smoke:prune
+bun run smoke:compact
+bun run smoke:delegate
+bun run smoke:adaptive
+bun run smoke:lifecycle
 ```
 
-Smoke tests require installed Pi/npm and the prepared npm cache. All install actual plugin tarballs outside the checkout, use an isolated agent directory and deterministic in-process provider, and make no live provider requests.
+The built-tarball `smoke` and `smoke:lifecycle` were verified in Pi 1.5.2. Fixture smokes use isolated agent directories and no live provider requests. The older recovery fault-injection harness depends on private source modules that are not in built tarballs; it is not part of the release gate.
 
 - `smoke`: T0001 controls/passivity, model-bound conversation/tool-body equality against no ACO (normalizing only timestamps/durations and the intentionally added `aco_task`/`aco_recall` schemas), no extra model calls, parallel/blocked/unknown outcomes, metadata non-visibility and model/external-edit/native-compaction resets.
 - `smoke:tasks`: actual E02/E03 workload/no-op decisions, protected exact evidence, command/tool declaration provenance, atomic invalid-update rejection, tree isolation, persisted resume and no strategy/extra model calls.
-- `smoke:evidence`: actual Pi command/tool recall and provider-bound visibility, historical replay after workspace changes, real persistence failure, corrupt restart fallback, incomplete records, task/project/tree/fork isolation and disabled control. Child-subset grants, verification fault injection, append cancellation and selective/Unicode pagination are real-filesystem Vitest evidence, not live worker dispatch.
+- `smoke:evidence`: actual Pi command/tool recall and provider-bound visibility, historical replay after workspace changes, real persistence failure, corrupt restart fallback, incomplete records, task/project/tree/fork isolation and disabled control. Child-subset grants, verification fault injection, append cancellation and selective/Unicode pagination are real-filesystem Bun evidence, not live worker dispatch.
 - `smoke:prune`: installed Pi exact pruning in real RPC session, covering V1 observe passivity, request-local projection, durable context_edit omission, verified restoration from evidence store, and branch-relative isolation.
 - `smoke:compact`: installed Pi local summary/rejection/restoration, protected exact evidence, unauthorized RPC no-UI behavior, scoped grants, actual native prefix completion, cancellation, real session-file append failure, foreign-handler interference, restart continuity and supported tree recovery. Deterministic fixture provider, not a general-model quality benchmark.
 - `smoke:delegate`: isolated installed Pi parent/children, allowed evidence without parent history, structured staged deliverables, independent parent byte checks, persisted reservations/outcomes with revoked restart authority, exhausted no-launch case, parent working-set bytes alongside aggregate provider tokens/cost/cache and latency. Controlled fixture, not a live quality/cost benchmark.
 - `smoke:lifecycle`: installed Pi with two controlled peer plugins in both load orderings; foreign request context and boundary proposals survive verified prune/restoration; provider tool/system structure and raw originals remain intact; reload preserves edits and peer-owned listeners. Real automatic retry success/exhaustion verifies running versus final settled state.
-- `smoke:recovery`: actual installed ACO inside a privileged test-only Pi wrapper; controlled EvidenceIO readback/held-read faults and a temporary host append adapter exercise partial filesystem failure, restart/no replay, input/custom-run refusal, explicit legal restoration, disable/reload/replacement and genuine missing-provider admission. No production host patch or raw JSONL rewrite. Optional `ACO_TEST_ARTIFACTS=<directory>` retains synthetic JSON evidence for this smoke, lifecycle and delegation; never use real user sessions or credentials as fixture inputs.
+- `smoke:recovery`: historical source-layout verification inside a privileged test-only Pi wrapper; controlled EvidenceIO readback/held-read faults and a temporary host append adapter exercise partial filesystem failure, restart/no replay, input/custom-run refusal, explicit legal restoration, disable/reload/replacement and genuine missing-provider admission. No production host patch or raw JSONL rewrite. Optional `ACO_TEST_ARTIFACTS=<directory>` retains synthetic JSON evidence for this smoke, lifecycle and delegation; never use real user sessions or credentials as fixture inputs.
 - Optional V4 terminal check: `python tests/delegation-tui-smoke.py` in Python 3.12 with test-only `pywinpty==3.1.2`. Actual ConPTY default confirmation, Escape denial/no launch, confirmed isolated child and needs-verification outcome.
 - Optional V3 terminal check: `python tests/compaction-tui-smoke.py` in the same isolated Python 3.12 / `pywinpty==3.1.2` environment. Actual ConPTY dialogs verify local/native default confirmation, Escape denial, approved local commit/restoration and native completion.
 - Optional actual Windows ConPTY keyboard test: `python tests/tui-smoke.py`, using Python 3.12 with test-only `pywinpty==3.1.2` in an isolated Python environment. It covers settings/persistence, full-prefix Tab completion, task/recommendation inspection, loaded-only panel switching, real reload and orderly exit. Its `--approve` flag applies only to its disposable directory.
@@ -295,8 +297,7 @@ The [T0008 integrated coverage receipt](../../.grimoire/ticket/0004-adaptive-con
 
 
 ### Separately authorized representative evaluation
-
-Three frozen Antigravity control/adaptive pairs have completed under explicit model/source/spending authority. P1/P2 failures and the original P3 control startup timeout are retained; P3 adaptive and separately rechecked control artifacts passed. This completes the bounded evaluation, not a benchmark superiority claim. The [final assessment](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0007-final-evaluation.md) records task-fit decisions, matching-horizon forecasts, independent quality checks and unavailable charges. The opt-in `tests/representative-evaluation.mjs` is not run by `npm test` or ordinary smoke scripts; it requires its recorded checkpoint-specific upload/spending authority and separately installed/logged-in `pi-antigravity`, not a new runtime dependency.
+Three frozen Antigravity control/adaptive pairs have completed under explicit model/source/spending authority. P1/P2 failures and the original P3 control startup timeout are retained; P3 adaptive and separately rechecked control artifacts passed. This completes the bounded evaluation, not a benchmark superiority claim. The [final assessment](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0007-final-evaluation.md) records task-fit decisions, matching-horizon forecasts, independent quality checks and unavailable charges. The opt-in `tests/representative-evaluation.mjs` is not run by `bun run test` or ordinary smoke scripts; it requires its recorded checkpoint-specific upload/spending authority and separately installed/logged-in `pi-antigravity`, not a new runtime dependency.
 
 
 A subsequent [B1 benefit-scenario pair](../../.grimoire/ticket/0004-adaptive-context-orchestrator/T0007-benefit-scenarios.md) passed both coding artifacts but demonstrated a relevant compatibility boundary: current exact-prune refuses a paired assistant containing additional reasoning or text, including the observed Gemini/high thinking+toolCall+empty-text shape. A verified checkpoint may succeed while unloading remains blocked. A separate native controlled pure-tool-call case removed 4,437 serialized bytes/two messages and retained originals; this is not real-model token or fee savings. Do not assume a completed/redundant reference is automatically executable or that adaptive reduces costs for the current provider output format.

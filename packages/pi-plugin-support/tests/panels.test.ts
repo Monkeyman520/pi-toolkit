@@ -1,5 +1,5 @@
+import { expect, it, mock } from "bun:test";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
-import { expect, it, vi } from "vitest";
 import {
 	DISCOVER_EVENT,
 	discoverLoadedPanels,
@@ -39,10 +39,10 @@ it("interoperates with a baseline registration and removes only its caller subsc
 	second();
 });
 it("keeps panel callbacks, navigation, reload and values isolated per invocation", () => {
-	const a = vi.fn(),
-		b = vi.fn(),
-		close = vi.fn(),
-		tui = { requestRender: vi.fn() };
+	const a = mock(),
+		b = mock(),
+		close = mock(),
+		tui = { requestRender: mock() };
 	const make = (onChange: typeof a) =>
 		createSettingsPanel({
 			tui,
@@ -74,8 +74,8 @@ it("keeps panel callbacks, navigation, reload and values isolated per invocation
 	expect(close).toHaveBeenCalled();
 });
 it("builds a switcher only for supplied loaded panels and opens the selected descriptor", async () => {
-	const open = vi.fn(async () => {}),
-		select = vi.fn();
+	const open = mock(async () => {}),
+		select = mock();
 	const item = pluginSwitcherItem(
 		[
 			{
@@ -89,7 +89,7 @@ it("builds a switcher only for supplied loaded panels and opens the selected des
 		theme,
 		select,
 	);
-	const done = vi.fn();
+	const done = mock();
 	const submenu = item.submenu?.("", done);
 	submenu?.handleInput?.("\r");
 	expect(done).toHaveBeenCalled();

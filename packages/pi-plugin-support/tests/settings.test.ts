@@ -1,5 +1,5 @@
+import { expect, it } from "bun:test";
 import { Type } from "typebox";
-import { expect, it } from "vitest";
 import { settingCandidates } from "../src/settings.ts";
 
 it("preserves explicit presets and derives boolean aliases from the schema", () => {

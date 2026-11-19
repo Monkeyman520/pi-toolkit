@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { Check } from "typebox/value";
-import { describe, expect, it } from "vitest";
 import { declarationSchema } from "../extensions/tasks.ts";
 import { researchDeclaration } from "./representative-workloads.ts";
 

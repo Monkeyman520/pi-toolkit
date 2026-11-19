@@ -1,6 +1,6 @@
+import { describe, expect, it, mock } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
-import { describe, expect, it, vi } from "vitest";
 import { createActionRegistry } from "../extensions/actions.ts";
 import { SessionTreeConfigSchema } from "../extensions/config-schema.ts";
 import {
@@ -179,7 +179,7 @@ describe("T0003: Tool Call Aggregation & Smart Fold Mode", () => {
 				maxExpandDepth: 0,
 			},
 		});
-		const done = vi.fn();
+		const done = mock();
 		const comp = new SessionTreeComponent({
 			tui: { requestRender() {} },
 			theme: {},

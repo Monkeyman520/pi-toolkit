@@ -1,7 +1,7 @@
+import { afterEach, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
 import { loadConfig, saveConfig } from "../extensions/config.ts";
 
 const dirs: string[] = [];

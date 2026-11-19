@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import { createActionRegistry } from "../extensions/actions.ts";
 import { deepMergeConfig } from "../extensions/config.ts";
 import { getDefaultConfig } from "../extensions/config-schema.ts";
@@ -272,7 +272,7 @@ describe("T0008: End-to-End Acceptance Scenarios (Spec E01 - E07)", () => {
 			sessionManager: {
 				getEntry: (id: string) => entries.find((e) => e.id === id),
 			},
-			fork: vi.fn(
+			fork: mock(
 				async (
 					targetId: string,
 					options?: { position?: string; summarize?: boolean },
@@ -337,7 +337,7 @@ describe("T0008: End-to-End Acceptance Scenarios (Spec E01 - E07)", () => {
 			sessionManager: {
 				getEntry: (id: string) => entries.find((e) => e.id === id),
 			},
-			navigateTree: vi.fn(
+			navigateTree: mock(
 				async (
 					_id: string,
 					options?: { position?: string; summarize?: boolean },
@@ -361,7 +361,7 @@ describe("T0008: End-to-End Acceptance Scenarios (Spec E01 - E07)", () => {
 			"Wait for the current response or compaction to finish",
 		);
 		expect(
-			(mockCtx as { navigateTree: ReturnType<typeof vi.fn> }).navigateTree,
+			(mockCtx as { navigateTree: ReturnType<typeof mock> }).navigateTree,
 		).not.toHaveBeenCalled();
 
 		// When idle: succeeds with summarize=false
@@ -373,7 +373,7 @@ describe("T0008: End-to-End Acceptance Scenarios (Spec E01 - E07)", () => {
 		});
 		expect(idleRes.success).toBe(true);
 		expect(
-			(mockCtx as { navigateTree: ReturnType<typeof vi.fn> }).navigateTree,
+			(mockCtx as { navigateTree: ReturnType<typeof mock> }).navigateTree,
 		).toHaveBeenCalledWith("u1", {
 			summarize: false,
 		});

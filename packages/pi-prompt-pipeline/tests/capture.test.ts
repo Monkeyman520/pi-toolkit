@@ -1,7 +1,7 @@
+import { afterEach, expect, it } from "bun:test";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
 import { Capture } from "../extensions/capture.ts";
 
 const roots: string[] = [];

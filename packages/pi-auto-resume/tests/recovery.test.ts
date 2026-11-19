@@ -1,3 +1,4 @@
+import { describe, expect, it } from "bun:test";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,7 +6,6 @@ import {
 	createEventBus,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
 import {
 	getAutoResumeCompletions,
 	parseAutoResumeArgs,
@@ -46,7 +46,7 @@ describe("restricted recovery", () => {
 		["rate limit exceeded", "throttle"],
 		["subscription usage limit reached", "quota"],
 	])("recognizes %s", (error, kind) => {
-		expect(classify(error)).toBe(kind);
+		expect<unknown>(classify(error)).toBe(kind);
 	});
 	it("does not confuse a quota message with a generic 429", () => {
 		expect(classify("subscription quota exhausted", 429)).toBe("quota");

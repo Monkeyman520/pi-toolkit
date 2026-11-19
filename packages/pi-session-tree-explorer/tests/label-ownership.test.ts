@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
 import { buildDisplayProjection } from "../extensions/display.ts";
 import { buildSearchIndex, extractContentText } from "../extensions/search.ts";
 import { captureSessionSnapshot } from "../extensions/session-snapshot.ts";

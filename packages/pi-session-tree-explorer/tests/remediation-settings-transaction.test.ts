@@ -1,8 +1,8 @@
+import { describe, expect, it, mock, spyOn } from "bun:test";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
 import { ConfigManager } from "../extensions/config.ts";
 import { openSessionTreeSettingsPanel } from "../extensions/ui.ts";
 
@@ -14,7 +14,7 @@ describe("settings publication boundary", () => {
 				release = resolve;
 			}),
 			original = manager.updateSetting.bind(manager);
-		vi.spyOn(manager, "updateSetting").mockImplementation(async (key, val) => {
+		spyOn(manager, "updateSetting").mockImplementation(async (key, val) => {
 			await gate;
 			return original(key, val);
 		});
@@ -24,7 +24,7 @@ describe("settings publication boundary", () => {
 			events: { emit() {} } as unknown as ExtensionAPI["events"],
 			ctx: {
 				ui: {
-					notify: vi.fn(),
+					notify: mock(),
 					custom: async (
 						factory: (...args: unknown[]) => { handleInput(key: string): void },
 					) => {

@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it, jest, mock } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDefaultConfig } from "../extensions/config-schema.ts";
 import { defaultDisplayOptions } from "../extensions/display.ts";
 import { buildSearchIndex, executeSearch } from "../extensions/search.ts";
@@ -88,7 +88,7 @@ function createForkSessionFixture(): SessionEntry[] {
 
 describe("T0005: Interactive Native Summaries & Enhanced Search", () => {
 	afterEach(() => {
-		vi.useRealTimers();
+		jest.useRealTimers();
 	});
 
 	it("computes branch summary context and offers No summary / Summarize / Custom prompt on cross-branch navigation", async () => {
@@ -165,14 +165,14 @@ describe("T0005: Interactive Native Summaries & Enhanced Search", () => {
 		comp2.handleInput("3");
 		for (const ch of "Focus on schema migrations") comp2.handleInput(ch);
 		comp2.handleInput("\r");
-		expect(emitted).toEqual({
+		expect<unknown>(emitted).toEqual({
 			type: "navigate",
 			entryId: "b2-tip",
 			summarize: true,
 			customInstructions: "Focus on schema migrations",
 		});
 
-		const navigateTree = vi.fn(async () => ({ cancelled: false }));
+		const navigateTree = mock(async () => ({ cancelled: false }));
 		const byId = new Map(entries.map((e) => [e.id, e]));
 		const res = await executeSessionIntent({
 			intent: emitted as unknown as ExplorerResult,
@@ -198,7 +198,7 @@ describe("T0005: Interactive Native Summaries & Enhanced Search", () => {
 	it("supports interactive ctx.ui.select fallback in executeSessionIntent when promptSummary is enabled", async () => {
 		const entries = createForkSessionFixture();
 		const byId = new Map(entries.map((e) => [e.id, e]));
-		const navigateTree = vi.fn(async () => ({ cancelled: false }));
+		const navigateTree = mock(async () => ({ cancelled: false }));
 		const config = getDefaultConfig();
 		config.session.promptSummary = true;
 
@@ -214,8 +214,8 @@ describe("T0005: Interactive Native Summaries & Enhanced Search", () => {
 				},
 				isIdle: () => true,
 				ui: {
-					select: vi.fn(async () => "Custom prompt"),
-					input: vi.fn(async () => "Keep ORM tradeoffs"),
+					select: mock(async () => "Custom prompt"),
+					input: mock(async () => "Keep ORM tradeoffs"),
 				},
 				navigateTree,
 			} as unknown as ExtensionCommandContext,
@@ -229,7 +229,7 @@ describe("T0005: Interactive Native Summaries & Enhanced Search", () => {
 	});
 
 	it("indexes tool call names, arguments, and outputs, expands ancestor chain on accept, and highlights matches", () => {
-		vi.useFakeTimers();
+		jest.useFakeTimers();
 		const entries = createForkSessionFixture();
 		const index = buildTreeIndex(entries);
 		const docs = buildSearchIndex(index);
@@ -292,7 +292,7 @@ describe("T0005: Interactive Native Summaries & Enhanced Search", () => {
 
 		// Search for "strict_pool" (hidden tool argument) and accept with Enter
 		for (const ch of ["/", ..."strict_pool"]) comp.handleInput(ch);
-		vi.runAllTimers();
+		jest.runAllTimers();
 		comp.handleInput("\r");
 
 		expect(state.mode).toBe("normal");
@@ -306,7 +306,7 @@ describe("T0005: Interactive Native Summaries & Enhanced Search", () => {
 		// Search for visible text "Drizzle" -> highlights substring with ANSI color
 		comp.handleInput("\u001b");
 		for (const ch of ["/", ..."Drizzle"]) comp.handleInput(ch);
-		vi.runAllTimers();
+		jest.runAllTimers();
 		comp.handleInput("\r");
 		expect(comp.render(120).join("\n")).toContain("\x1b[1;33mDrizzle\x1b[0m");
 		comp.dispose();

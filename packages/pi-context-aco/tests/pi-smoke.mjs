@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -10,7 +11,9 @@ const here = dirname(fileURLToPath(import.meta.url)),
 	pkg = resolve(here, "..");
 const root = await mkdtemp(join(tmpdir(), "pi-aco-smoke-"));
 const npm =
-	process.env.npm_execpath ??
+	(process.env.npm_execpath?.endsWith(".js")
+		? process.env.npm_execpath
+		: undefined) ??
 	join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 let client;
 function run(args, cwd) {
@@ -36,8 +39,11 @@ try {
 			pkg,
 		),
 	)[0];
-	assert.deepEqual(info.bundled, ["pi-plugin-support"]);
-	assert.ok(info.files.some((f) => f.path === "extensions/index.ts"));
+	assert.equal(info.bundled?.length ?? 0, 0);
+	assert.ok(info.files.some((f) => f.path === "dist/index.js"));
+	assert.ok(info.files.some((f) => f.path === "dist/LICENSE"));
+	assert.ok(info.files.some((f) => f.path === "dist/CHANGELOG.md"));
+	assert.ok(!info.files.some((f) => f.path.startsWith("vendor/")));
 	const consumer = join(root, "consumer");
 	await mkdir(consumer);
 	await writeFile(
@@ -63,13 +69,14 @@ try {
 		consumer,
 	);
 	const installed = join(consumer, "node_modules", "pi-context-aco");
-	const support = JSON.parse(
-		await readFile(
-			join(installed, "node_modules", "pi-plugin-support", "package.json"),
-			"utf8",
-		),
+	assert.equal(
+		existsSync(join(installed, "node_modules", "pi-plugin-support")),
+		false,
 	);
-	assert.equal(support.version, "0.1.0");
+	assert.equal(
+		existsSync(join(consumer, "node_modules", "pi-plugin-support")),
+		false,
+	);
 	const fixture = join(root, "fixture.js");
 	await cp(join(here, "fixture.js"), fixture);
 	const agent = join(root, "agent");

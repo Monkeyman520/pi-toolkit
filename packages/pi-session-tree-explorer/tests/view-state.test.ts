@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import type { SessionEntry } from "../extensions/types.ts";

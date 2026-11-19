@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createInitialState } from "../extensions/state.ts";
 import { buildTreeIndex } from "../extensions/tree-index.ts";
 import { SessionTreeComponent } from "../extensions/tui.ts";
+import { trackContentReads } from "./track-content-reads.ts";
 
 describe("affected projection work", () => {
 	it("keeps the projection across branch focus changes when the fold policy does not use focus", () => {
@@ -45,7 +46,7 @@ describe("affected projection work", () => {
 					return "stable content";
 				},
 			},
-			read = vi.spyOn(message, "content", "get");
+			read = trackContentReads(message);
 		const index = buildTreeIndex([
 				{ id: "r", parentId: null, type: "message", timestamp: "T0", message },
 			]),

@@ -107,7 +107,9 @@ export async function sendWakeup(
 	account: Account,
 	model: Model<Api>,
 	signal: AbortSignal,
-	fetcher: typeof fetch = fetch,
+	fetcher: (
+		...args: Parameters<typeof fetch>
+	) => ReturnType<typeof fetch> = fetch,
 ): Promise<string> {
 	if (
 		!canWake(account) ||

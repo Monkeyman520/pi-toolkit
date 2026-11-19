@@ -1,9 +1,9 @@
+import { describe, expect, it } from "bun:test";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type {
 	SessionEntry,
 	SessionHeader,
 } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
 import { defaultConfig } from "../extensions/config.ts";
 import {
 	applyDuplicateTitleSuffix,

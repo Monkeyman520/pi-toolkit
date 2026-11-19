@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-	cp,
-	mkdir,
-	mkdtemp,
-	readFile,
-	realpath,
-	rm,
-	writeFile,
-} from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,14 +9,29 @@ import { startPi } from "./pi-client.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packages = [
-	{ id: "pi-auto-resume", commands: ["auto-resume"] },
-	{ id: "pi-pretty-session", commands: ["pretty-session", "ps"] },
-	{ id: "pi-quota-keeper", commands: ["quota"] },
+	{
+		id: "pi-auto-resume",
+		pkgName: "@monkeyman520/pi-auto-resume",
+		commands: ["auto-resume"],
+	},
+	{
+		id: "pi-pretty-session",
+		pkgName: "@monkeyman520/pi-pretty-session",
+		commands: ["pretty-session", "ps"],
+	},
+	{
+		id: "pi-quota-keeper",
+		pkgName: "@monkeyman520/pi-quota-keeper",
+		commands: ["quota"],
+	},
 ];
 const npm =
-	process.env.npm_execpath ??
+	(process.env.npm_execpath?.endsWith(".js")
+		? process.env.npm_execpath
+		: undefined) ??
 	join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 const allCommands = packages.flatMap((plugin) => plugin.commands);
+
 async function checkCombination(selected) {
 	const root = await mkdtemp(join(tmpdir(), "pi-plugin-isolation-"));
 	let client;
@@ -43,21 +51,38 @@ async function checkCombination(selected) {
 			);
 			assert.equal(packed.status, 0, packed.stderr);
 			const info = JSON.parse(packed.stdout)[0];
-			assert.deepEqual(
-				info.bundled,
-				["pi-plugin-support"],
-				"only the ordinary library is bundled, never host SDKs",
+			assert.equal(
+				info.bundled?.length ?? 0,
+				0,
+				"no bundledDependencies; support library is inlined into dist/index.js",
 			);
 			assert.ok(
-				info.files.some(
-					(file) => file.path === "vendor/pi-plugin-support-0.1.0.tgz",
+				info.files.some((file) => file.path === "dist/index.js"),
+				"built dist/index.js must be packed",
+			);
+			assert.ok(
+				info.files.some((file) => file.path === "dist/LICENSE"),
+				"dist/LICENSE must be packed",
+			);
+			assert.ok(
+				info.files.some((file) => file.path === "dist/CHANGELOG.md"),
+				"dist/CHANGELOG.md must be packed",
+			);
+			assert.ok(
+				!info.files.some(
+					(file) =>
+						file.path.startsWith("vendor/") ||
+						file.path.startsWith("node_modules/"),
 				),
+				"tarball must not ship vendor/ or node_modules/",
 			);
 			await writeFile(
 				join(wrapper, "package.json"),
 				JSON.stringify({
 					private: true,
-					dependencies: { [plugin.id]: `file:../${info.filename}` },
+					dependencies: {
+						[plugin.pkgName]: `file:${join(root, info.filename).replaceAll("\\", "/")}`,
+					},
 				}),
 			);
 			const installed = spawnSync(
@@ -68,55 +93,52 @@ async function checkCombination(selected) {
 					"--omit=dev",
 					"--ignore-scripts",
 					"--legacy-peer-deps",
-					"--offline",
+					"--prefer-offline",
 					"--no-audit",
 				],
-				{ cwd: wrapper, encoding: "utf8", windowsHide: true, timeout: 30000 },
+				{ cwd: wrapper, encoding: "utf8", windowsHide: true, timeout: 60000 },
 			);
 			assert.equal(installed.status, 0, installed.stderr);
-			paths.push(join(wrapper, "node_modules", plugin.id));
+			const installedPkg = join(
+				wrapper,
+				"node_modules",
+				...plugin.pkgName.split("/"),
+			);
+			assert.equal(
+				existsSync(join(installedPkg, "node_modules", "pi-plugin-support")),
+				false,
+				"pi-plugin-support is inlined and must not be installed as a runtime dependency",
+			);
+			assert.equal(
+				existsSync(join(wrapper, "node_modules", "pi-plugin-support")),
+				false,
+				"pi-plugin-support must not appear in consumer node_modules",
+			);
+			paths.push(installedPkg);
 		}
-		const roots = await Promise.all(
-			paths.map((path) =>
-				realpath(join(path, "node_modules", "pi-plugin-support")),
-			),
-		);
-		assert.equal(
-			new Set(roots).size,
-			selected.length,
-			"independent physical library roots",
-		);
 		await cp(
 			join(repository, "tests", "fixtures", "baseline-discovery.ts"),
 			join(root, "baseline-discovery.ts"),
 		);
 		await writeFile(join(root, "auth.json"), "{}");
-		if (selected.some((plugin) => plugin.id === "pi-pretty-session"))
+		if (selected.some((plugin) => plugin.id === "pi-pretty-session")) {
 			await writeFile(
 				join(root, "pi-pretty-session.json"),
 				JSON.stringify({ useLlm: false }),
 			);
-		const imports = paths
-			.map(
-				(path, index) =>
-					`import {discoverLoadedPanels as discover${index}} from ${JSON.stringify(join(path, "extensions", "ui.ts"))};`,
-			)
-			.join("\n");
+		}
 		await writeFile(
 			join(root, "probe.ts"),
 			`
 import {appendFileSync} from "node:fs";
 import {discoverLoadedPanels as baselineDiscover} from "./baseline-discovery.ts";
-${imports}
 export default function(pi){
  const collect=()=>{const panels=[];pi.events.emit("pi-packages:ui:discover",{register:panel=>panels.push(panel)});return panels;};
- const readers=[${paths.map((_, index) => `discover${index}`).join(",")}];
  pi.registerCommand("isolation-probe",{description:"fixture",handler:async(_args,ctx)=>{
   const raw=collect().map(panel=>({id:panel.id,command:panel.command,summary:panel.getSummary(),canOpen:typeof panel.open==="function"}));
-  const current=readers.map(read=>read(pi.events).map(panel=>panel.id).sort());
   const off=pi.events.on("pi-packages:ui:discover",payload=>payload.register({id:"baseline-peer",title:"Baseline",command:"/baseline",getSummary:()=>"baseline",open:async()=>{}}));
-  const mixed=[baselineDiscover,...readers].map(read=>read(pi.events).map(panel=>panel.id).sort());off();
-  ctx.ui.notify("ISOLATION:"+JSON.stringify({raw,current,mixed}),"info");
+  const mixed=baselineDiscover(pi.events).map(panel=>panel.id).sort();off();
+  ctx.ui.notify("ISOLATION:"+JSON.stringify({raw,mixed}),"info");
  }});
  pi.on("session_shutdown",()=>appendFileSync(process.env.ISOLATION_SHUTDOWN_LOG,JSON.stringify(collect().map(panel=>panel.id))+"\\n"));
 }
@@ -132,8 +154,9 @@ export default function(pi){
 		});
 		const expectedIds = selected.map((plugin) => plugin.id).sort();
 		for (let session = 0; session < 3; session++) {
-			if (session > 0)
+			if (session > 0) {
 				assert.equal((await client.command("new_session")).cancelled, false);
+			}
 			const commands = await client.command("get_commands");
 			assert.deepEqual(
 				commands.commands
@@ -169,18 +192,11 @@ export default function(pi){
 					),
 				);
 			}
-			for (const ids of result.current)
-				assert.deepEqual(
-					ids,
-					expectedIds,
-					"every migrated reader interoperates",
-				);
-			for (const ids of result.mixed)
-				assert.deepEqual(
-					ids,
-					[...expectedIds, "baseline-peer"].sort(),
-					"baseline protocol interoperability",
-				);
+			assert.deepEqual(
+				result.mixed,
+				[...expectedIds, "baseline-peer"].sort(),
+				"baseline protocol interoperability",
+			);
 		}
 		await client.close();
 		const shutdowns = (await readFile(join(root, "shutdown.jsonl"), "utf8"))
@@ -193,13 +209,15 @@ export default function(pi){
 			"session cleanup removes only its registered resources",
 		);
 		console.log(
-			`PASS ${expectedIds.join(" + ")}: packed install, separate library roots, baseline protocol, 3 lifecycles`,
+			`PASS ${expectedIds.join(" + ")}: built tarball install, inlined support, baseline protocol, 3 lifecycles`,
 		);
 	} finally {
 		await client?.dispose();
 		await rm(root, { recursive: true, force: true });
 	}
 }
-for (let mask = 1; mask < 1 << packages.length; mask++)
+
+for (let mask = 1; mask < 1 << packages.length; mask++) {
 	await checkCombination(packages.filter((_, index) => mask & (1 << index)));
+}
 console.log("Pi plugin isolation matrix: all 7 combinations PASS");
