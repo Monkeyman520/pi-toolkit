@@ -8,6 +8,7 @@ This repository organizes Pi plugin packages; it is not the Pi host's source tre
 
 | Package | Purpose |
 | --- | --- |
+| [pi-auto-continue](./packages/pi-auto-continue/README.md) | **Private (initial).** Explicitly armed multi-round continuation, FIFO continuation queue (`send`/`steer`, multiline editor, import, quota-reset waiting), prompt pipe with format extraction, and one-shot stop hooks |
 | [pi-auto-resume](./packages/pi-auto-resume/README.md) | Configurable recovery of interrupted Pi tasks |
 | [pi-pretty-session](./packages/pi-pretty-session/README.md) | Automatic session naming, title/description summarization, dynamic config, session metrics, and project info |
 | [pi-quota-keeper](./packages/pi-quota-keeper/README.md) | Coordinated account quota visibility and capability-gated activation |
@@ -58,6 +59,7 @@ pi-packages/
 │   └── ticket/               # Reserved for separately requested tickets
 └── packages/
     ├── README.md             # Package layout and development reference
+    ├── pi-auto-continue/     # Explicitly armed continuation, queue, prompt pipe, and stop hooks (private)
     ├── pi-auto-resume/        # Interrupted-task recovery
     ├── pi-pretty-session/     # Session summarization, metrics, and project info
     ├── pi-quota-keeper/       # Quota visibility and coordinated activation

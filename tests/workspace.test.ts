@@ -33,8 +33,9 @@ describe("Bun workspace", () => {
 		);
 	});
 
-	test("contains the seven independent packages and keeps ACO and support private", () => {
+	test("contains the eight independent packages and keeps private packages private", () => {
 		expect(manifests.map(({ directory }) => directory).sort()).toEqual([
+			"pi-auto-continue",
 			"pi-auto-resume",
 			"pi-context-aco",
 			"pi-plugin-support",
@@ -46,7 +47,11 @@ describe("Bun workspace", () => {
 		expect(new Set(manifests.map(({ manifest }) => manifest.name)).size).toBe(
 			manifests.length,
 		);
-		for (const directory of ["pi-context-aco", "pi-plugin-support"]) {
+		for (const directory of [
+			"pi-auto-continue",
+			"pi-context-aco",
+			"pi-plugin-support",
+		]) {
 			expect(
 				manifests.find((entry) => entry.directory === directory)?.manifest
 					.private,
