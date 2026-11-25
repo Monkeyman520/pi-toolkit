@@ -63,9 +63,17 @@ export async function openAutoResumeSettingsPanel(params: {
 						id: "network",
 						label: "Network / Timeout Recovery",
 						description:
-							"Resume tasks interrupted by network loss or request timeouts",
+							"Resume tasks interrupted by network loss, stream aborts, or request timeouts",
 						currentValue: String(s.network),
 						values: [...configOptions.network.values],
+					},
+					{
+						id: "server",
+						label: "Server / Overload Recovery",
+						description:
+							"Resume tasks interrupted by transient HTTP 5xx or provider overload errors",
+						currentValue: String(s.server),
+						values: [...configOptions.server.values],
 					},
 					{
 						id: "throttle",
@@ -94,9 +102,23 @@ export async function openAutoResumeSettingsPanel(params: {
 					{
 						id: "retryDelayMs",
 						label: "Retry Delay (ms)",
-						description: `Minimum wait before network/throttling retry (default: ${defaults.retryDelayMs}ms)`,
+						description: `Minimum wait before network/server/throttling retry (default: ${defaults.retryDelayMs}ms)`,
 						currentValue: String(s.retryDelayMs),
 						values: [...configOptions.retryDelayMs.values],
+					},
+					{
+						id: "retryBackoffFactor",
+						label: "Retry Backoff Factor",
+						description: `Exponential backoff multiplier for consecutive retries (1 = fixed, default: ${defaults.retryBackoffFactor})`,
+						currentValue: String(s.retryBackoffFactor),
+						values: [...configOptions.retryBackoffFactor.values],
+					},
+					{
+						id: "maxRetryDelayMs",
+						label: "Max Retry Backoff Cap (ms)",
+						description: `Upper bound for exponential retry backoff (default: ${defaults.maxRetryDelayMs}ms)`,
+						currentValue: String(s.maxRetryDelayMs),
+						values: [...configOptions.maxRetryDelayMs.values],
 					},
 					{
 						id: "quotaDelayMs",
@@ -111,6 +133,28 @@ export async function openAutoResumeSettingsPanel(params: {
 						description: `Maximum automatic retries per user prompt (default: ${defaults.maxAttempts})`,
 						currentValue: String(s.maxAttempts),
 						values: [...configOptions.maxAttempts.values],
+					},
+					{
+						id: "maxWaitMs",
+						label: "Max Single Wait Cap (ms)",
+						description: `Skip recovery if wait exceeds this limit (0 = unlimited, default: ${defaults.maxWaitMs})`,
+						currentValue: String(s.maxWaitMs),
+						values: [...configOptions.maxWaitMs.values],
+					},
+					{
+						id: "maxTotalAttempts",
+						label: "Max Session Total Attempts",
+						description: `Cumulative session recovery cap (0 = unlimited, default: ${defaults.maxTotalAttempts})`,
+						currentValue: String(s.maxTotalAttempts),
+						values: [...configOptions.maxTotalAttempts.values],
+					},
+					{
+						id: "notifyOnResume",
+						label: "Notify on Auto-Resume",
+						description:
+							"Show a concise notification when an automatic recovery continuation fires",
+						currentValue: String(s.notifyOnResume),
+						values: [...configOptions.notifyOnResume.values],
 					},
 					{
 						id: "action-stop",
@@ -184,16 +228,57 @@ export async function openAutoResumeSettingsPanel(params: {
 				renderHeader: (width: number) => {
 					const w = Math.max(20, width);
 					const s = recovery.settings;
+					const now = Date.now();
+					const diag = recovery.getDiagnostics(now);
+					const totalLabel =
+						diag.maxTotalAttempts > 0
+							? `${diag.totalAttempts}/${diag.maxTotalAttempts}`
+							: String(diag.totalAttempts);
+					const metaParts = [`Config: ${configManager.configPath}`];
+					if (diag.guardUntilMs !== undefined) {
+						metaParts.push(
+							now >= diag.guardUntilMs
+								? "Guard: expired"
+								: `Guard: until ${new Date(diag.guardUntilMs).toISOString()}`,
+						);
+					}
+					if (diag.stopFile) {
+						metaParts.push(`StopFile: ${diag.stopFile}`);
+					}
 					const headerLines = [
 						truncateToWidth(
 							`${theme.bold(theme.fg("accent", "Auto Resume · Status & Settings"))} · ${s.enabled ? theme.fg("success", "enabled") : theme.fg("warning", "disabled")}`,
 							w,
 						),
 						truncateToWidth(
-							`${theme.fg("dim", "Status:")} ${theme.fg("text", recovery.status)} · ${theme.fg("dim", `Config: ${configManager.configPath}`)}`,
+							`${theme.fg("dim", "Status:")} ${theme.fg("text", diag.status)} · ${theme.fg("dim", `Attempts: ${diag.attempts}/${diag.maxAttempts} (session: ${totalLabel})`)}`,
 							w,
 						),
+						truncateToWidth(theme.fg("dim", metaParts.join(" · ")), w),
 					];
+					if (diag.lastError) {
+						headerLines.push(
+							truncateToWidth(
+								`${theme.fg("dim", "Last:")} ${theme.fg("muted", `[${diag.lastCause ?? "excluded"}] ${diag.lastError}`)}`,
+								w,
+							),
+						);
+					}
+					if (s.resumePromptFile) {
+						headerLines.push(
+							truncateToWidth(
+								`${theme.fg("dim", "Prompt File:")} ${theme.fg("text", s.resumePromptFile)}`,
+								w,
+							),
+						);
+					} else if (s.resumePrompt !== defaults.resumePrompt) {
+						headerLines.push(
+							truncateToWidth(
+								`${theme.fg("dim", "Prompt:")} ${theme.fg("text", s.resumePrompt)}`,
+								w,
+							),
+						);
+					}
 					if (configManager.error) {
 						headerLines.push(
 							truncateToWidth(theme.fg("error", configManager.error), w),
@@ -213,12 +298,24 @@ export async function openAutoResumeSettingsPanel(params: {
 				const s = recovery.settings;
 				settingsList.updateValue("session-toggle", s.enabled ? "on" : "off");
 				settingsList.updateValue("network", String(s.network));
+				settingsList.updateValue("server", String(s.server));
 				settingsList.updateValue("throttle", String(s.throttle));
 				settingsList.updateValue("quota", String(s.quota));
 				settingsList.updateValue("wake", String(s.wake));
 				settingsList.updateValue("retryDelayMs", String(s.retryDelayMs));
+				settingsList.updateValue(
+					"retryBackoffFactor",
+					String(s.retryBackoffFactor),
+				);
+				settingsList.updateValue("maxRetryDelayMs", String(s.maxRetryDelayMs));
 				settingsList.updateValue("quotaDelayMs", String(s.quotaDelayMs));
 				settingsList.updateValue("maxAttempts", String(s.maxAttempts));
+				settingsList.updateValue("maxWaitMs", String(s.maxWaitMs));
+				settingsList.updateValue(
+					"maxTotalAttempts",
+					String(s.maxTotalAttempts),
+				);
+				settingsList.updateValue("notifyOnResume", String(s.notifyOnResume));
 			};
 
 			return component;

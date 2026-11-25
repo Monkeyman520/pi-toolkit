@@ -9,11 +9,16 @@ export type AutoResumeCommand =
 	| { kind: "on" }
 	| { kind: "off" }
 	| { kind: "stop" }
+	| {
+			kind: "guard";
+			sub: "status" | "clear" | "duration" | "until";
+			value?: string;
+	  }
 	| { kind: "config"; reload?: boolean; key?: string; value?: string }
 	| { kind: "help" };
 
 export const autoResumeUsage =
-	"Usage: /auto-resume [status | stop | on | off | config [reload | <key> [value]] | help]";
+	"Usage: /auto-resume [status | stop | on | off | guard [status | clear | duration <spec> | until <timestamp>] | config [reload | <key> [value]] | help]";
 
 const actionDefinitions: ReadonlyArray<{
 	action: string;
@@ -33,6 +38,11 @@ const actionDefinitions: ReadonlyArray<{
 		description: "Cancel any pending recovery wait immediately",
 	},
 	{
+		action: "guard",
+		description:
+			"Inspect, set, or clear session-only time guardrails (duration/until)",
+	},
+	{
 		action: "config",
 		description:
 			"Open TUI settings panel, reload config, or view/update a setting",
@@ -40,8 +50,28 @@ const actionDefinitions: ReadonlyArray<{
 	{ action: "help", description: "Show /auto-resume command usage" },
 ];
 
+const guardSubcommands: ReadonlyArray<{
+	sub: "status" | "clear" | "duration" | "until";
+	description: string;
+}> = [
+	{ sub: "status", description: "Show active session time guardrail" },
+	{ sub: "clear", description: "Remove active session time guardrail" },
+	{
+		sub: "duration",
+		description:
+			"Stop automatic recoveries after a relative duration (e.g. 2h)",
+	},
+	{
+		sub: "until",
+		description:
+			"Stop automatic recoveries after a timestamp (ISO-8601 or YYYY-MM-DD HH:MM:SS)",
+	},
+];
+
+const guardDurationPresets = ["15m", "30m", "1h", "2h", "4h", "8h"] as const;
+
 export function parseAutoResumeArgs(args: string): AutoResumeCommand {
-	if (args.length > 512) return { kind: "help" };
+	if (args.length > 4096) return { kind: "help" };
 	const trimmed = args.trim();
 	if (!trimmed) return { kind: "default" };
 	const parts = trimmed.split(/\s+/).filter(Boolean);
@@ -64,6 +94,20 @@ export function parseAutoResumeArgs(args: string): AutoResumeCommand {
 	}
 	if (sub === "stop" && parts.length === 1) {
 		return { kind: "stop" };
+	}
+	if (sub === "guard") {
+		const guardSub = (parts[1] ?? "status").toLowerCase();
+		const rest = parts.slice(2).join(" ").trim();
+		if (guardSub === "status" && !rest) {
+			return { kind: "guard", sub: "status" };
+		}
+		if (guardSub === "clear" && !rest) {
+			return { kind: "guard", sub: "clear" };
+		}
+		if ((guardSub === "duration" || guardSub === "until") && rest) {
+			return { kind: "guard", sub: guardSub, value: rest };
+		}
+		return { kind: "help" };
 	}
 	if (sub === "config" || sub === "cfg" || sub === "set") {
 		const keyArg = parts[1];
@@ -104,6 +148,33 @@ export function getAutoResumeCompletions(
 	}
 
 	const sub = (parts[0] ?? "").toLowerCase();
+	if (sub === "guard") {
+		const actionToken = parts[0] ?? "guard";
+		const tokenIndex = endsWithSpace ? parts.length : parts.length - 1;
+		const partial = endsWithSpace ? "" : (parts[parts.length - 1] ?? "");
+		const lowerPartial = partial.toLowerCase();
+		if (tokenIndex === 1) {
+			const matches = guardSubcommands
+				.filter((item) => item.sub.startsWith(lowerPartial))
+				.map((item) => ({
+					value: `${actionToken} ${item.sub}`,
+					label: item.sub,
+					description: item.description,
+				}));
+			return matches.length > 0 ? matches : null;
+		}
+		if (tokenIndex === 2 && (parts[1] ?? "").toLowerCase() === "duration") {
+			const matches = guardDurationPresets
+				.filter((preset) => preset.toLowerCase().startsWith(lowerPartial))
+				.map((preset) => ({
+					value: `${actionToken} duration ${preset}`,
+					label: preset,
+					description: `Set session recovery guardrail for ${preset}`,
+				}));
+			return matches.length > 0 ? matches : null;
+		}
+		return null;
+	}
 	if (sub !== "config" && sub !== "cfg" && sub !== "set") {
 		return null;
 	}
@@ -124,10 +195,14 @@ export function getAutoResumeCompletions(
 		}
 		for (const key of Object.keys(defaults) as Array<keyof Settings>) {
 			if (key.toLowerCase().startsWith(lowerPartial)) {
+				const currentVal = settings[key];
+				const formatted = Array.isArray(currentVal)
+					? `${currentVal.length} rules`
+					: String(currentVal);
 				candidates.push({
 					value: `${actionToken} ${key}`,
 					label: key,
-					description: `${configOptions[key].description} (current: ${String(settings[key])})`,
+					description: `${configOptions[key].description} (current: ${formatted})`,
 				});
 			}
 		}

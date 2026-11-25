@@ -81,23 +81,31 @@ try {
 	);
 	await writeFile(
 		join(root, "pi-auto-resume.json"),
-		JSON.stringify({ retryDelayMs: 400, maxAttempts: 2 }),
+		JSON.stringify({
+			retryDelayMs: 400,
+			retryBackoffFactor: 1,
+			maxAttempts: 2,
+		}),
 	);
 	await writeFile(
 		join(root, "fixture.ts"),
 		`
  import {createAssistantMessageEventStream} from "@earendil-works/pi-ai";
  import {appendFileSync} from "node:fs";
- let calls=0,always=false;
+ let calls=0,always=false,serverOnce=false;
  export default function(pi){
-  pi.registerCommand("fixture-error",{description:"fixture",handler:async()=>{always=true;}});
+  pi.registerCommand("fixture-error",{description:"fixture",handler:async()=>{always=true;serverOnce=false;}});
+  pi.registerCommand("fixture-server-once",{description:"fixture",handler:async()=>{always=false;serverOnce=true;}});
   pi.registerProvider("resume-fixture",{baseUrl:"https://example.invalid",apiKey:"fixture",api:"resume-fixture-api",
    models:[{id:"test",name:"Fixture",reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:100000,maxTokens:100}],
    streamSimple(model){
     const stream=createAssistantMessageEventStream();calls++;
     appendFileSync(process.env.SMOKE_METRICS,JSON.stringify({calls})+"\\n");
-    const fail=always||calls===1;
-    const message={role:"assistant",api:model.api,provider:model.provider,model:model.id,content:fail?[]:[{type:"text",text:"done"}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:fail?"error":"stop",errorMessage:fail?"fetch failed":undefined,timestamp:Date.now()};
+    const isServer=serverOnce;
+    if(serverOnce) serverOnce=false;
+    const fail=always||calls===1||isServer;
+    const errMsg=isServer?"overloaded_error":"fetch failed";
+    const message={role:"assistant",api:model.api,provider:model.provider,model:model.id,content:fail?[]:[{type:"text",text:"done"}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:fail?"error":"stop",errorMessage:fail?errMsg:undefined,timestamp:Date.now()};
     queueMicrotask(()=>{stream.push(fail?{type:"error",reason:"error",error:message}:{type:"done",reason:"stop",message});stream.end(message);});
     return stream;
    }
@@ -242,6 +250,69 @@ try {
 		4,
 		"/auto-resume config persists setting",
 	);
+
+	// Enhanced verification: server recovery + dynamic resumePromptFile + stopFile sentinel
+	const promptFile = join(root, "resume-prompt.txt");
+	const stopFile = join(root, "STOP_SENTINEL");
+	await writeFile(
+		promptFile,
+		"Smoke dynamic resume ({cause} #{attempt}/{maxAttempts})",
+		"utf8",
+	);
+	await writeFile(
+		join(root, "pi-auto-resume.json"),
+		JSON.stringify({
+			retryDelayMs: 400,
+			retryBackoffFactor: 1,
+			maxAttempts: 4,
+			resumePromptFile: promptFile,
+			stopFile,
+		}),
+	);
+	await command("prompt", { message: "/auto-resume config reload" });
+	await command("prompt", { message: "/fixture-server-once" });
+	await command("prompt", { message: "server overload task" });
+	await until(
+		() =>
+			events.filter(
+				(e) => e.type === "message_end" && e.message?.role === "assistant",
+			).length >= 8,
+	);
+	await pause(600);
+	metrics = (await readFile(join(root, "metrics.jsonl"), "utf8"))
+		.trim()
+		.split("\n");
+	assert.equal(
+		metrics.length,
+		8,
+		"transient server failure recovers once with dynamic prompt file",
+	);
+	const messagesAfterServer = await command("get_messages");
+	assert.ok(
+		JSON.stringify(messagesAfterServer).includes(
+			"Smoke dynamic resume (server #1/4)",
+		),
+		"dynamic resumePromptFile placeholders substituted",
+	);
+
+	// Sentinel file cancels pending recovery
+	await writeFile(stopFile, "halt", "utf8");
+	await command("prompt", { message: "/fixture-server-once" });
+	const sentinelStart = events.length;
+	await command("prompt", { message: "blocked by stopFile" });
+	await until(() =>
+		events.slice(sentinelStart).some((e) => e.type === "agent_settled"),
+	);
+	await pause(1200);
+	metrics = (await readFile(join(root, "metrics.jsonl"), "utf8"))
+		.trim()
+		.split("\n");
+	assert.equal(
+		metrics.length,
+		9,
+		"stopFile sentinel prevents automatic continuation",
+	);
+
 	assert.ok(!stderr.includes("Failed to load extension"), stderr);
 	child.stdin.end();
 	await Promise.race([
@@ -251,7 +322,7 @@ try {
 		}),
 	]);
 	console.log(
-		"Pi standalone smoke: network recovery, normal completion, stop, bounded retries, clean shutdown PASS",
+		"Pi standalone smoke: network/server recovery, dynamic prompt file, stopFile sentinel, normal completion, stop, bounded retries, clean shutdown PASS",
 	);
 } finally {
 	if (child?.exitCode === null) child.kill("SIGKILL");
